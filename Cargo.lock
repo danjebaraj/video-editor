@@ -558,6 +558,7 @@ dependencies = [
  "cutline-render",
  "cutline-testkit",
  "cutline-text",
+ "cutline-transcribe",
  "fs2",
  "image",
  "json5",
@@ -650,6 +651,7 @@ dependencies = [
  "cutline-media",
  "cutline-testkit",
  "cutline-text",
+ "cutline-transcribe",
  "image",
  "insta",
  "rayon",
@@ -690,6 +692,17 @@ dependencies = [
 [[package]]
 name = "cutline-transcribe"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cutline-core",
+ "cutline-deps",
+ "cutline-media",
+ "cutline-testkit",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+]
 
 [[package]]
 name = "deflate64"

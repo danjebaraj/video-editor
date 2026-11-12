@@ -35,6 +35,7 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, _draft: bool) -> Result<P
         ..Default::default()
     };
     text_layers(p, tl, &brand, &mut extras)?;
+    captions(l, p, tl, &brand, &mut extras)?;
     for c in &tl.clips {
         let mut x = ClipExtras {
             pad_color: c
@@ -125,7 +126,110 @@ pub fn warnings(_l: &Loaded) -> Vec<cutline_core::Diagnostic> {
     vec![]
 }
 
-/// Apply `auto` directives, producing an explicit project (M5).
+/// Apply `auto` directives, producing an explicit project.
 pub fn expand_project(l: &Loaded) -> Result<Project> {
-    Ok(l.project.clone())
+    let brand = load_brand(l, &l.project)?;
+    Ok(crate::auto::expand(l, &l.project, &brand)?.0)
+}
+
+/// Captions, speech spans (ducking) and SRT.
+pub fn captions(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, extras: &mut PlanExtras) -> Result<()> {
+    use cutline_core::model::CaptionSource;
+    use cutline_text::captions::{render, srt, CWord, CaptionCfg};
+    let cap = p.captions.clone();
+    let source = cap.as_ref().map(|c| c.source).unwrap_or(CaptionSource::None);
+    let allow_whisper = source == CaptionSource::Auto;
+    let words = crate::auto::timeline_words(l, p, tl, brand, allow_whisper)?;
+    extras.speech = cutline_transcribe::mapping::speech_spans(&words, 0.3);
+    let cuts = crate::auto::cut_times(tl);
+    let mut cw: Vec<CWord> = words.iter().map(|w| CWord { w: w.w.clone(), start: w.start, end: w.end }).collect();
+    if source == CaptionSource::File {
+        let f = l.dir.join(cap.as_ref().and_then(|c| c.file.clone()).unwrap_or_default());
+        cw = load_caption_file(&f)?;
+    }
+    extras.srt = srt(&cw, &cuts);
+    if source == CaptionSource::None || cw.is_empty() {
+        return Ok(());
+    }
+    let c = cap.unwrap();
+    let cfg = CaptionCfg {
+        style: c.style.clone().unwrap_or_default(),
+        position: c.position.clone(),
+        max_words: c.max_words_per_line.map(|v| v as usize),
+        max_chars: c.max_chars_per_line.map(|v| v as usize),
+        max_lines: c.max_lines.map(|v| v as usize),
+        emphasis: c.emphasis.clone(),
+        emoji: c.emoji.clone(),
+        font: c.font.clone(),
+        size: c.size,
+        color: c.color.clone(),
+        accent: c.accent_color.clone(),
+        uppercase: c.uppercase,
+    };
+    let db = cutline_text::FontDb::bundled()?;
+    let fr = frame_of(tl);
+    let mut doc = cutline_text::ass::Doc::new(fr.width, fr.height);
+    let out = render(&mut doc, &db, &fr, brand, &cw, &cfg, &cuts, 1.0 / tl.fps.as_f64())?;
+    for b in out.boxes {
+        extras.text_boxes.push(crate::TextBox {
+            start: b.start,
+            end: b.end,
+            x: b.x,
+            y: b.y,
+            w: b.w,
+            h: b.h,
+            text: b.text,
+            kind: "caption".into(),
+        });
+    }
+    for im in out.images {
+        extras.extra_images.push(crate::ExtraImage {
+            path: im.path,
+            start: im.start,
+            end: im.end,
+            cx: im.cx,
+            cy: im.cy,
+            w: im.w,
+            pop: im.pop,
+        });
+    }
+    if !doc.events.is_empty() {
+        extras.ass_docs.push(("captions.ass".into(), doc.render()));
+    }
+    Ok(())
+}
+
+/// Caption file in timeline time: SRT (cue text spread evenly over the cue) or transcript JSON.
+pub fn load_caption_file(f: &std::path::Path) -> Result<Vec<cutline_text::captions::CWord>> {
+    use cutline_text::captions::CWord;
+    let text = std::fs::read_to_string(f).map_err(|e| anyhow::anyhow!("caption file {}: {e}", f.display()))?;
+    if text.trim_start().starts_with('{') {
+        let t = cutline_transcribe::scribe::load_any(&text, "captions")?;
+        return Ok(t.words.into_iter().map(|w| CWord { w: w.w, start: w.start, end: w.end }).collect());
+    }
+    let parse_tc = |s: &str| -> Option<f64> {
+        let s = s.trim().replace(',', ".");
+        let p: Vec<&str> = s.split(':').collect();
+        if p.len() != 3 {
+            return None;
+        }
+        Some(p[0].parse::<f64>().ok()? * 3600.0 + p[1].parse::<f64>().ok()? * 60.0 + p[2].parse::<f64>().ok()?)
+    };
+    let mut out = vec![];
+    for block in text.replace("\r", "").split("\n\n") {
+        let lines: Vec<&str> = block.lines().filter(|l| !l.trim().is_empty()).collect();
+        let Some(ti) = lines.iter().position(|l| l.contains("-->")) else { continue };
+        let (a, b) = lines[ti].split_once("-->").unwrap();
+        let (Some(a), Some(b)) = (parse_tc(a), parse_tc(b.split_whitespace().next().unwrap_or(""))) else { continue };
+        let words: Vec<&str> = lines[ti + 1..].iter().flat_map(|l| l.split_whitespace()).collect();
+        let n = words.len().max(1) as f64;
+        for (k, w) in words.iter().enumerate() {
+            out.push(CWord {
+                w: w.to_string(),
+                start: a + (b - a) * k as f64 / n,
+                end: a + (b - a) * (k + 1) as f64 / n,
+            });
+        }
+    }
+    Ok(out)
 }

@@ -155,7 +155,7 @@ fn check_shorts_pipeline(d: &Path) -> Result<Outcome> {
 
 pub const SHORTS_PROJECT: &str = r#"{
   version: 1, name: "selftest_shorts", target: "shorts",
-  assets: { a: {path: "a.mp4"}, b: {path: "b.mp4"}, c: {path: "c.mp4"}, music: {path: "music.wav", role: "music"}, logo: {path: "logo.png"} },
+  assets: { a: {path: "a.mp4", transcript: "a.transcript.json"}, b: {path: "b.mp4"}, c: {path: "c.mp4"}, music: {path: "music.wav", role: "music"}, logo: {path: "logo.png"} },
   main: [
     { id: "hook", clip: "a", in: 1.0, out: 3.0 },
     { transition: { type: "fade", duration: 0.3 } },
@@ -169,5 +169,6 @@ pub const SHORTS_PROJECT: &str = r#"{
     { type: "text", template: "hook_title", text: "Sharp in 60 seconds", start: 0, duration: 1.8, position: "lower_mid" },
     { type: "audio", asset: "music", start: 0, end: "end", gain_db: -8, fade_in: 0.3, fade_out: 0.5 },
   ],
+  captions: { style: "bold_pop", emphasis: ["sharp"] },
   audio: { loudness: { integrated: -14, true_peak: -1.0 }, duck: { amount_db: -12 } },
 }"#;

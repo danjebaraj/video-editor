@@ -121,3 +121,18 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 
 ## 2026-11-12 — Text boxes in QA
 - **Decision:** templates report their layout boxes. QA checks every text/caption box against the safe zone; reading speed (cps) applies only to captions.
+
+## 2026-11-12 — whisper.cpp via sidecar only (whisper-rs not compiled)
+- **Decision:** transcription runs the whisper.cpp CLI (`whisper-cli`, discovered via `CUTLINE_WHISPER_CLI`, `<tools>/whisper/`, or PATH), with `-ml 1 -sow -ojf` word segments and `-dtw <preset>` alignment for known models. The `whisper-rs` crate is not a dependency.
+- **Alternatives:** an in-process `whisper-rs` binding behind a cargo feature (the spec's first choice).
+- **Reason:** building whisper.cpp (needed by both paths) was not permitted in the implementation environment, so a feature-gated binding could not be compiled or tested. The spec names the sidecar as the fallback. macOS CI installs `whisper-cpp` via Homebrew and runs the WER test.
+
+## 2026-11-12 — Transcript cache is global
+- **Decision:** transcripts are cached under the global cache dir by (asset fingerprint, model, language). `cutline transcribe --import-scribe` stores the import under the default model key, so renders find it without a `transcript:` field.
+
+## 2026-11-12 — Captions are not split at cuts
+- **Decision:** caption chunks break at word/char limits, sentence ends and pauses only. Display spans snap to a cut when they would cross it by less than two frames.
+- **Reason:** jump cuts fall between words constantly; splitting there shredded sentences into one- or two-word captions.
+
+## 2026-11-12 — Auto-directive expansion
+- **Decision:** `jump_cuts` intersects silencedetect spans with transcript gaps (silencedetect alone when there is no transcript), keeps `keep_padding` inside each silence, and splits the clip. The first piece keeps the original id (so anchors survive); later pieces are `<id>~N`. Every generated item carries `generated_by`. Fillers are cut between neighbouring words with 30 ms margins. Punch-ins are placed every `every` seconds of timeline, one per clip, alternating `scale[0]`/`scale[1]`, skipping clips with other motion. `sfx_on_transitions` fills transitions that have no `sfx`. The expanded project has `auto` removed and is what `expand` prints and what renders use.

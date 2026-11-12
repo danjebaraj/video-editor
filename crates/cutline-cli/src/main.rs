@@ -39,6 +39,24 @@ enum Cmd {
         #[arg(long)]
         loudness: bool,
     },
+    /// Word-level transcript JSON (cached). Uses whisper.cpp, or imports an ElevenLabs Scribe JSON.
+    Transcribe {
+        file: PathBuf,
+        /// whisper model name (default large-v3-turbo-q5_0).
+        #[arg(long)]
+        model: Option<String>,
+        /// Use the fast base.en model.
+        #[arg(long)]
+        fast: bool,
+        #[arg(long)]
+        lang: Option<String>,
+        /// Import an ElevenLabs Scribe JSON instead of running whisper.
+        #[arg(long)]
+        import_scribe: Option<PathBuf>,
+        /// Write the transcript JSON here (default: stdout only).
+        #[arg(long, short)]
+        out: Option<PathBuf>,
+    },
     /// Schema and semantic validation.
     Validate { project: PathBuf },
     /// Print the project JSON Schema.
@@ -226,6 +244,9 @@ fn dispatch(cli: Cli) -> CmdResult {
             DepsCmd::Rollback => deps_cmd::rollback(),
             DepsCmd::Status => deps_cmd::status(),
         },
+        Cmd::Transcribe { file, model, fast, lang, import_scribe, out } => {
+            transcribe(&file, model, fast, lang, import_scribe, out)
+        }
         Cmd::Validate { project } => edit::validate(&project),
         Cmd::Schema => edit::schema(),
         Cmd::Init { dir, target, assets, name } => edit::init(&dir, &target, assets.as_deref(), name.as_deref()),
@@ -354,4 +375,61 @@ fn templates_list() -> CmdResult {
     h.push_str(&format!("\nEasings: {}\nLayer enter/exit: {}\nCaption styles: {}\nVoice chains: {}\nColor presets: {}\nLUTs: {}\nEmoji: {}\nFonts: {}\n",
         eases.join(", "), anims.join(", "), c::CAPTION_STYLES.join(", "), c::VOICE_CHAINS.join(", "), c::COLOR_PRESETS.join(", "), c::BUNDLED_LUTS.join(", "), emoji.join(", "), fonts.join(", ")));
     Ok(Output::ok(j, h))
+}
+
+fn transcribe(
+    file: &std::path::Path,
+    model: Option<String>,
+    fast: bool,
+    lang: Option<String>,
+    scribe: Option<PathBuf>,
+    out: Option<PathBuf>,
+) -> CmdResult {
+    use cutline_transcribe::whisper;
+    let tc = cutline_deps::toolchain().tool_err()?;
+    let fp = cutline_media::fingerprint(file).map_err(CliError::usage)?;
+    let cache = cutline_media::cache::Cache::global("transcripts");
+    let model =
+        model.unwrap_or_else(|| if fast { whisper::FAST_MODEL.into() } else { cutline_render::auto::whisper_model() });
+    let asset = file.file_stem().and_then(|s| s.to_str()).unwrap_or("asset").to_string();
+    let (t, source) = match &scribe {
+        Some(sf) => {
+            let text = std::fs::read_to_string(sf).map_err(CliError::usage)?;
+            let t = cutline_transcribe::scribe::import(&text, &asset).map_err(CliError::validation)?;
+            // cache under the default model key so renders pick it up without the file
+            cutline_transcribe::put_cache(&cache, &fp, &model, lang.as_deref(), &t).map_err(CliError::internal)?;
+            (t, "scribe".to_string())
+        }
+        None => {
+            let work = std::env::temp_dir().join(format!("cutline-whisper-{}", std::process::id()));
+            match cutline_transcribe::get(tc, &asset, file, &fp, None, &model, lang.as_deref(), &cache, true).map_err(CliError::tool)? {
+                Some((t, s)) => {
+                    let _ = std::fs::remove_dir_all(work);
+                    (t, format!("{s:?}"))
+                }
+                None => {
+                    return Err(CliError::tool(anyhow::anyhow!(
+                        "no transcriber available: {}. Import a Scribe JSON with --import-scribe, or install whisper.cpp (whisper-cli) and `cutline deps install whisper-model {model}`",
+                        whisper::available(&model).err().map(|e| format!("{e:#}")).unwrap_or_default()
+                    )))
+                }
+            }
+        }
+    };
+    if let Some(o) = &out {
+        std::fs::write(o, serde_json::to_vec_pretty(&t).unwrap_or_default()).map_err(CliError::internal)?;
+    }
+    let human = format!(
+        "{} words, {} segments ({source})\n{}",
+        t.words.len(),
+        t.segments.len(),
+        t.segments
+            .iter()
+            .map(|s| format!("[{:>7.2}–{:>7.2}] {}", s.start, s.end, s.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let mut j = json!(t);
+    j["source"] = json!(source);
+    Ok(Output::ok(j, human))
 }

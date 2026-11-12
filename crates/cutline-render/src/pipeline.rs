@@ -116,8 +116,11 @@ pub struct Prepared {
 
 /// Resolve one export and compute the plan extras.
 pub fn prepare(l: &Loaded, export_name: Option<String>, e: &Export, draft: bool) -> Result<Prepared> {
-    let p = for_export(&l.project, e);
-    let (tl, diags) = resolve(&p, &l.media, &context(&l.dir));
+    let brand = crate::extras::load_brand(l, &l.project)?;
+    let (expanded, notes) = crate::auto::expand(l, &l.project, &brand)?;
+    let p = for_export(&expanded, e);
+    let (tl, mut diags) = resolve(&p, &l.media, &context(&l.dir));
+    diags.extend(notes);
     if has_errors(&diags) {
         bail!(LoadError::Invalid(diags));
     }

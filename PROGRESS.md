@@ -9,7 +9,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 | M2 Audio | ✅ done |
 | M3 Motion/transitions/overlays/color | ✅ done |
 | M4 Text & graphics | ✅ done |
-| M5 Transcription/captions/edit assist | ⏳ |
+| M5 Transcription/captions/edit assist | ✅ done (whisper WER test skips here; runs on macOS CI) |
 | M6 Auto-reframe | ⏳ |
 | M7 QA/review/selftest | ⏳ |
 | M8 HTML/SVG/Lottie | ⏳ |
@@ -92,7 +92,25 @@ Acceptance (`crates/cutline-render/tests/m4_text.rs` + unit tests):
 - ASS escaping unit tests, plus escaped braces in a real render.
 - Byte-identical frames with system fonts and with an empty fontconfig.
 
+## M5 — Transcription, captions, edit assist
+Built:
+- `cutline-transcribe`: internal transcript format, tolerant ElevenLabs Scribe importer (field variants, nested arrays, spacing/audio_event skipping), whisper.cpp sidecar (discovery, 16 kHz extraction, full-JSON parsing, DTW presets), global transcript cache, corrections (multi-word, keeps punctuation), WER, TTS helper (say / SAPI / espeak-ng), source→timeline word mapping (trims, speed, ramps, freezes, transitions, reverse, mute/replace, VO layers), speech spans.
+- Captions (`cutline-text::captions`): chunking, cut snapping, styles `bold_pop`, `karaoke` (\kf), `word_by_word`, `clean_sentence` (soft box), `boxed`. Emphasis words in accent, emoji for chosen words (Noto overlays), auto-fit in the safe zone, SRT output (always written next to renders). Captions use the brand dictionary + `corrections`.
+- Transcripts drive ducking (speech spans) when available.
+- Auto directives: `jump_cuts`, `remove_fillers`, `punch_ins`, `sfx_on_transitions` expand to explicit items shown by `cutline expand`.
+- CLI `transcribe <file> [--model|--fast] [--lang] [--import-scribe f.json] [-o out.json]`.
+- Selftest Shorts project now has `bold_pop` captions from a fixture transcript.
+
+Acceptance:
+- Word mapping unit tests: trims, speed, jump-cut pieces, transitions, freeze, reverse, layers (`crates/cutline-transcribe/tests/mapping.rs`).
+- WER ≤ 15 % and timing monotonicity/coverage on synthesized speech (`crates/cutline-transcribe/tests/speech.rs`): **skipped here** (no whisper-cli or TTS in this container); runs on macOS CI.
+- Golden images for every caption style (+ safe-zone check), per ffmpeg major version.
+- Jump cuts at the expected points (±1 frame) on a synthetic file with known gaps, with no silence > `min_silence` in the rendered output.
+- Filler removal on a fixture transcript (cuts land between neighbours; SRT drops the fillers).
+- Scribe import: hand-made fixture in the documented shape plus a variant-tolerance test.
+
 ## Blockers
+- Building whisper.cpp from source was not permitted in this container, so real-speech transcription is untested here (see decisions); macOS CI covers it.
 - github.com release downloads are blocked from this container (BtbN Windows builds). The code path exists; Windows CI exercises it.
 
 ## Known issues

@@ -1,0 +1,20 @@
+{
+  "language_code": "en",
+  "language_probability": 0.99,
+  "text": "Your knife is dull because of this. Let me show you.",
+  "words": [
+    {"text": "Your", "start": 0.12, "end": 0.34, "type": "word", "speaker_id": "speaker_0", "logprob": -0.02},
+    {"text": " ", "start": 0.34, "end": 0.36, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0.0},
+    {"text": "knife", "start": 0.36, "end": 0.71, "type": "word", "speaker_id": "speaker_0", "logprob": -0.05},
+    {"text": " ", "start": 0.71, "end": 0.73, "type": "spacing", "speaker_id": "speaker_0", "logprob": 0.0},
+    {"text": "is", "start": 0.73, "end": 0.86, "type": "word", "speaker_id": "speaker_0", "logprob": -0.01},
+    {"text": "dull", "start": 0.9, "end": 1.21, "type": "word", "speaker_id": "speaker_0", "logprob": -0.03},
+    {"text": "because", "start": 1.25, "end": 1.62, "type": "word", "speaker_id": "speaker_0", "logprob": -0.02},
+    {"text": "of", "start": 1.64, "end": 1.74, "type": "word", "speaker_id": "speaker_0", "logprob": -0.01},
+    {"text": "this.", "start": 1.76, "end": 2.10, "type": "word", "speaker_id": "speaker_0", "logprob": -0.04},
+    {"text": "(breath)", "start": 2.10, "end": 2.6, "type": "audio_event", "speaker_id": "speaker_0", "logprob": 0.0},
+    {"text": "Let", "start": 2.9, "end": 3.05, "type": "word", "speaker_id": "speaker_0", "logprob": -0.02,
+     "characters": [{"text": "L", "start": 2.9, "end": 2.95}]},
+    {"text": "me", "start": 3.05, "end": 3.15, "type": "word", "speaker_id": "speaker_0", "logprob": -0.01}
+  ]
+}

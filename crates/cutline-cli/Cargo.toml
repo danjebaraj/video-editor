@@ -16,6 +16,7 @@ cutline-qa = { version = "0.1.0", path = "../cutline-qa" }
 cutline-render = { version = "0.1.0", path = "../cutline-render" }
 cutline-testkit = { version = "0.1.0", path = "../cutline-testkit" }
 cutline-text = { version = "0.1.0", path = "../cutline-text" }
+cutline-transcribe = { version = "0.1.0", path = "../cutline-transcribe" }
 fs2 = "0.4.3"
 json5 = "1.3.7"
 serde = { version = "1.0.229", features = ["derive"] }

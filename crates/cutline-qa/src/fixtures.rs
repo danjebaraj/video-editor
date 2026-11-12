@@ -33,6 +33,21 @@ pub fn sources(dir: &Path) -> Result<Vec<(PathBuf, f64)>> {
     if !logo.exists() {
         gen::still(tc, &logo, 256, 256, "0xFFC400")?;
     }
+    // transcript fixture for clip asset `a` (cutline format, source seconds)
+    let tr = dir.join("a.transcript.json");
+    if !tr.exists() {
+        let words = [
+            ("Sharp", 1.05, 1.35),
+            ("knives", 1.4, 1.75),
+            ("cut", 1.8, 2.0),
+            ("cleaner", 2.05, 2.45),
+            ("and", 2.5, 2.6),
+            ("safer.", 2.62, 2.95),
+        ];
+        let j = serde_json::json!({"asset": "a", "lang": "en", "model": "fixture",
+            "words": words.iter().map(|(w, a, b)| serde_json::json!({"w": w, "start": a, "end": b})).collect::<Vec<_>>()});
+        std::fs::write(&tr, serde_json::to_vec_pretty(&j)?)?;
+    }
     let m = dir.join("music.wav");
     if !m.exists() {
         gen::noise_bed(tc, &m, 12.0, 0.25)?;

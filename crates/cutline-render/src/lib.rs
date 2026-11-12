@@ -2,6 +2,7 @@
 
 pub mod assemble;
 pub mod audio_plan;
+pub mod auto;
 pub mod custom_transitions;
 pub mod effects;
 pub mod escape;
