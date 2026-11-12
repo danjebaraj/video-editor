@@ -67,6 +67,7 @@ fn extras_caption_boxes(e: &cutline_render::PlanExtras) -> Vec<crate::qa::Captio
             w: b.w,
             h: b.h,
             text: b.text.clone(),
+            kind: b.kind.clone(),
         })
         .collect()
 }

@@ -93,6 +93,11 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Text/graphics/caption templates, transitions, effects and other names.
+    Templates {
+        #[command(subcommand)]
+        cmd: TemplatesCmd,
+    },
     /// Run QA on any video file.
     Qa {
         video: PathBuf,
@@ -114,6 +119,12 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum TemplatesCmd {
+    /// List everything with parameters.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -229,6 +240,7 @@ fn dispatch(cli: Cli) -> CmdResult {
             }
             edit::preview(&project, &at, range.as_deref(), safe_zones, out)
         }
+        Cmd::Templates { cmd: TemplatesCmd::List } => templates_list(),
         Cmd::Qa { video, target, project } => edit::qa(&video, &target, project.as_deref()),
         Cmd::Selftest { quick: _, full, keep, out } => selftest(full, keep, out),
         Cmd::Probe { files, loudness } => {
@@ -277,4 +289,69 @@ fn selftest(full: bool, keep: bool, out: Option<PathBuf>) -> CmdResult {
         j["report"] = json!(report_path);
     }
     Ok(Output::ok(j, human).with_code(if rep.ok { EXIT_OK } else { EXIT_VALIDATION }))
+}
+
+fn templates_list() -> CmdResult {
+    use cutline_core::catalog as c;
+    let tpl = cutline_text::templates::list();
+    let effects = [
+        ("punch_in", "at, scale=1.15, duration=0.25, ease, hold?, focus?{x,y}"),
+        ("zoom", "from=1, to, start=0, end?, ease, focus?"),
+        ("ken_burns", "from_scale=1, to_scale=1.15, from?{x,y}, to?{x,y}, ease"),
+        ("shake", "at, duration=0.3, intensity=0.02"),
+        ("flash", "at, duration=0.15, color?"),
+        ("blur_in", "duration=0.4"),
+        ("glitch", "at, duration=0.15, amount=12"),
+        ("vignette", "strength=0.4"),
+        ("motion_blur", "at, duration=0.15"),
+        ("freeze", "at, duration"),
+    ];
+    let eases = [
+        "linear",
+        "in_quad",
+        "out_quad",
+        "in_out_quad",
+        "in_cubic",
+        "out_cubic",
+        "in_out_cubic",
+        "in_expo",
+        "out_expo",
+        "in_out_expo",
+        "back",
+        "spring",
+    ];
+    let anims = ["fade", "slide_left", "slide_right", "slide_up", "slide_down", "pop", "scale_in"];
+    let emoji = cutline_text::templates::emoji_names();
+    let fonts = cutline_render::pipeline::bundled_fonts();
+    let j = json!({
+        "text_templates": tpl,
+        "transitions": {"xfade": c::XFADE_TRANSITIONS, "custom": c::CUSTOM_TRANSITIONS},
+        "effects": effects.iter().map(|(n, p)| json!({"name": n, "params": p})).collect::<Vec<_>>(),
+        "easings": eases,
+        "layer_animations": anims,
+        "caption_styles": c::CAPTION_STYLES,
+        "voice_chains": c::VOICE_CHAINS,
+        "color_presets": c::COLOR_PRESETS,
+        "luts": c::BUNDLED_LUTS,
+        "sfx_aliases": c::SFX_ALIASES,
+        "emoji": emoji,
+        "fonts": fonts,
+        "position_presets": ["center", "top", "bottom", "left", "right", "top_left", "top_right", "bottom_left", "bottom_right", "upper_mid", "lower_mid"],
+    });
+    let mut h = String::from("Text templates (layer type \"text\"):\n");
+    for t in &tpl {
+        h.push_str(&format!("  {:<14} {}\n                 params: {}\n", t.name, t.description, t.params.join(", ")));
+    }
+    h.push_str(&format!(
+        "\nTransitions: {}\nCustom transitions: {}\n",
+        c::XFADE_TRANSITIONS.join(", "),
+        c::CUSTOM_TRANSITIONS.join(", ")
+    ));
+    h.push_str("\nEffects:\n");
+    for (n, p) in effects {
+        h.push_str(&format!("  {n:<12} {p}\n"));
+    }
+    h.push_str(&format!("\nEasings: {}\nLayer enter/exit: {}\nCaption styles: {}\nVoice chains: {}\nColor presets: {}\nLUTs: {}\nEmoji: {}\nFonts: {}\n",
+        eases.join(", "), anims.join(", "), c::CAPTION_STYLES.join(", "), c::VOICE_CHAINS.join(", "), c::COLOR_PRESETS.join(", "), c::BUNDLED_LUTS.join(", "), emoji.join(", "), fonts.join(", ")));
+    Ok(Output::ok(j, h))
 }

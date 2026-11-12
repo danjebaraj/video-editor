@@ -201,8 +201,10 @@ pub fn build_plan(
 pub struct PlanExtras {
     pub clip: std::collections::BTreeMap<String, segment::ClipExtras>,
     pub pad_color: String,
-    /// ASS subtitle files to burn in (captions + text templates), in order.
-    pub ass_files: Vec<PathBuf>,
+    /// ASS documents to burn in (text templates, captions): (file name, content), in order.
+    pub ass_docs: Vec<(String, String)>,
+    /// Image overlays produced by templates (emoji pops).
+    pub extra_images: Vec<ExtraImage>,
     pub fonts_dir: Option<PathBuf>,
     /// Accent color (`0xRRGGBB`) for the progress bar.
     pub accent: String,
@@ -218,6 +220,18 @@ pub struct PlanExtras {
     pub text_boxes: Vec<TextBox>,
     /// SRT captions in timeline time.
     pub srt: String,
+}
+
+/// Template image overlay (full-target pixel coordinates).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExtraImage {
+    pub path: PathBuf,
+    pub start: f64,
+    pub end: f64,
+    pub cx: f64,
+    pub cy: f64,
+    pub w: f64,
+    pub pop: bool,
 }
 
 /// A laid-out text box on the timeline, in output pixels.
@@ -369,8 +383,29 @@ fn final_job(
     j.scripts.push((script, text));
     j.scripts.extend(ov.scripts);
     j.files.extend(ov.files);
+    if !extras.ass_docs.is_empty() {
+        if let Some(fd) = &extras.fonts_dir {
+            let conf = work.join("fonts.conf");
+            j.scripts.push((conf.clone(), fontconfig_isolated(fd, &work.join("fccache"))));
+            j.env.push(("FONTCONFIG_FILE".into(), conf.to_string_lossy().to_string()));
+        }
+    }
     j.outputs.push(output.to_path_buf());
     Ok((ov.pre_jobs, j))
+}
+
+/// A fontconfig config that only knows the bundled fonts, so text renders identically whether
+/// or not system fonts exist (and never falls back to a system font).
+pub fn fontconfig_isolated(fonts_dir: &Path, cache: &Path) -> String {
+    format!(
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n  <dir>{}</dir>\n  <cachedir>{}</cachedir>\n</fontconfig>\n",
+        xml_escape(&fonts_dir.to_string_lossy()),
+        xml_escape(&cache.to_string_lossy())
+    )
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

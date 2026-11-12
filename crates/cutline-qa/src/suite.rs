@@ -166,6 +166,7 @@ pub const SHORTS_PROJECT: &str = r#"{
   layers: [
     { type: "image", asset: "logo", start: 0, end: "end", position: "top_right", scale: 0.1, opacity: 0.9 },
     { type: "progress_bar", style: "brand" },
+    { type: "text", template: "hook_title", text: "Sharp in 60 seconds", start: 0, duration: 1.8, position: "lower_mid" },
     { type: "audio", asset: "music", start: 0, end: "end", gain_db: -8, fade_in: 0.3, fade_out: 0.5 },
   ],
   audio: { loudness: { integrated: -14, true_peak: -1.0 }, duck: { amount_db: -12 } },

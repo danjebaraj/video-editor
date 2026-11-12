@@ -407,13 +407,51 @@ pub fn apply(
             _ => {}
         }
     }
-    // ASS text/captions on top
-    for (i, a) in extras.ass_files.iter().enumerate() {
+    // template images (emoji pops)
+    for (i, im) in extras.extra_images.iter().enumerate() {
+        let idx = *next_input;
+        *next_input += 1;
+        let len = im.end - im.start;
+        o.input_args.extend(
+            ["-loop", "1", "-framerate", &fps.ff(), "-t", &f(len + 0.1), "-i", &im.path.to_string_lossy()]
+                .map(String::from),
+        );
+        let ow = ((im.w * k).round() as u32).max(2) & !1;
+        let look = Visual {
+            enter: im.pop.then_some(Anim::Pop),
+            exit: Some(Anim::Fade),
+            anim_duration: Some(0.25),
+            ..Default::default()
+        };
+        let mut ch = vec![
+            format!("fps={}", fps.ff()),
+            "setpts=PTS-STARTPTS".into(),
+            format!("scale={ow}:-2"),
+            "format=yuva444p".into(),
+        ];
+        ch.extend(anim_chain(&look, len, ow));
+        ch.push(format!("setpts=PTS+{}/TB", f(im.start)));
+        let lab = format!("em{i}");
+        lines.push(format!("[{idx}:v]{}[{lab}]", ch.join(",")));
+        push_overlay(
+            lines,
+            cur,
+            &lab,
+            &format!("{}-w/2", f(im.cx * k)),
+            &format!("{}-h/2", f(im.cy * k)),
+            im.start,
+            im.end,
+        );
+    }
+    // ASS text/captions on top; libass only sees the bundled fonts (fontconfig isolated)
+    for (i, (name, content)) in extras.ass_docs.iter().enumerate() {
+        let path = work.join(name);
+        o.scripts.push((path.clone(), content.clone()));
         let fonts = extras.fonts_dir.as_ref().map(|d| format!(":fontsdir={}", filter_path(d))).unwrap_or_default();
         let out = format!("ass{i}");
         lines.push(format!(
             "[{cur}]subtitles=filename={}{fonts}:original_size={}x{}[{out}]",
-            filter_path(a),
+            filter_path(&path),
             full.width,
             full.height
         ));

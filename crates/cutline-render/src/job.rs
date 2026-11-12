@@ -16,12 +16,14 @@ pub struct Job {
     /// Binary helper files (masks, frames) to write before running.
     #[serde(skip)]
     pub files: Vec<(PathBuf, Vec<u8>)>,
+    /// Extra environment for the ffmpeg process (e.g. FONTCONFIG_FILE isolation).
+    pub env: Vec<(String, String)>,
     pub outputs: Vec<PathBuf>,
 }
 
 impl Job {
     pub fn new(label: impl Into<String>) -> Self {
-        Self { label: label.into(), args: vec![], scripts: vec![], files: vec![], outputs: vec![] }
+        Self { label: label.into(), args: vec![], scripts: vec![], files: vec![], env: vec![], outputs: vec![] }
     }
     pub fn arg(&mut self, a: impl Into<String>) -> &mut Self {
         self.args.push(a.into());
@@ -74,6 +76,7 @@ impl Job {
         }
         tracing::debug!(cmd = %self.display(&tc.ffmpeg.to_string_lossy()), "ffmpeg");
         let out = Command::new(&tc.ffmpeg)
+            .envs(self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .args(&self.args)
             .output()
             .with_context(|| format!("spawning ffmpeg for {}", self.label))?;

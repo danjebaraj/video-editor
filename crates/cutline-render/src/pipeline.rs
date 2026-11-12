@@ -42,31 +42,9 @@ impl std::fmt::Display for LoadError {
 }
 impl std::error::Error for LoadError {}
 
-/// Bundled font family names derived from the files in assets/fonts.
+/// Bundled font family names (as libass matches them).
 pub fn bundled_fonts() -> Vec<String> {
-    let dir = cutline_deps::paths::assets_dir().join("fonts");
-    let mut v: Vec<String> = std::fs::read_dir(dir)
-        .map(|rd| {
-            rd.flatten()
-                .filter_map(|e| e.file_name().to_str().map(str::to_string))
-                .filter(|n| n.ends_with(".ttf") || n.ends_with(".otf"))
-                .map(|n| {
-                    let stem = n.split(['-', '[', '.']).next().unwrap_or(&n).to_string();
-                    let mut out = String::new();
-                    for (i, ch) in stem.chars().enumerate() {
-                        if i > 0 && ch.is_uppercase() {
-                            out.push(' ');
-                        }
-                        out.push(ch);
-                    }
-                    out
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    v.sort();
-    v.dedup();
-    v
+    cutline_text::FontDb::bundled().map(|d| d.families()).unwrap_or_default()
 }
 
 pub fn context(dir: &Path) -> Context {

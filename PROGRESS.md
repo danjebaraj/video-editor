@@ -8,7 +8,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 | M1 Project model & basic render | ✅ done |
 | M2 Audio | ✅ done |
 | M3 Motion/transitions/overlays/color | ✅ done |
-| M4 Text & graphics | ⏳ |
+| M4 Text & graphics | ✅ done |
 | M5 Transcription/captions/edit assist | ⏳ |
 | M6 Auto-reframe | ⏳ |
 | M7 QA/review/selftest | ⏳ |
@@ -78,6 +78,19 @@ Acceptance (`crates/cutline-render/tests/m3_motion.rs` + core tests):
 - Alpha compositing within ±3/255 for ProRes 4444, VP9 alpha and PNG sequence.
 - Anchored layers follow ripple edits (`anchored_layer_follows_ripple`).
 - Golden midpoint frame for every transition (SSIM ≥ 0.97, half-resolution luma; bless with `CUTLINE_BLESS=1`), per ffmpeg major version.
+
+## M4 — Text & graphics
+Built:
+- `cutline-text`: font DB (family names as libass sees them, OS/2 metrics), libass-consistent measurement, greedy wrap + 2-line balancing, auto-fit (shrink until the block fits the box and line limit), ASS document writer (BT.709 YCbCr matrix, `PlayRes` = target size so draft renders scale), escaping (braces, backslashes, newlines), colors.
+- Templates: `hook_title` (pop-in, stroke, shadow, emphasis words in accent; fitted at 110 % so the pop peak stays inside the safe zone), `lower_third` (sliding accent bar + name/subtitle), `callout` (pill + arrow up/down/left/right), `step_counter`, `big_number` (count-up), `quote`, `cta_subscribe`, `end_card` (end-screen placeholders on 16:9, CTA on Shorts), `emoji_pop` (Noto PNG overlay with pop).
+- Brand file drives fonts and colors. Safe-zone positioning and clamping. `preview --safe-zones`. `templates list` (templates, transitions, effects, easings, animations, caption styles, voice chains, color presets, LUTs, emoji, fonts).
+- Fontconfig isolation for libass; text boxes feed the QA safe-zone and hook checks.
+
+Acceptance (`crates/cutline-render/tests/m4_text.rs` + unit tests):
+- Golden images per template on Shorts and 16:9 (per ffmpeg major version).
+- Auto-fit: a very long title renders inside the safe zone (rendered-pixel bbox), and the predicted width matches the rendered width within 8 %.
+- ASS escaping unit tests, plus escaped braces in a real render.
+- Byte-identical frames with system fonts and with an empty fontconfig.
 
 ## Blockers
 - github.com release downloads are blocked from this container (BtbN Windows builds). The code path exists; Windows CI exercises it.

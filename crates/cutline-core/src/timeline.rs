@@ -232,7 +232,8 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             }
         }
     }
-    let first_src_fps = p.clips().find_map(|c| facts.get(&c.clip).and_then(|f| f.fps));
+    let first_src_fps =
+        p.clips().find_map(|c| facts.get(&c.clip).filter(|f| f.kind == AssetKind::Video).and_then(|f| f.fps));
     let spec = target::resolve(p.target, p.fps, first_src_fps, p.width, p.height);
     let fps = spec.fps;
 

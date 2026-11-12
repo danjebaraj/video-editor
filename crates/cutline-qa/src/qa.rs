@@ -61,6 +61,8 @@ pub struct CaptionBox {
     pub w: f64,
     pub h: f64,
     pub text: String,
+    /// `caption` or `text`.
+    pub kind: String,
 }
 
 pub struct Builder {

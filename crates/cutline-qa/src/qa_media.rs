@@ -72,7 +72,16 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
 
     // loudness
     if let Some(l) = cutline_media::probe::parse_ebur128_summary(&log) {
-        if let Some((ti, ttp)) = ctx.loudness_target {
+        if l.integrated_lufs <= -69.0 {
+            b.add(
+                "loudness",
+                Sev::Warn,
+                false,
+                "no audible audio (silent mix)",
+                json!({"integrated": l.integrated_lufs}),
+                json!("audible audio"),
+            );
+        } else if let Some((ti, ttp)) = ctx.loudness_target {
             let ok = (l.integrated_lufs - ti).abs() <= 1.0 && l.true_peak_dbtp <= ttp + 0.05;
             b.add(
                 "loudness",
@@ -199,6 +208,7 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
         let fast: Vec<_> = ctx
             .caption_boxes
             .iter()
+            .filter(|c| c.kind == "caption")
             .filter(|c| {
                 let chars = c.text.chars().filter(|ch| !ch.is_whitespace()).count() as f64;
                 let d = (c.end - c.start).max(0.05);
