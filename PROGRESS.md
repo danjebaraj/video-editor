@@ -7,7 +7,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 | M0 Foundation | ✅ done |
 | M1 Project model & basic render | ✅ done |
 | M2 Audio | ✅ done |
-| M3 Motion/transitions/overlays/color | ⏳ |
+| M3 Motion/transitions/overlays/color | ✅ done |
 | M4 Text & graphics | ⏳ |
 | M5 Transcription/captions/edit assist | ⏳ |
 | M6 Auto-reframe | ⏳ |
@@ -62,8 +62,26 @@ Acceptance (`crates/cutline-render/tests/m2_audio.rs`):
 - Tone per segment via FFT with wipe and fade transitions present.
 - `audio.png` renders at 1568 px width.
 
+## M3 — Motion, transitions, overlays, color
+Built:
+- All 52 xfade transitions, plus custom `whip_left/right/up/down` (slide + directional avgblur), `zoom_punch` (zoomin + flash), `flash_cut` (white or colored), `glitch` (pixelize + rgbashift + seeded noise), and `cut`. Audio crossfades or hard cuts with micro-fades (M2).
+- Effects: punch-in (with optional hold + release), zoom, Ken Burns (scale + pan), shake (impact headroom + decaying offsets), flash (white via `eq`, colored via `drawbox`), blur-in (gblur sigma ramp via sendcmd), glitch, vignette, motion blur (tmix). Easing: linear, quad/cubic/expo × in/out/in_out, back, spring, with Rust and ffmpeg-expression versions kept in sync.
+- Speed ramps (closed-form setpts), freeze frames (`loop` + muted audio hold), reverse.
+- Color: bundled or project `.cube` LUTs with intensity blend, exposure, contrast, saturation, temperature, tint, sharpen, presets (`natural`, `punchy`, `warm_film`, `cool_clean`, `bw_contrast`). Brand LUT default.
+- Overlays: images, alpha video (ProRes 4444 / VP9 alpha via libvpx / PNG sequences), B-roll full-frame (cover/contain/stretch) or PiP with rounded corners (alpha mask), border and soft shadow (generated PNGs), rotation, opacity, z-order, position presets inside the safe zone, enter/exit animations (fade, slide_*, pop, scale_in), Ken Burns on stills/B-roll, progress bar in the brand accent. ASS hook for M4.
+- Brand file loader (`cutline-core::brand`): colors drive pad, accent and SFX aliases.
+- Identical segments (same cache key) render once.
+
+Acceptance (`crates/cutline-render/tests/m3_motion.rs` + core tests):
+- Exact timeline duration with 59 chained transitions (frame count of the rendered file).
+- Punch-in smoothness on a high-contrast grid: scale tracks the ease curve within 1.5 %, monotone, no jitter spikes.
+- Alpha compositing within ±3/255 for ProRes 4444, VP9 alpha and PNG sequence.
+- Anchored layers follow ripple edits (`anchored_layer_follows_ripple`).
+- Golden midpoint frame for every transition (SSIM ≥ 0.97, half-resolution luma; bless with `CUTLINE_BLESS=1`), per ffmpeg major version.
+
 ## Blockers
 - github.com release downloads are blocked from this container (BtbN Windows builds). The code path exists; Windows CI exercises it.
 
 ## Known issues
-- (none yet)
+- Speed-ramp audio uses the average tempo (see decisions).
+- Transition goldens are per ffmpeg major version (xfade timing differs between 6.x and 9.x).

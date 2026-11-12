@@ -7,6 +7,10 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+/// Explicit YUV→RGB conversion (BT.709, limited range): ffmpeg versions disagree on whether
+/// stream tags are honoured by default, which would make golden comparisons version-dependent.
+pub const CONV: &str = "scale=in_color_matrix=bt709:in_range=limited,format=rgb24";
+
 /// Video dimensions via ffprobe.
 pub fn dims(tc: &Toolchain, p: &Path) -> Result<(u32, u32)> {
     let out = tc
@@ -63,11 +67,10 @@ pub fn read_frames(tc: &Toolchain, p: &Path, indices: &[u64]) -> Result<Vec<RgbI
 /// Decode ALL frames, optionally cropped to (x, y, w, h) first to keep memory small.
 pub fn read_all_frames(tc: &Toolchain, p: &Path, crop: Option<(u32, u32, u32, u32)>) -> Result<Vec<RgbImage>> {
     let (mut w, mut h) = dims(tc, p)?;
-    let mut args: Vec<String> = vec![];
+    let mut args: Vec<String> = vec!["-vf".into(), CONV.into()];
     if let Some((x, y, cw, ch)) = crop {
         let (x, y, cw, ch) = (x & !1, y & !1, (cw + 1) & !1, (ch + 1) & !1);
-        args.push("-vf".into());
-        args.push(format!("crop={cw}:{ch}:{x}:{y}"));
+        args[1] = format!("crop={cw}:{ch}:{x}:{y},{CONV}");
         w = cw;
         h = ch;
     }
@@ -209,7 +212,17 @@ pub fn golden_compare(img: &RgbImage, golden: &Path, min_ssim: f64) -> Result<f6
     if g.dimensions() != img.dimensions() {
         bail!("golden size {:?} != {:?}", g.dimensions(), img.dimensions());
     }
-    let s = ssim(img, &g);
+    // compare at half resolution (box filter): robust to encoder noise / pseudo-random test
+    // patterns that differ between ffmpeg builds, still sensitive to layout and motion.
+    let half = |i: &RgbImage| {
+        image::imageops::resize(
+            i,
+            (i.width() / 2).max(8),
+            (i.height() / 2).max(8),
+            image::imageops::FilterType::Triangle,
+        )
+    };
+    let s = ssim(&half(img), &half(&g));
     if s < min_ssim {
         let actual = golden.with_extension("actual.png");
         img.save(&actual)?;

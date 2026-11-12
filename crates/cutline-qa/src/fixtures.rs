@@ -29,6 +29,10 @@ pub fn sources(dir: &Path) -> Result<Vec<(PathBuf, f64)>> {
         }
         v.push((p, hz));
     }
+    let logo = dir.join("logo.png");
+    if !logo.exists() {
+        gen::still(tc, &logo, 256, 256, "0xFFC400")?;
+    }
     let m = dir.join("music.wav");
     if !m.exists() {
         gen::noise_bed(tc, &m, 12.0, 0.25)?;

@@ -59,6 +59,29 @@ fn atempo_chain(speed: f64) -> Vec<String> {
     v
 }
 
+/// Explicit input color interpretation (`auto` differs between ffmpeg versions for untagged
+/// sources): stream tag if present, else BT.709 for HD and BT.601 for SD; range from tag or
+/// pixel format (`yuvj*` = full).
+pub fn color_in(m: &AssetMedia) -> String {
+    let v = m.info.as_ref().and_then(|i| i.video.as_ref());
+    let matrix = match v.and_then(|v| v.color_space.as_deref()) {
+        Some("bt709") => "bt709",
+        Some("smpte170m") | Some("bt470bg") | Some("bt601") => "bt601",
+        Some("bt2020nc") | Some("bt2020c") => "bt2020",
+        Some("fcc") => "fcc",
+        Some("smpte240m") => "smpte240m",
+        _ => {
+            if m.facts.height.min(m.facts.width) >= 720 || m.facts.width >= 1280 {
+                "bt709"
+            } else {
+                "bt601"
+            }
+        }
+    };
+    let full = v.map(|v| v.color_range.as_deref() == Some("pc") || v.pix_fmt.starts_with("yuvj")).unwrap_or(false);
+    format!("in_color_matrix={matrix}:in_range={}", if full { "full" } else { "limited" })
+}
+
 /// Geometry chain for a source of `sw×sh` into the target. Returns filtergraph text taking
 /// `[{inp}]` and producing `[{out}]`.
 pub fn geometry_chain(
@@ -69,10 +92,11 @@ pub fn geometry_chain(
     inp: &str,
     out: &str,
     pad_color: &str,
+    cin: &str,
 ) -> String {
     let (w, h) = (g.width, g.height);
     let same_aspect = sw > 0 && sh > 0 && ((sw as f64 / sh as f64) - (w as f64 / h as f64)).abs() < 0.01;
-    let cs = "in_color_matrix=auto:in_range=auto:out_color_matrix=bt709:out_range=tv";
+    let cs = format!("{cin}:out_color_matrix=bt709:out_range=tv");
     if same_aspect {
         return format!("[{inp}]scale={w}:{h}:flags=lanczos:{cs},setsar=1[{out}]");
     }
@@ -152,8 +176,15 @@ pub fn build(
     v.push(format!("[0:v]{}[vn]", pre.join(",")));
     let (sw, sh) = (m.facts.width, m.facts.height);
     match &extras.geometry_override {
-        Some(go) => v.push(go.replace("{in}", "vn").replace("{out}", "vg")),
-        None => v.push(geometry_chain(mode, sw, sh, g, "vn", "vg", &extras.pad_color)),
+        Some(go) => v.push(go.replace("{in}", "vn").replace("{out}", "vg").replace("{cin}", &color_in(m))),
+        None => v.push(geometry_chain(mode, sw, sh, g, "vn", "vg", &extras.pad_color, &color_in(m))),
+    }
+    let mut vlab = "vg".to_string();
+    if let Some(cg) = &c.clip.color {
+        if let Some(gr) = effects::color_graph(cg, "vg", "vc", extras) {
+            v.push(gr);
+            vlab = "vc".into();
+        }
     }
     let post = effects::video_chain(c, g, extras);
     let freeze = effects::freeze_chain(c, g);
@@ -164,7 +195,7 @@ pub fn build(
     tail.push(format!("trim=end_frame={frames}"));
     tail.push("setpts=PTS-STARTPTS".into());
     tail.push("format=yuv422p10le".into());
-    v.push(format!("[vg]{}[vout]", tail.join(",")));
+    v.push(format!("[{vlab}]{}[vout]", tail.join(",")));
 
     // ---------------- audio (dialogue)
     let mut a = vec![];

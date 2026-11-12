@@ -13,12 +13,15 @@ pub struct Job {
     pub args: Vec<String>,
     /// Filter scripts to write before running: (path, content).
     pub scripts: Vec<(PathBuf, String)>,
+    /// Binary helper files (masks, frames) to write before running.
+    #[serde(skip)]
+    pub files: Vec<(PathBuf, Vec<u8>)>,
     pub outputs: Vec<PathBuf>,
 }
 
 impl Job {
     pub fn new(label: impl Into<String>) -> Self {
-        Self { label: label.into(), args: vec![], scripts: vec![], outputs: vec![] }
+        Self { label: label.into(), args: vec![], scripts: vec![], files: vec![], outputs: vec![] }
     }
     pub fn arg(&mut self, a: impl Into<String>) -> &mut Self {
         self.args.push(a.into());
@@ -47,6 +50,12 @@ impl Job {
 
     pub fn write_scripts(&self) -> Result<()> {
         for (p, c) in &self.scripts {
+            if let Some(d) = p.parent() {
+                std::fs::create_dir_all(d)?;
+            }
+            std::fs::write(p, c).with_context(|| format!("writing {}", p.display()))?;
+        }
+        for (p, c) in &self.files {
             if let Some(d) = p.parent() {
                 std::fs::create_dir_all(d)?;
             }

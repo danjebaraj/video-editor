@@ -1,5 +1,6 @@
 //! Project model, JSON5 parsing, schema, validation, time math and timeline resolution.
 
+pub mod brand;
 pub mod catalog;
 pub mod diag;
 pub mod model;

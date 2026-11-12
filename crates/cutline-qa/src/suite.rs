@@ -155,14 +155,17 @@ fn check_shorts_pipeline(d: &Path) -> Result<Outcome> {
 
 pub const SHORTS_PROJECT: &str = r#"{
   version: 1, name: "selftest_shorts", target: "shorts",
-  assets: { a: {path: "a.mp4"}, b: {path: "b.mp4"}, c: {path: "c.mp4"}, music: {path: "music.wav", role: "music"} },
+  assets: { a: {path: "a.mp4"}, b: {path: "b.mp4"}, c: {path: "c.mp4"}, music: {path: "music.wav", role: "music"}, logo: {path: "logo.png"} },
   main: [
     { id: "hook", clip: "a", in: 1.0, out: 3.0 },
     { transition: { type: "fade", duration: 0.3 } },
-    { id: "step", clip: "b", in: 2.0, out: 4.0 },
+    { id: "step", clip: "b", in: 2.0, out: 4.0, effects: [{ type: "punch_in", at: 0.8, scale: 1.15, duration: 0.25 }] },
+    { transition: { type: "whip_left", duration: 0.25 } },
     { id: "outro", clip: "c", in: 3.0, out: 5.0 },
   ],
   layers: [
+    { type: "image", asset: "logo", start: 0, end: "end", position: "top_right", scale: 0.1, opacity: 0.9 },
+    { type: "progress_bar", style: "brand" },
     { type: "audio", asset: "music", start: 0, end: "end", gain_db: -8, fade_in: 0.3, fade_out: 0.5 },
   ],
   audio: { loudness: { integrated: -14, true_peak: -1.0 }, duck: { amount_db: -12 } },

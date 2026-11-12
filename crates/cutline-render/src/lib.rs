@@ -368,6 +368,7 @@ fn final_job(
     j.arg(output.to_string_lossy().to_string());
     j.scripts.push((script, text));
     j.scripts.extend(ov.scripts);
+    j.files.extend(ov.files);
     j.outputs.push(output.to_path_buf());
     Ok((ov.pre_jobs, j))
 }
@@ -394,9 +395,16 @@ pub fn execute(tc: &Toolchain, plan: &Plan, opts: &RenderOptions) -> Result<Exec
     let mut rep = ExecReport { output: plan.output.clone(), segments_total: plan.segments.len(), ..Default::default() };
     std::fs::create_dir_all(&plan.work_dir)?;
     let t = Instant::now();
-    let todo: Vec<&PlannedSegment> = plan.segments.iter().filter(|s| opts.no_cache || !s.mezzanine.exists()).collect();
-    rep.cache_hits = plan.segments.len() - todo.len();
-    rep.cache_misses = todo.len();
+    let mut seen = std::collections::BTreeSet::new();
+    // identical segments share a cache key: render each key once
+    let todo: Vec<&PlannedSegment> = plan
+        .segments
+        .iter()
+        .filter(|s| (opts.no_cache || !s.mezzanine.exists()) && seen.insert(s.key.clone()))
+        .collect();
+    let pending = plan.segments.iter().filter(|s| opts.no_cache || !s.mezzanine.exists()).count();
+    rep.cache_hits = plan.segments.len() - pending;
+    rep.cache_misses = pending;
     rep.rendered_segments = todo.iter().map(|s| s.clip_id.clone()).collect();
     let jobs = if opts.jobs == 0 {
         (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2) / 2).max(1)
