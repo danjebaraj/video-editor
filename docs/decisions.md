@@ -63,3 +63,19 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 
 ## 2026-11-12 — `cut` transitions
 - **Decision:** `{transition: {type: "cut"}}` has zero overlap whatever its duration. `audio: "cut"` on a visual transition hard-cuts the audio at the overlap midpoint with 10 ms micro-fades.
+
+## 2026-11-12 — Ducking envelope model
+- **Decision:** the gain ramps linearly in dB to `amount_db` over `attack` seconds *ending at* speech onset (pre-roll), holds while speech lasts, and ramps back over `release` seconds after speech ends. Gaps shorter than attack+release stay ducked. The envelope is written as a 1 kHz mono WAV, upsampled by ffmpeg and applied with `amultiply`.
+- **Alternatives:** `volume=eval=frame` with a giant expression; sendcmd; `sidechaincompress` (still available as `duck.mode: "sidechain"`).
+- **Reason:** deterministic, visualizable in audio.png, scales to 60-minute timelines (≈14 MB envelope), and speech is never masked at onset because transcripts tell us the future.
+
+## 2026-11-12 — Speech activity source
+- **Decision:** transcript word timings mapped to the timeline when available (M5); otherwise energy VAD (20 ms frames, adaptive threshold = floor + 15 dB, falling back to a −45 dBFS gate when the floor is loud, 150 ms hangover) over the `under` stems.
+
+## 2026-11-12 — Loudness correction pass
+- **Decision:** after `loudnorm` pass 2 (linear), measure with `ebur128`. If integrated is off by > 0.2 LU or true peak exceeds the target, apply a corrective gain plus a 4× oversampled `alimiter` at TP − 0.3 dB.
+- **Reason:** loudnorm silently switches to dynamic mode when linear normalization would breach the true-peak limit, so the result can miss the ±0.5 LU acceptance window.
+
+## 2026-11-12 — Stems
+- **Decision:** the audio stage renders one WAV per present role (dialogue/voice/music/sfx) with its chain applied, then a separate mix job ducks and sums them. Default chains: voice and dialogue `clean_voice`, music `highpass=30`, sfx raw.
+- **Reason:** stems feed the VAD, `audio.png` and future per-role QA without re-decoding.

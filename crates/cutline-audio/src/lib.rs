@@ -1,14 +1,11 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Audio building blocks: role chains, speech activity, ducking envelopes, loudness, WAV I/O
+//! and the `audio.png` visualizer.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod chains;
+pub mod envelope;
+pub mod loudness;
+pub mod vad;
+pub mod viz;
+pub mod wav;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub const SR: u32 = 48_000;

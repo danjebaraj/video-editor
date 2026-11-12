@@ -26,16 +26,27 @@ ffmpeg -hide_banner -nostdin -y -loglevel error -ss 4.991667 -t 2.075 -i /proj/a
 [vg]tpad=stop_mode=clone:stop=60,trim=end_frame=60,setpts=PTS-STARTPTS,format=yuv422p10le[vout];
 [0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=flt:channel_layouts=stereo,apad=whole_len=96000,atrim=end_sample=96000,afade=t=in:d=0.01,afade=t=out:st=1.99:d=0.01[aout]
 
-# audio mix
-ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/6053d8ad5aa338d00e70153cb70763c7.mov -i /proj/.cutline/cache/segments/d659df9158ce44c3d90f5a1796e6ca88.mov -i /proj/.cutline/cache/segments/81905f12c5976f046b4ad3ed372c2696.mov -/filter_complex <work>/audio_mix.filter -map '[mix]' -c:a pcm_f32le -ar 48000 -ac 2 <work>/mix.wav
-## <work>/audio_mix.filter
+# audio stems
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/6053d8ad5aa338d00e70153cb70763c7.mov -i /proj/.cutline/cache/segments/d659df9158ce44c3d90f5a1796e6ca88.mov -i /proj/.cutline/cache/segments/81905f12c5976f046b4ad3ed372c2696.mov -/filter_complex <work>/audio_stems.filter -map '[stem_dialogue]' -c:a pcm_f32le -ar 48000 <work>/stem_dialogue.wav
+## <work>/audio_stems.filter
 [0:a][1:a]acrossfade=ns=24000:c1=tri:c2=tri[ax1];
 [ax1][2:a]concat=n=2:v=0:a=1[ac2];
 [ac2]apad=whole_len=216000,atrim=end_sample=216000[dialogue];
-[dialogue]anull[mix]
+[dialogue]highpass=f=80:poles=2,afftdn=nr=10:nf=-50:tn=1,deesser=i=0.4:m=0.5:f=0.5:s=o,equalizer=f=4000:t=q:w=1.0:g=2,equalizer=f=320:t=q:w=1.2:g=-2,acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2,alimiter=limit=0.89:attack=5:release=50:level=disabled,atrim=end_sample=216000,aformat=sample_fmts=flt:channel_layouts=stereo[stem_dialogue]
+
+# audio mix
+ffmpeg -hide_banner -nostdin -y -loglevel error -i <work>/stem_dialogue.wav -/filter_complex <work>/audio_mix.filter -map '[mix]' -c:a pcm_f32le -ar 48000 -ac 2 <work>/mix.wav
+## <work>/audio_mix.filter
+[0:a]anull[mix]
+
+# loudness pass 1 (measure)
+ffmpeg -hide_banner -nostdin -nostats -i <work>/mix.wav -af loudnorm=I=-14:TP=-1:LRA=7:print_format=json -f null -
+
+# loudness pass 2 (apply; values from pass 1)
+ffmpeg -hide_banner -nostdin -y -i <work>/mix.wav -af 'loudnorm=I=-14:TP=-1:LRA=7:measured_I=<I>:measured_TP=<TP>:measured_LRA=<LRA>:measured_thresh=<thresh>:offset=<offset>:linear=true:print_format=json,aresample=48000' -c:a pcm_f32le <work>/final_audio.wav
 
 # final encode
-ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/6053d8ad5aa338d00e70153cb70763c7.mov -i /proj/.cutline/cache/segments/d659df9158ce44c3d90f5a1796e6ca88.mov -i /proj/.cutline/cache/segments/81905f12c5976f046b4ad3ed372c2696.mov -i <work>/mix.wav -/filter_complex <work>/final.filter -map '[vout]' -map 3:a -c:v libx264 -preset slow -crf 18 -profile:v high -level:v 4.2 -bf 2 -g 15 -x264-params keyint_min=1:scenecut=0 -pix_fmt yuv420p -r 30 -fps_mode cfr -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart -map_metadata -1 -frames:v 135 -t 4.5 /proj/out/snap.mp4
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/6053d8ad5aa338d00e70153cb70763c7.mov -i /proj/.cutline/cache/segments/d659df9158ce44c3d90f5a1796e6ca88.mov -i /proj/.cutline/cache/segments/81905f12c5976f046b4ad3ed372c2696.mov -i <work>/final_audio.wav -/filter_complex <work>/final.filter -map '[vout]' -map 3:a -c:v libx264 -preset slow -crf 18 -profile:v high -level:v 4.2 -bf 2 -g 15 -x264-params keyint_min=1:scenecut=0 -pix_fmt yuv420p -r 30 -fps_mode cfr -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart -map_metadata -1 -frames:v 135 -t 4.5 /proj/out/snap.mp4
 ## <work>/final.filter
 [0:v]settb=AVTB,setpts=PTS-STARTPTS[s0];
 [1:v]settb=AVTB,setpts=PTS-STARTPTS[s1];

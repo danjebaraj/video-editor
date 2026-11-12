@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
+cutline-audio = { version = "0.1.0", path = "../cutline-audio" }
 cutline-core = { version = "0.1.0", path = "../cutline-core" }
 cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
 cutline-media = { version = "0.1.0", path = "../cutline-media" }

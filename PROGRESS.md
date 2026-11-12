@@ -6,7 +6,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 |---|---|
 | M0 Foundation | ✅ done |
 | M1 Project model & basic render | ✅ done |
-| M2 Audio | ⏳ |
+| M2 Audio | ✅ done |
 | M3 Motion/transitions/overlays/color | ⏳ |
 | M4 Text & graphics | ⏳ |
 | M5 Transcription/captions/edit assist | ⏳ |
@@ -47,6 +47,20 @@ Acceptance:
 - Invalid-project suite: 33 cases with code + JSON path (`crates/cutline-core/tests/invalid_projects.rs`).
 - Exact frame mapping on a 5-clip render (speed 2×, frame-number in point, fade) and a cache test where only the edited clip's segment re-renders (`crates/cutline-render/tests/m1_render.rs`).
 - Windows path escaping: unit tests (drive letters, specials) plus a real ffmpeg test with spaces, commas, quotes, brackets and `ü` in the path.
+
+## M2 — Audio pipeline
+Built:
+- `cutline-audio`: voice chains (`clean_voice`, `podcast_warm`, `raw`; `arnndn` only with a verified model path), energy VAD, ducking envelope, loudnorm JSON parsing/pass filters, f32 WAV writer and decoder, `audio.png` renderer (per-role waveforms, final mix, duck envelope, momentary LUFS with target line; built-in bitmap font).
+- Render audio stage: role stems from dialogue (sample-exact joins), audio/VO/music layers (trim, loop, gain, fades, sample-precise placement), SFX layers (asset or brand alias, deterministic `pick_from`), clip audio replacement, transition SFX at the transition midpoint, video/B-roll layer audio. Ducking by envelope (`amultiply`) or `sidechaincompress`; speech from transcripts or VAD. Mix, then two-pass loudnorm with a measured correction pass. Dry-run shows the stems, mix and both loudness passes.
+- QA: loudness (±1 LU, TP), LRA (warn), clipping (sample count ≥ −0.1 dBFS), digital silence > 1.5 s, black frames, freeze, first frame, Shorts hook, caption safe zone and reading speed (boxes come from M4/M5). Intended spans (transitions, freeze effects, stills) are excluded. An analysis pass that fails is now a QA error, never a silent pass.
+- Selftest Shorts project now has a ducked music bed and loudness QA.
+
+Acceptance (`crates/cutline-render/tests/m2_audio.rs`):
+- Final mix within ±0.5 LU at −14 and −16 LUFS targets; true peak ≤ target.
+- Ducking: music (200 Hz Goertzel) is lower by `amount_db` ±1.5 dB during speech; attack/release half-depth crossings within ±50 ms of the model.
+- No sample-step discontinuities above the tone's legitimate slope at a hard cut or an audio-cut transition.
+- Tone per segment via FFT with wipe and fade transitions present.
+- `audio.png` renders at 1568 px width.
 
 ## Blockers
 - github.com release downloads are blocked from this container (BtbN Windows builds). The code path exists; Windows CI exercises it.

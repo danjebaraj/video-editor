@@ -7,6 +7,12 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+anyhow = "1.0.104"
+cutline-core = { version = "0.1.0", path = "../cutline-core" }
+cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+image = "0.25.6"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 
 [lints]
 workspace = true

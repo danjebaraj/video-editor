@@ -520,6 +520,14 @@ dependencies = [
 [[package]]
 name = "cutline-audio"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cutline-core",
+ "cutline-deps",
+ "image",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "cutline-cli"
@@ -618,6 +626,7 @@ name = "cutline-render"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cutline-audio",
  "cutline-core",
  "cutline-deps",
  "cutline-media",
