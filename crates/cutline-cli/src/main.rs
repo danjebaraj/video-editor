@@ -2,6 +2,7 @@
 
 mod deps_cmd;
 mod doctor;
+mod edit;
 mod out;
 
 use clap::{Parser, Subcommand};
@@ -10,11 +11,7 @@ use serde_json::json;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(
-    name = "cutline",
-    version,
-    about = "Declarative CLI video editor for Shorts, short and long-form video"
-)]
+#[command(name = "cutline", version, about = "Declarative CLI video editor for Shorts, short and long-form video")]
 struct Cli {
     /// Machine-readable JSON on stdout (logs go to stderr).
     #[arg(long, global = true)]
@@ -41,6 +38,68 @@ enum Cmd {
         /// Also measure loudness (decodes the audio).
         #[arg(long)]
         loudness: bool,
+    },
+    /// Schema and semantic validation.
+    Validate { project: PathBuf },
+    /// Print the project JSON Schema.
+    Schema,
+    /// Scaffold a project, brand file and folders.
+    Init {
+        /// Directory to create the project in.
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        #[arg(long, default_value = "shorts")]
+        target: String,
+        /// Add every media file in this directory as an asset.
+        #[arg(long)]
+        assets: Option<PathBuf>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Explicit timeline after auto directives + EDL table.
+    Expand { project: PathBuf },
+    /// Final render, then QA.
+    Render {
+        project: PathBuf,
+        #[arg(long)]
+        export: Option<String>,
+        #[arg(long)]
+        draft: bool,
+        /// Print the exact ffmpeg commands and filter scripts without running them.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        no_cache: bool,
+        #[arg(long)]
+        allow_qa_errors: bool,
+        /// Use a hardware encoder for the final render.
+        #[arg(long)]
+        hw: bool,
+        /// Concurrent segment jobs (default: cores/2).
+        #[arg(long, default_value_t = 0)]
+        jobs: usize,
+        #[arg(long, short)]
+        out: Option<PathBuf>,
+    },
+    /// Still PNGs (`--at`) or a 540p proxy clip (`--range a-b`).
+    Preview {
+        project: PathBuf,
+        #[arg(long, num_args = 1..)]
+        at: Vec<String>,
+        #[arg(long)]
+        range: Option<String>,
+        #[arg(long)]
+        safe_zones: bool,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Run QA on any video file.
+    Qa {
+        video: PathBuf,
+        #[arg(long, default_value = "shorts")]
+        target: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
     },
     /// Toolchain + pipeline self-test on synthetic media.
     Selftest {
@@ -83,13 +142,7 @@ enum DepsCmd {
 }
 
 fn init_tracing(verbose: bool) {
-    let filter = std::env::var("CUTLINE_LOG").unwrap_or_else(|_| {
-        if verbose {
-            "debug".into()
-        } else {
-            "warn".into()
-        }
-    });
+    let filter = std::env::var("CUTLINE_LOG").unwrap_or_else(|_| if verbose { "debug".into() } else { "warn".into() });
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
         .with_writer(std::io::stderr)
@@ -117,17 +170,8 @@ fn dispatch(cli: Cli) -> CmdResult {
     match cli.cmd {
         Cmd::Doctor => doctor::run(),
         Cmd::Deps { cmd } => match cmd {
-            DepsCmd::Install {
-                what,
-                name,
-                all,
-                latest,
-            } => {
-                let what = if all {
-                    "all".to_string()
-                } else {
-                    what.unwrap_or_else(|| "ffmpeg".into())
-                };
+            DepsCmd::Install { what, name, all, latest } => {
+                let what = if all { "all".to_string() } else { what.unwrap_or_else(|| "ffmpeg".into()) };
                 match what.as_str() {
                     "ffmpeg" => deps_cmd::install_ffmpeg(latest),
                     "whisper-model" => {
@@ -144,14 +188,7 @@ fn dispatch(cli: Cli) -> CmdResult {
                             ("ffmpeg", Box::new(move || deps_cmd::install_ffmpeg(latest))),
                             (
                                 "whisper-model",
-                                Box::new(move || {
-                                    deps_cmd::install_model(
-                                        "whisper",
-                                        "whisper-base.en",
-                                        &s.url,
-                                        s.file,
-                                    )
-                                }),
+                                Box::new(move || deps_cmd::install_model("whisper", "whisper-base.en", &s.url, s.file)),
                             ),
                             ("face-model", Box::new(deps_cmd::install_face_model)),
                         ];
@@ -169,31 +206,34 @@ fn dispatch(cli: Cli) -> CmdResult {
                                 }
                             }
                         }
-                        Ok(
-                            Output::ok(json!({"ok": code == 0, "steps": res}), human.join("\n"))
-                                .with_code(code),
-                        )
+                        Ok(Output::ok(json!({"ok": code == 0, "steps": res}), human.join("\n")).with_code(code))
                     }
-                    other => Err(CliError::usage(anyhow::anyhow!(
-                        "unknown dependency `{other}`"
-                    ))),
+                    other => Err(CliError::usage(anyhow::anyhow!("unknown dependency `{other}`"))),
                 }
             }
             DepsCmd::Update { check } => deps_cmd::update(check),
             DepsCmd::Rollback => deps_cmd::rollback(),
             DepsCmd::Status => deps_cmd::status(),
         },
-        Cmd::Selftest {
-            quick: _,
-            full,
-            keep,
-            out,
-        } => selftest(full, keep, out),
+        Cmd::Validate { project } => edit::validate(&project),
+        Cmd::Schema => edit::schema(),
+        Cmd::Init { dir, target, assets, name } => edit::init(&dir, &target, assets.as_deref(), name.as_deref()),
+        Cmd::Expand { project } => edit::expand(&project),
+        Cmd::Render { project, export, draft, dry_run, no_cache, allow_qa_errors, hw, jobs, out } => edit::render(
+            &project,
+            edit::RenderArgs { export, draft, dry_run, no_cache, allow_qa_errors, hw, jobs, out },
+        ),
+        Cmd::Preview { project, at, range, safe_zones, out } => {
+            if at.is_empty() && range.is_none() {
+                return Err(CliError::usage(anyhow::anyhow!("preview needs --at <t>... or --range a-b")));
+            }
+            edit::preview(&project, &at, range.as_deref(), safe_zones, out)
+        }
+        Cmd::Qa { video, target, project } => edit::qa(&video, &target, project.as_deref()),
+        Cmd::Selftest { quick: _, full, keep, out } => selftest(full, keep, out),
         Cmd::Probe { files, loudness } => {
             if files.is_empty() {
-                return Err(CliError::usage(anyhow::anyhow!(
-                    "probe needs at least one file"
-                )));
+                return Err(CliError::usage(anyhow::anyhow!("probe needs at least one file")));
             }
             let tc = cutline_deps::toolchain().tool_err()?;
             let mut v = vec![];
@@ -224,10 +264,7 @@ fn selftest(full: bool, keep: bool, out: Option<PathBuf>) -> CmdResult {
     std::fs::create_dir_all(&dir).map_err(|e| CliError::internal(anyhow::Error::from(e)))?;
     let rep = run_selftest(if full { Mode::Full } else { Mode::Quick }, dir.clone());
     let report_path = dir.join("selftest_report.json");
-    let _ = std::fs::write(
-        &report_path,
-        serde_json::to_vec_pretty(&rep).unwrap_or_default(),
-    );
+    let _ = std::fs::write(&report_path, serde_json::to_vec_pretty(&rep).unwrap_or_default());
     // Always keep a copy of the report in the cwd-independent cache dir for `deps update`.
     let human = cutline_qa::selftest::summary(&rep);
     let mut j = json!(rep);

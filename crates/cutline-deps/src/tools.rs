@@ -68,21 +68,14 @@ impl Toolchain {
 }
 
 fn read_version(ffmpeg: &Path) -> Result<String> {
-    let out = Command::new(ffmpeg)
-        .arg("-version")
-        .output()
-        .with_context(|| format!("running {}", ffmpeg.display()))?;
+    let out = Command::new(ffmpeg).arg("-version").output().with_context(|| format!("running {}", ffmpeg.display()))?;
     if !out.status.success() {
         bail!("{} -version failed", ffmpeg.display());
     }
     let s = String::from_utf8_lossy(&out.stdout);
     let first = s.lines().next().unwrap_or_default();
     // "ffmpeg version 6.1.1-3ubuntu5 Copyright ..."
-    Ok(first
-        .split_whitespace()
-        .nth(2)
-        .unwrap_or("unknown")
-        .to_string())
+    Ok(first.split_whitespace().nth(2).unwrap_or("unknown").to_string())
 }
 
 /// Directory where the active installed ffmpeg version lives, if any.
@@ -95,10 +88,7 @@ pub fn installed_ffmpeg_dir() -> Option<PathBuf> {
 
 /// Discover ffmpeg/ffprobe: `CUTLINE_FFMPEG`/`CUTLINE_FFPROBE` → tools dir → PATH.
 pub fn discover() -> Result<Toolchain> {
-    if let (Some(f), Some(p)) = (
-        std::env::var_os("CUTLINE_FFMPEG"),
-        std::env::var_os("CUTLINE_FFPROBE"),
-    ) {
+    if let (Some(f), Some(p)) = (std::env::var_os("CUTLINE_FFMPEG"), std::env::var_os("CUTLINE_FFPROBE")) {
         let ffmpeg = PathBuf::from(f);
         return Ok(Toolchain {
             version: read_version(&ffmpeg)?,
@@ -112,25 +102,13 @@ pub fn discover() -> Result<Toolchain> {
         let ffprobe = d.join(exe_name("ffprobe"));
         if ffprobe.exists() {
             if let Ok(version) = read_version(&ffmpeg) {
-                return Ok(Toolchain {
-                    ffmpeg,
-                    ffprobe,
-                    version,
-                    source: ToolSource::ToolsDir,
-                });
+                return Ok(Toolchain { ffmpeg, ffprobe, version, source: ToolSource::ToolsDir });
             }
         }
     }
-    let ffmpeg =
-        which::which("ffmpeg").context("ffmpeg not found (run `cutline deps install ffmpeg`)")?;
-    let ffprobe =
-        which::which("ffprobe").context("ffprobe not found (run `cutline deps install ffmpeg`)")?;
-    Ok(Toolchain {
-        version: read_version(&ffmpeg)?,
-        ffmpeg,
-        ffprobe,
-        source: ToolSource::Path,
-    })
+    let ffmpeg = which::which("ffmpeg").context("ffmpeg not found (run `cutline deps install ffmpeg`)")?;
+    let ffprobe = which::which("ffprobe").context("ffprobe not found (run `cutline deps install ffmpeg`)")?;
+    Ok(Toolchain { version: read_version(&ffmpeg)?, ffmpeg, ffprobe, source: ToolSource::Path })
 }
 
 static TOOLCHAIN: OnceLock<Result<Toolchain, String>> = OnceLock::new();
@@ -230,12 +208,7 @@ pub fn check_capabilities(c: &Capabilities) -> Vec<CapCheck> {
     let mut v = vec![];
     let mut push = |kind, set: &BTreeSet<String>, names: &[&str], required| {
         for n in names {
-            v.push(CapCheck {
-                kind,
-                name: n.to_string(),
-                required,
-                present: set.contains(*n),
-            });
+            v.push(CapCheck { kind, name: n.to_string(), required, present: set.contains(*n) });
         }
     };
     push("filter", &c.filters, REQUIRED_FILTERS, true);

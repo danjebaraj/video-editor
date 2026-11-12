@@ -3,10 +3,7 @@ use std::process::{exit, Command};
 
 fn run(args: &[&str]) {
     eprintln!("xtask: cargo {}", args.join(" "));
-    let st = Command::new(env!("CARGO"))
-        .args(args)
-        .status()
-        .expect("spawn cargo");
+    let st = Command::new(env!("CARGO")).args(args).status().expect("spawn cargo");
     if !st.success() {
         exit(st.code().unwrap_or(1));
     }
@@ -17,14 +14,7 @@ fn main() {
     match task.as_str() {
         "ci" => {
             run(&["fmt", "--all", "--check"]);
-            run(&[
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--",
-                "-D",
-                "warnings",
-            ]);
+            run(&["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]);
             run(&["test", "--workspace"]);
             run(&["run", "-p", "cutline-cli", "--", "selftest", "--quick"]);
         }

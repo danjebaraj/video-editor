@@ -13,11 +13,7 @@ pub fn run_json(cmd: &mut Command) -> (i32, serde_json::Value, String) {
     let out = cmd.arg("--json").output().expect("run cutline");
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let v = serde_json::from_str(&stdout).unwrap_or(serde_json::Value::Null);
-    (
-        out.status.code().unwrap_or(-1),
-        v,
-        String::from_utf8_lossy(&out.stderr).to_string(),
-    )
+    (out.status.code().unwrap_or(-1), v, String::from_utf8_lossy(&out.stderr).to_string())
 }
 
 /// Minimal static HTTP server for tests: serves files from a map path → bytes.
@@ -42,20 +38,15 @@ impl MockServer {
                 let body = f2.lock().unwrap().get(&path).cloned();
                 let resp = match body {
                     Some(b) => {
-                        let mut r = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                            b.len()
-                        )
-                        .into_bytes();
+                        let mut r =
+                            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", b.len())
+                                .into_bytes();
                         if !req.starts_with("HEAD") {
                             r.extend(b);
                         }
                         r
                     }
-                    None => {
-                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                            .to_vec()
-                    }
+                    None => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
                 };
                 let _ = s.write_all(&resp);
             }
@@ -77,11 +68,7 @@ pub fn sha256_hex(b: &[u8]) -> String {
         .output()
         .or_else(|_| Command::new("shasum").args(["-a", "256"]).arg(&p).output())
         .unwrap();
-    String::from_utf8_lossy(&out.stdout)
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .to_string()
+    String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap().to_string()
 }
 
 /// Zip containing a fake `ffmpeg`/`ffprobe` shell script reporting `version`.
@@ -90,11 +77,9 @@ pub fn fake_ffmpeg_zip(dir: &Path, name: &str, version: &str) -> Vec<u8> {
     {
         let f = std::fs::File::create(&p).unwrap();
         let mut w = zip::ZipWriter::new(f);
-        let o: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default().unix_permissions(0o755);
+        let o: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default().unix_permissions(0o755);
         w.start_file(name, o).unwrap();
-        w.write_all(format!("#!/bin/sh\necho \"{name} version {version} Copyright\"\n").as_bytes())
-            .unwrap();
+        w.write_all(format!("#!/bin/sh\necho \"{name} version {version} Copyright\"\n").as_bytes()).unwrap();
         w.finish().unwrap();
     }
     std::fs::read(&p).unwrap()

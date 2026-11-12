@@ -36,10 +36,7 @@ pub fn get_text(url: &str) -> Result<String> {
 }
 
 fn get_text_once(url: &str) -> Result<String> {
-    let r = client()?
-        .get(url)
-        .send()
-        .with_context(|| format!("GET {url}"))?;
+    let r = client()?.get(url).send().with_context(|| format!("GET {url}"))?;
     if !r.status().is_success() {
         bail!("GET {url}: HTTP {}", r.status());
     }
@@ -104,10 +101,7 @@ pub fn download(url: &str, dest: &Path, expected: Option<&str>) -> Result<String
 
 fn download_once(url: &str, dest: &Path, expected: Option<&str>) -> Result<String> {
     tracing::info!(url, dest = %dest.display(), "downloading");
-    let mut r = client()?
-        .get(url)
-        .send()
-        .with_context(|| format!("GET {url}"))?;
+    let mut r = client()?.get(url).send().with_context(|| format!("GET {url}"))?;
     if !r.status().is_success() {
         bail!("GET {url}: HTTP {}", r.status());
     }
@@ -146,18 +140,13 @@ pub fn sha256_file(p: &Path) -> Result<String> {
 /// Parse a `.sha256` sidecar (`<hex>  <name>` or just `<hex>`).
 pub fn parse_sha256_sidecar(s: &str) -> Option<String> {
     let tok = s.split_whitespace().next()?;
-    (tok.len() == 64 && tok.chars().all(|c| c.is_ascii_hexdigit()))
-        .then(|| tok.to_ascii_lowercase())
+    (tok.len() == 64 && tok.chars().all(|c| c.is_ascii_hexdigit())).then(|| tok.to_ascii_lowercase())
 }
 
 /// Extract an archive (zip, tar.gz/tgz, tar) into `dest`. Returns extracted file paths.
 pub fn extract(archive: &Path, dest: &Path) -> Result<Vec<PathBuf>> {
     std::fs::create_dir_all(dest)?;
-    let name = archive
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let name = archive.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_ascii_lowercase();
     let mut out = vec![];
     if name.ends_with(".zip") {
         let f = std::fs::File::open(archive)?;
@@ -186,19 +175,13 @@ pub fn extract(archive: &Path, dest: &Path) -> Result<Vec<PathBuf>> {
         }
     } else if name.ends_with(".tar.gz") || name.ends_with(".tgz") || name.ends_with(".tar") {
         let f = std::fs::File::open(archive)?;
-        let rd: Box<dyn Read> = if name.ends_with(".tar") {
-            Box::new(f)
-        } else {
-            Box::new(flate2::read::GzDecoder::new(f))
-        };
+        let rd: Box<dyn Read> =
+            if name.ends_with(".tar") { Box::new(f) } else { Box::new(flate2::read::GzDecoder::new(f)) };
         let mut t = tar::Archive::new(rd);
         for e in t.entries()? {
             let mut e = e?;
             let rel = e.path()?.to_path_buf();
-            if rel
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
+            if rel.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
                 continue;
             }
             let p = dest.join(&rel);
@@ -234,10 +217,7 @@ mod tests {
     #[test]
     fn sidecar_parse() {
         let h = "a".repeat(64);
-        assert_eq!(
-            parse_sha256_sidecar(&format!("{h}  ffmpeg.zip\n")),
-            Some(h.clone())
-        );
+        assert_eq!(parse_sha256_sidecar(&format!("{h}  ffmpeg.zip\n")), Some(h.clone()));
         assert_eq!(parse_sha256_sidecar(&h.to_uppercase()), Some(h));
         assert_eq!(parse_sha256_sidecar("nope"), None);
     }

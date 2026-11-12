@@ -18,11 +18,7 @@ pub struct Output {
 
 impl Output {
     pub fn ok(json: Value, human: impl Into<String>) -> Self {
-        Self {
-            json,
-            human: human.into(),
-            code: EXIT_OK,
-        }
+        Self { json, human: human.into(), code: EXIT_OK }
     }
     pub fn with_code(mut self, code: i32) -> Self {
         self.code = code;
@@ -40,32 +36,16 @@ pub struct CliError {
 
 impl CliError {
     pub fn usage(e: impl Into<anyhow::Error>) -> Self {
-        Self {
-            code: EXIT_USAGE,
-            kind: "usage",
-            err: e.into(),
-        }
+        Self { code: EXIT_USAGE, kind: "usage", err: e.into() }
     }
     pub fn tool(e: impl Into<anyhow::Error>) -> Self {
-        Self {
-            code: EXIT_TOOL,
-            kind: "tool",
-            err: e.into(),
-        }
+        Self { code: EXIT_TOOL, kind: "tool", err: e.into() }
     }
     pub fn validation(e: impl Into<anyhow::Error>) -> Self {
-        Self {
-            code: EXIT_VALIDATION,
-            kind: "validation",
-            err: e.into(),
-        }
+        Self { code: EXIT_VALIDATION, kind: "validation", err: e.into() }
     }
     pub fn internal(e: impl Into<anyhow::Error>) -> Self {
-        Self {
-            code: EXIT_INTERNAL,
-            kind: "internal",
-            err: e.into(),
-        }
+        Self { code: EXIT_INTERNAL, kind: "internal", err: e.into() }
     }
 }
 
@@ -97,10 +77,7 @@ pub fn emit(json_mode: bool, r: CmdResult) -> i32 {
     match r {
         Ok(o) => {
             if json_mode {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&o.json).unwrap_or_default()
-                );
+                println!("{}", serde_json::to_string_pretty(&o.json).unwrap_or_default());
             } else if !o.human.is_empty() {
                 println!("{}", o.human.trim_end());
             }

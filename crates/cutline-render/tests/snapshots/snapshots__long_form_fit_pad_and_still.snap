@@ -1,0 +1,36 @@
+---
+source: crates/cutline-render/tests/snapshots.rs
+expression: s
+---
+# segment intro → /proj/.cutline/cache/segments/97669128783445e654121baa64cd32b4.mov
+ffmpeg -hide_banner -nostdin -y -loglevel error -loop 1 -framerate 30 -t 2.5 -i /proj/pic.png -/filter_complex <work>/seg_000_intro.filter -map '[vout]' -map '[aout]' -c:v prores_ks -profile:v 3 -vendor apl0 -pix_fmt yuv422p10le -bits_per_mb 8000 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a pcm_f32le -ar 48000 -ac 2 -map_metadata -1 -fflags +bitexact -flags:v +bitexact -flags:a +bitexact -frames:v 60 /proj/.cutline/cache/segments/97669128783445e654121baa64cd32b4.tmp.mov
+## <work>/seg_000_intro.filter
+[0:v]setpts=PTS-STARTPTS,fps=30[vn];
+[vn]scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos:in_color_matrix=auto:in_range=auto:out_color_matrix=bt709:out_range=tv,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x101014,setsar=1[vg];
+[vg]tpad=stop_mode=clone:stop=60,trim=end_frame=60,setpts=PTS-STARTPTS,format=yuv422p10le[vout];
+anullsrc=r=48000:cl=stereo,atrim=end_sample=96000,aformat=sample_fmts=flt:channel_layouts=stereo[aout]
+
+# segment talk → /proj/.cutline/cache/segments/9109e364314ea6963bbfb5e4b9a0b482.mov
+ffmpeg -hide_banner -nostdin -y -loglevel error -ss 9.991667 -t 10.075 -i /proj/talk.mp4 -/filter_complex <work>/seg_001_talk.filter -map '[vout]' -map '[aout]' -c:v prores_ks -profile:v 3 -vendor apl0 -pix_fmt yuv422p10le -bits_per_mb 8000 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a pcm_f32le -ar 48000 -ac 2 -map_metadata -1 -fflags +bitexact -flags:v +bitexact -flags:a +bitexact -frames:v 300 /proj/.cutline/cache/segments/9109e364314ea6963bbfb5e4b9a0b482.tmp.mov
+## <work>/seg_001_talk.filter
+[0:v]setpts=PTS-STARTPTS,fps=30[vn];
+[vn]scale=1920:1080:force_original_aspect_ratio=increase:force_divisible_by=2:flags=lanczos:in_color_matrix=auto:in_range=auto:out_color_matrix=bt709:out_range=tv,crop=1920:1080,setsar=1[vg];
+[vg]tpad=stop_mode=clone:stop=300,trim=end_frame=300,setpts=PTS-STARTPTS,format=yuv422p10le[vout];
+[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=flt:channel_layouts=stereo,volume=-3dB,apad=whole_len=480000,atrim=end_sample=480000,afade=t=in:d=0.01,afade=t=out:st=9.99:d=0.01[aout]
+
+# audio mix
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/97669128783445e654121baa64cd32b4.mov -i /proj/.cutline/cache/segments/9109e364314ea6963bbfb5e4b9a0b482.mov -/filter_complex <work>/audio_mix.filter -map '[mix]' -c:a pcm_f32le -ar 48000 -ac 2 <work>/mix.wav
+## <work>/audio_mix.filter
+[0:a]atrim=start_sample=0:end_sample=88800,asetpts=N/SR/TB,afade=t=in:d=0.01,afade=t=out:st=1.84:d=0.01[at0];
+[1:a]atrim=start_sample=7200:end_sample=480000,asetpts=N/SR/TB,afade=t=in:d=0.01,afade=t=out:st=9.84:d=0.01[at1];
+[at0][at1]concat=n=2:v=0:a=1[ac1];
+[ac1]apad=whole_len=561600,atrim=end_sample=561600[dialogue];
+[dialogue]anull[mix]
+
+# final encode
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/97669128783445e654121baa64cd32b4.mov -i /proj/.cutline/cache/segments/9109e364314ea6963bbfb5e4b9a0b482.mov -i <work>/mix.wav -/filter_complex <work>/final.filter -map '[vout]' -map 2:a -c:v libx264 -preset slow -crf 18 -profile:v high -level:v 4.2 -bf 2 -g 15 -x264-params keyint_min=1:scenecut=0 -pix_fmt yuv420p -r 30 -fps_mode cfr -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart -map_metadata -1 -frames:v 351 -t 11.7 /proj/out/long.mp4
+## <work>/final.filter
+[0:v]settb=AVTB,setpts=PTS-STARTPTS[s0];
+[1:v]settb=AVTB,setpts=PTS-STARTPTS[s1];
+[s0][s1]xfade=transition=wipeleft:duration=0.3:offset=1.7[x1];
+[x1]format=yuv420p[vout]

@@ -35,13 +35,9 @@ fn one() -> u32 {
 impl Lockfile {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Ok(Self {
-                version: 1,
-                tools: vec![],
-            });
+            return Ok(Self { version: 1, tools: vec![] });
         }
-        let s =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         serde_json::from_str(&s).with_context(|| format!("parsing {}", path.display()))
     }
 
@@ -59,18 +55,14 @@ impl Lockfile {
     }
 
     pub fn get(&self, name: &str, platform: &str) -> Option<&LockEntry> {
-        self.tools
-            .iter()
-            .find(|t| t.name == name && t.platform == platform)
+        self.tools.iter().find(|t| t.name == name && t.platform == platform)
     }
 
     /// Insert or replace the entry for (name, platform). Entries stay sorted for stable diffs.
     pub fn upsert(&mut self, e: LockEntry) {
-        self.tools
-            .retain(|t| !(t.name == e.name && t.platform == e.platform));
+        self.tools.retain(|t| !(t.name == e.name && t.platform == e.platform));
         self.tools.push(e);
-        self.tools
-            .sort_by(|a, b| (&a.name, &a.platform).cmp(&(&b.name, &b.platform)));
+        self.tools.sort_by(|a, b| (&a.name, &a.platform).cmp(&(&b.name, &b.platform)));
     }
 }
 
@@ -112,10 +104,7 @@ mod tests {
             license: None,
         };
         l.upsert(e.clone());
-        l.upsert(LockEntry {
-            version: "9.1".into(),
-            ..e.clone()
-        });
+        l.upsert(LockEntry { version: "9.1".into(), ..e.clone() });
         assert_eq!(l.tools.len(), 1);
         l.save(&p).unwrap();
         let l2 = Lockfile::load(&p).unwrap();

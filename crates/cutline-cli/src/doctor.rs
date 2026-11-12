@@ -12,12 +12,7 @@ pub fn run() -> CmdResult {
     let tc = cutline_deps::tools::discover();
     let (tool_json, caps_json) = match &tc {
         Ok(tc) => {
-            lines.push(format!(
-                "✔ ffmpeg {} ({:?}) at {}",
-                tc.version,
-                tc.source,
-                tc.ffmpeg.display()
-            ));
+            lines.push(format!("✔ ffmpeg {} ({:?}) at {}", tc.version, tc.source, tc.ffmpeg.display()));
             if cutline_deps::tools::parse_version(&tc.version) < (6, 0) {
                 warnings += 1;
                 lines.push("⚠ ffmpeg < 6.0 is untested".into());
@@ -36,7 +31,8 @@ pub fn run() -> CmdResult {
                 }
             }
             if checks.iter().any(|c| c.required && !c.present) {
-                fixes.push("cutline deps install ffmpeg   # the static build includes every required capability".into());
+                fixes
+                    .push("cutline deps install ffmpeg   # the static build includes every required capability".into());
             } else {
                 lines.push(format!(
                     "✔ all {} required filters/encoders/decoders present",
@@ -95,10 +91,7 @@ pub fn run() -> CmdResult {
     let whisper_cli = which_any(&["whisper-cli", "whisper-cpp", "main"]);
     if whisper.is_empty() {
         warnings += 1;
-        lines.push(
-            "⚠ no whisper model installed (transcription unavailable; Scribe import still works)"
-                .into(),
-        );
+        lines.push("⚠ no whisper model installed (transcription unavailable; Scribe import still works)".into());
         fixes.push("cutline deps install whisper-model base.en".into());
     } else {
         lines.push(format!("✔ whisper models: {}", whisper.join(", ")));
@@ -108,12 +101,7 @@ pub fn run() -> CmdResult {
         lines.push("· face model not installed (reframe falls back to center/fit_blur)".into());
     }
 
-    let free = fs2::available_space(
-        paths::data_dir()
-            .parent()
-            .unwrap_or(std::path::Path::new(".")),
-    )
-    .ok();
+    let free = fs2::available_space(paths::data_dir().parent().unwrap_or(std::path::Path::new("."))).ok();
     if let Some(f) = free {
         let gb = f as f64 / 1e9;
         if gb < 5.0 {
@@ -160,7 +148,5 @@ fn which_any(names: &[&str]) -> Option<std::path::PathBuf> {
 
 fn which_path(n: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|d| d.join(paths::exe_name(n)))
-        .find(|p| p.is_file())
+    std::env::split_paths(&path).map(|d| d.join(paths::exe_name(n))).find(|p| p.is_file())
 }

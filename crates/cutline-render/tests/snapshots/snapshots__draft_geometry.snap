@@ -1,0 +1,23 @@
+---
+source: crates/cutline-render/tests/snapshots.rs
+expression: s
+---
+# segment x → /proj/.cutline/cache/segments/5ec02c4e7caac82f7f82e47a165d9014.mov
+ffmpeg -hide_banner -nostdin -y -loglevel error -ss 0 -t 1.066667 -i /proj/a.mp4 -/filter_complex <work>/seg_000_x.filter -map '[vout]' -map '[aout]' -c:v prores_ks -profile:v 0 -vendor apl0 -pix_fmt yuv422p10le -bits_per_mb 8000 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a pcm_f32le -ar 48000 -ac 2 -map_metadata -1 -fflags +bitexact -flags:v +bitexact -flags:a +bitexact -frames:v 30 /proj/.cutline/cache/segments/5ec02c4e7caac82f7f82e47a165d9014.tmp.mov
+## <work>/seg_000_x.filter
+[0:v]setpts=PTS-STARTPTS,fps=30[vn];
+[vn]scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=lanczos:in_color_matrix=auto:in_range=auto:out_color_matrix=bt709:out_range=tv,crop=540:960,setsar=1[vg];
+[vg]tpad=stop_mode=clone:stop=30,trim=end_frame=30,setpts=PTS-STARTPTS,format=yuv422p10le[vout];
+[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=flt:channel_layouts=stereo,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:d=0.01,afade=t=out:st=0.99:d=0.01[aout]
+
+# audio mix
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/5ec02c4e7caac82f7f82e47a165d9014.mov -/filter_complex <work>/audio_mix.filter -map '[mix]' -c:a pcm_f32le -ar 48000 -ac 2 <work>/mix.wav
+## <work>/audio_mix.filter
+[0:a]apad=whole_len=48000,atrim=end_sample=48000[dialogue];
+[dialogue]anull[mix]
+
+# final encode
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/5ec02c4e7caac82f7f82e47a165d9014.mov -i <work>/mix.wav -/filter_complex <work>/final.filter -map '[vout]' -map 1:a -c:v libx264 -preset veryfast -crf 23 -profile:v high -level:v 4.2 -bf 2 -g 15 -x264-params keyint_min=1:scenecut=0 -pix_fmt yuv420p -r 30 -fps_mode cfr -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart -map_metadata -1 -frames:v 30 -t 1 /proj/out/d-draft.mp4
+## <work>/final.filter
+[0:v]settb=AVTB,setpts=PTS-STARTPTS[s0];
+[s0]format=yuv420p[vout]

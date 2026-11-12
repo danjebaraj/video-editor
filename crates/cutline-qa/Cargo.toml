@@ -11,6 +11,7 @@ anyhow = "1.0.104"
 cutline-core = { version = "0.1.0", path = "../cutline-core" }
 cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
 cutline-media = { version = "0.1.0", path = "../cutline-media" }
+cutline-render = { version = "0.1.0", path = "../cutline-render" }
 cutline-testkit = { version = "0.1.0", path = "../cutline-testkit" }
 image = "0.25.6"
 serde = { version = "1.0.229", features = ["derive"] }

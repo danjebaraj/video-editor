@@ -4,9 +4,7 @@
 //! `previous`) holding the active version name. Plain files are used instead of symlinks so the
 //! layout works on Windows.
 
-use crate::download::{
-    download, extract, get_text, make_executable, parse_sha256_sidecar, resolve_url,
-};
+use crate::download::{download, extract, get_text, make_executable, parse_sha256_sidecar, resolve_url};
 use crate::lockfile::{LockEntry, Lockfile};
 use crate::paths::{exe_name, platform_id, tools_dir};
 use anyhow::{anyhow, bail, Context, Result};
@@ -38,8 +36,7 @@ pub struct Release {
 /// and by anyone hosting an internal mirror).
 pub fn resolve_latest_ffmpeg() -> Result<Release> {
     if let Ok(u) = std::env::var("CUTLINE_FFMPEG_MANIFEST_URL") {
-        let mut r: Release =
-            serde_json::from_str(&get_text(&u)?).context("parsing ffmpeg manifest")?;
+        let mut r: Release = serde_json::from_str(&get_text(&u)?).context("parsing ffmpeg manifest")?;
         r.source = format!("manifest:{u}");
         return Ok(r);
     }
@@ -65,51 +62,31 @@ fn resolve_martin_riedl(os: &str, arch: &str) -> Result<Release> {
     let mut artifacts = vec![];
     let mut version = String::new();
     for name in ["ffmpeg", "ffprobe"] {
-        let u = format!(
-            "https://ffmpeg.martin-riedl.de/redirect/latest/{os}/{arch}/release/{name}.zip"
-        );
+        let u = format!("https://ffmpeg.martin-riedl.de/redirect/latest/{os}/{arch}/release/{name}.zip");
         let fin = resolve_url(&u)?;
         let seg = fin.rsplit('/').nth(1).unwrap_or_default();
-        version = seg
-            .split_once('_')
-            .map(|(_, v)| v.to_string())
-            .unwrap_or_else(|| seg.to_string());
+        version = seg.split_once('_').map(|(_, v)| v.to_string()).unwrap_or_else(|| seg.to_string());
         let sha = parse_sha256_sidecar(&get_text(&format!("{fin}.sha256"))?);
-        artifacts.push(Artifact {
-            name: name.into(),
-            url: fin,
-            sha256: sha,
-        });
+        artifacts.push(Artifact { name: name.into(), url: fin, sha256: sha });
     }
-    Ok(Release {
-        version,
-        artifacts,
-        source: "martin-riedl".into(),
-    })
+    Ok(Release { version, artifacts, source: "martin-riedl".into() })
 }
 
 /// BtbN GitHub builds: prefer the newest `ffmpeg-nX.Y-latest-win64-gpl-X.Y.zip` release branch.
 fn resolve_btbn() -> Result<Release> {
-    let j: serde_json::Value = serde_json::from_str(&get_text(
-        "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest",
-    )?)?;
+    let j: serde_json::Value =
+        serde_json::from_str(&get_text("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest")?)?;
     let assets = j["assets"].as_array().ok_or_else(|| anyhow!("no assets"))?;
     let mut best: Option<((u32, u32), String, String)> = None;
     let mut sums_url = None;
     for a in assets {
         let name = a["name"].as_str().unwrap_or_default();
-        let url = a["browser_download_url"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
+        let url = a["browser_download_url"].as_str().unwrap_or_default().to_string();
         if name == "checksums.sha256" {
             sums_url = Some(url.clone());
         }
         if let Some(rest) = name.strip_prefix("ffmpeg-n") {
-            if name.contains("-latest-win64-gpl-")
-                && name.ends_with(".zip")
-                && !name.contains("shared")
-            {
+            if name.contains("-latest-win64-gpl-") && name.ends_with(".zip") && !name.contains("shared") {
                 let ver = rest.split('-').next().unwrap_or_default().to_string();
                 let pv = crate::tools::parse_version(&ver);
                 if best.as_ref().map(|b| pv > b.0).unwrap_or(true) {
@@ -120,19 +97,13 @@ fn resolve_btbn() -> Result<Release> {
     }
     let (_, ver, url) = best.ok_or_else(|| anyhow!("no win64 gpl release build found"))?;
     let fname = url.rsplit('/').next().unwrap_or_default().to_string();
-    let sha = sums_url.and_then(|u| get_text(&u).ok()).and_then(|s| {
-        s.lines()
-            .find(|l| l.ends_with(&fname))
-            .and_then(parse_sha256_sidecar)
-    });
+    let sha = sums_url
+        .and_then(|u| get_text(&u).ok())
+        .and_then(|s| s.lines().find(|l| l.ends_with(&fname)).and_then(parse_sha256_sidecar));
     // One archive contains both binaries.
     Ok(Release {
         version: ver,
-        artifacts: vec![Artifact {
-            name: "ffmpeg+ffprobe".into(),
-            url,
-            sha256: sha,
-        }],
+        artifacts: vec![Artifact { name: "ffmpeg+ffprobe".into(), url, sha256: sha }],
         source: "btbn".into(),
     })
 }
@@ -154,10 +125,7 @@ fn find_file(root: &Path, file: &str) -> Option<PathBuf> {
 
 fn now_rfc3339() -> String {
     // Avoid a chrono dependency: seconds since epoch is unambiguous and sortable.
-    let s = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     format!("unix:{s}")
 }
 
@@ -172,19 +140,11 @@ pub fn stage_ffmpeg(rel: &Release) -> Result<PathBuf> {
     std::fs::create_dir_all(&work)?;
     for a in &rel.artifacts {
         let fname = a.url.rsplit('/').next().unwrap_or("archive.zip");
-        let fname = if fname.contains('.') {
-            fname.to_string()
-        } else {
-            format!("{fname}.zip")
-        };
+        let fname = if fname.contains('.') { fname.to_string() } else { format!("{fname}.zip") };
         let arch = dl.join(format!("{}-{}", sanitize(&a.name), fname));
         let sha = download(&a.url, &arch, a.sha256.as_deref())?;
         if a.sha256.is_none() {
-            tracing::warn!(
-                url = a.url,
-                sha,
-                "upstream publishes no sha256; recording computed hash"
-            );
+            tracing::warn!(url = a.url, sha, "upstream publishes no sha256; recording computed hash");
         }
         extract(&arch, &work.join(sanitize(&a.name)))?;
         let _ = std::fs::remove_file(&arch);
@@ -192,17 +152,14 @@ pub fn stage_ffmpeg(rel: &Release) -> Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     for b in ["ffmpeg", "ffprobe"] {
         let n = exe_name(b);
-        let src =
-            find_file(&work, &n).ok_or_else(|| anyhow!("{n} not found in downloaded archive"))?;
+        let src = find_file(&work, &n).ok_or_else(|| anyhow!("{n} not found in downloaded archive"))?;
         let dst = dir.join(&n);
         std::fs::copy(&src, &dst)?;
         make_executable(&dst)?;
     }
     let _ = std::fs::remove_dir_all(&work);
     // sanity: it runs
-    let out = std::process::Command::new(dir.join(exe_name("ffmpeg")))
-        .arg("-version")
-        .output()?;
+    let out = std::process::Command::new(dir.join(exe_name("ffmpeg"))).arg("-version").output()?;
     if !out.status.success() {
         bail!("staged ffmpeg does not run");
     }
@@ -210,15 +167,7 @@ pub fn stage_ffmpeg(rel: &Release) -> Result<PathBuf> {
 }
 
 pub fn sanitize(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' }).collect()
 }
 
 /// Mark a staged version as current (keeping the old current as `previous`).
@@ -240,8 +189,7 @@ pub fn promote_ffmpeg(version: &str) -> Result<()> {
 /// Switch back to the previously active version.
 pub fn rollback_ffmpeg() -> Result<String> {
     let base = tools_dir().join("ffmpeg");
-    let prev = std::fs::read_to_string(base.join("previous"))
-        .context("no previous ffmpeg version to roll back to")?;
+    let prev = std::fs::read_to_string(base.join("previous")).context("no previous ffmpeg version to roll back to")?;
     let cur = std::fs::read_to_string(base.join("current")).unwrap_or_default();
     std::fs::write(base.join("current"), prev.trim())?;
     if !cur.trim().is_empty() {
@@ -251,9 +199,7 @@ pub fn rollback_ffmpeg() -> Result<String> {
 }
 
 pub fn current_ffmpeg_version() -> Option<String> {
-    std::fs::read_to_string(tools_dir().join("ffmpeg").join("current"))
-        .ok()
-        .map(|s| s.trim().to_string())
+    std::fs::read_to_string(tools_dir().join("ffmpeg").join("current")).ok().map(|s| s.trim().to_string())
 }
 
 /// Record a release in the lockfile.
@@ -278,14 +224,10 @@ pub fn pinned_ffmpeg(lock: &Lockfile) -> Option<Release> {
     let ents: Vec<&LockEntry> = lock
         .tools
         .iter()
-        .filter(|t| {
-            t.platform == plat
-                && (t.name == "ffmpeg" || t.name == "ffprobe" || t.name == "ffmpeg+ffprobe")
-        })
+        .filter(|t| t.platform == plat && (t.name == "ffmpeg" || t.name == "ffprobe" || t.name == "ffmpeg+ffprobe"))
         .collect();
     let combined = ents.iter().any(|e| e.name == "ffmpeg+ffprobe");
-    let complete = combined
-        || (ents.iter().any(|e| e.name == "ffmpeg") && ents.iter().any(|e| e.name == "ffprobe"));
+    let complete = combined || (ents.iter().any(|e| e.name == "ffmpeg") && ents.iter().any(|e| e.name == "ffprobe"));
     if !complete || ents.iter().any(|e| e.sha256.is_empty()) {
         return None;
     }
@@ -293,23 +235,14 @@ pub fn pinned_ffmpeg(lock: &Lockfile) -> Option<Release> {
         version: ents[0].version.clone(),
         artifacts: ents
             .iter()
-            .map(|e| Artifact {
-                name: e.name.clone(),
-                url: e.url.clone(),
-                sha256: Some(e.sha256.clone()),
-            })
+            .map(|e| Artifact { name: e.name.clone(), url: e.url.clone(), sha256: Some(e.sha256.clone()) })
             .collect(),
         source: "lockfile".into(),
     })
 }
 
 /// Download a single file (model etc.) to `<tools>/<sub>/<file>`, verifying sha when known.
-pub fn install_file(
-    sub: &str,
-    file: &str,
-    url: &str,
-    sha256: Option<&str>,
-) -> Result<(PathBuf, String)> {
+pub fn install_file(sub: &str, file: &str, url: &str, sha256: Option<&str>) -> Result<(PathBuf, String)> {
     let dest = tools_dir().join(sub).join(file);
     if dest.exists() {
         if let Some(e) = sha256 {

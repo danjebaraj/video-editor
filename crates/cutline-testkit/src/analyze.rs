@@ -11,14 +11,7 @@ use std::process::{Command, Stdio};
 pub fn dims(tc: &Toolchain, p: &Path) -> Result<(u32, u32)> {
     let out = tc
         .ffprobe_cmd()
-        .args([
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height",
-            "-of",
-            "csv=p=0:s=x",
-        ])
+        .args(["-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x"])
         .arg(p)
         .output()?;
     let s = String::from_utf8_lossy(&out.stdout);
@@ -32,11 +25,7 @@ pub fn read_frames(tc: &Toolchain, p: &Path, indices: &[u64]) -> Result<Vec<RgbI
     if indices.is_empty() {
         return Ok(vec![]);
     }
-    let sel = indices
-        .iter()
-        .map(|i| format!("eq(n\\,{i})"))
-        .collect::<Vec<_>>()
-        .join("+");
+    let sel = indices.iter().map(|i| format!("eq(n\\,{i})")).collect::<Vec<_>>().join("+");
     let mut child = Command::new(&tc.ffmpeg)
         .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i"])
         .arg(p)
@@ -66,20 +55,13 @@ pub fn read_frames(tc: &Toolchain, p: &Path, indices: &[u64]) -> Result<Vec<RgbI
     }
     let st = child.wait_with_output()?;
     if !st.status.success() {
-        bail!(
-            "frame decode failed: {}",
-            String::from_utf8_lossy(&st.stderr)
-        );
+        bail!("frame decode failed: {}", String::from_utf8_lossy(&st.stderr));
     }
     Ok(out)
 }
 
 /// Decode ALL frames, optionally cropped to (x, y, w, h) first to keep memory small.
-pub fn read_all_frames(
-    tc: &Toolchain,
-    p: &Path,
-    crop: Option<(u32, u32, u32, u32)>,
-) -> Result<Vec<RgbImage>> {
+pub fn read_all_frames(tc: &Toolchain, p: &Path, crop: Option<(u32, u32, u32, u32)>) -> Result<Vec<RgbImage>> {
     let (mut w, mut h) = dims(tc, p)?;
     let mut args: Vec<String> = vec![];
     if let Some((x, y, cw, ch)) = crop {
@@ -93,15 +75,7 @@ pub fn read_all_frames(
         .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i"])
         .arg(p)
         .args(&args)
-        .args([
-            "-fps_mode",
-            "passthrough",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgb24",
-            "-",
-        ])
+        .args(["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
@@ -120,49 +94,18 @@ pub fn read_all_frames(
 }
 
 /// Decode mono f32 audio samples at 48 kHz from `start` for `dur` seconds (all if dur None).
-pub fn read_audio(
-    tc: &Toolchain,
-    p: &Path,
-    start: f64,
-    dur: Option<f64>,
-    channels: u32,
-) -> Result<Vec<f32>> {
+pub fn read_audio(tc: &Toolchain, p: &Path, start: f64, dur: Option<f64>, channels: u32) -> Result<Vec<f32>> {
     let mut c = Command::new(&tc.ffmpeg);
-    c.args([
-        "-hide_banner",
-        "-nostdin",
-        "-loglevel",
-        "error",
-        "-ss",
-        &format!("{start}"),
-        "-i",
-    ])
-    .arg(p);
+    c.args(["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", &format!("{start}"), "-i"]).arg(p);
     if let Some(d) = dur {
         c.args(["-t", &format!("{d}")]);
     }
-    c.args([
-        "-vn",
-        "-ac",
-        &channels.to_string(),
-        "-ar",
-        "48000",
-        "-f",
-        "f32le",
-        "-",
-    ]);
+    c.args(["-vn", "-ac", &channels.to_string(), "-ar", "48000", "-f", "f32le", "-"]);
     let out = c.output()?;
     if !out.status.success() {
-        bail!(
-            "audio decode failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        bail!("audio decode failed: {}", String::from_utf8_lossy(&out.stderr));
     }
-    Ok(out
-        .stdout
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .collect())
+    Ok(out.stdout.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect())
 }
 
 /// Dominant frequency (Hz) of a mono 48 kHz buffer via FFT with a Hann window.
@@ -234,8 +177,7 @@ pub fn ssim(a: &RgbImage, b: &RgbImage) -> f64 {
             let va = saa / m - ma * ma;
             let vb = sbb / m - mb * mb;
             let cov = sab / m - ma * mb;
-            total += ((2.0 * ma * mb + c1) * (2.0 * cov + c2))
-                / ((ma * ma + mb * mb + c1) * (va + vb + c2));
+            total += ((2.0 * ma * mb + c1) * (2.0 * cov + c2)) / ((ma * ma + mb * mb + c1) * (va + vb + c2));
             n += 1.0;
             x += 4;
         }
@@ -251,12 +193,8 @@ pub fn ssim(a: &RgbImage, b: &RgbImage) -> f64 {
 /// Compare `img` with a golden PNG at `golden`. With `CUTLINE_BLESS=1` (or when missing and
 /// `CUTLINE_BLESS_MISSING=1`) the golden is (re)written. Returns the SSIM.
 pub fn golden_compare(img: &RgbImage, golden: &Path, min_ssim: f64) -> Result<f64> {
-    let bless = std::env::var("CUTLINE_BLESS")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    let bless_missing = std::env::var("CUTLINE_BLESS_MISSING")
-        .map(|v| v == "1")
-        .unwrap_or(false);
+    let bless = std::env::var("CUTLINE_BLESS").map(|v| v == "1").unwrap_or(false);
+    let bless_missing = std::env::var("CUTLINE_BLESS_MISSING").map(|v| v == "1").unwrap_or(false);
     if bless || (!golden.exists() && bless_missing) {
         if let Some(p) = golden.parent() {
             std::fs::create_dir_all(p)?;
@@ -265,10 +203,7 @@ pub fn golden_compare(img: &RgbImage, golden: &Path, min_ssim: f64) -> Result<f6
         return Ok(1.0);
     }
     if !golden.exists() {
-        bail!(
-            "golden image missing: {} (run with CUTLINE_BLESS=1)",
-            golden.display()
-        );
+        bail!("golden image missing: {} (run with CUTLINE_BLESS=1)", golden.display());
     }
     let g = image::open(golden)?.to_rgb8();
     if g.dimensions() != img.dimensions() {
@@ -278,11 +213,7 @@ pub fn golden_compare(img: &RgbImage, golden: &Path, min_ssim: f64) -> Result<f6
     if s < min_ssim {
         let actual = golden.with_extension("actual.png");
         img.save(&actual)?;
-        bail!(
-            "SSIM {s:.4} < {min_ssim} vs {} (actual saved to {})",
-            golden.display(),
-            actual.display()
-        );
+        bail!("SSIM {s:.4} < {min_ssim} vs {} (actual saved to {})", golden.display(), actual.display());
     }
     Ok(s)
 }
@@ -308,9 +239,7 @@ mod tests {
     use super::*;
     #[test]
     fn fft_finds_tone() {
-        let s: Vec<f32> = (0..9600)
-            .map(|i| (2.0 * std::f32::consts::PI * 660.0 * i as f32 / 48000.0).sin())
-            .collect();
+        let s: Vec<f32> = (0..9600).map(|i| (2.0 * std::f32::consts::PI * 660.0 * i as f32 / 48000.0).sin()).collect();
         let f = dominant_freq(&s);
         assert!((f - 660.0).abs() < 6.0, "{f}");
     }

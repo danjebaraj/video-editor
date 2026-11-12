@@ -36,13 +36,7 @@ pub struct Outcome {
 
 impl Outcome {
     pub fn pass(measured: serde_json::Value, threshold: serde_json::Value) -> Self {
-        Self {
-            status: Status::Pass,
-            measured,
-            threshold,
-            artifacts: vec![],
-            message: None,
-        }
+        Self { status: Status::Pass, measured, threshold, artifacts: vec![], message: None }
     }
     pub fn check(ok: bool, measured: serde_json::Value, threshold: serde_json::Value) -> Self {
         Self {
@@ -95,12 +89,7 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(dir: PathBuf) -> Self {
-        Self {
-            dir,
-            checks: vec![],
-            start: Instant::now(),
-            filter: std::env::var("CUTLINE_SELFTEST_ONLY").ok(),
-        }
+        Self { dir, checks: vec![], start: Instant::now(), filter: std::env::var("CUTLINE_SELFTEST_ONLY").ok() }
     }
 
     pub fn run(&mut self, id: &str, f: impl FnOnce(&Path) -> Result<Outcome>) {
@@ -136,41 +125,22 @@ impl Runner {
             measured: o.measured,
             threshold: o.threshold,
             duration_s: t.elapsed().as_secs_f64(),
-            artifacts: o
-                .artifacts
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect(),
+            artifacts: o.artifacts.iter().map(|p| p.display().to_string()).collect(),
             message: o.message,
         };
         eprintln!(
             "selftest: {id}: {:?} ({:.1}s){}",
             r.status,
             r.duration_s,
-            r.message
-                .as_deref()
-                .map(|m| format!(" — {m}"))
-                .unwrap_or_default()
+            r.message.as_deref().map(|m| format!(" — {m}")).unwrap_or_default()
         );
         self.checks.push(r);
     }
 
     pub fn finish(self, mode: &str) -> Report {
-        let passed = self
-            .checks
-            .iter()
-            .filter(|c| c.status == Status::Pass)
-            .count();
-        let failed = self
-            .checks
-            .iter()
-            .filter(|c| c.status == Status::Fail)
-            .count();
-        let skipped = self
-            .checks
-            .iter()
-            .filter(|c| c.status == Status::Skip)
-            .count();
+        let passed = self.checks.iter().filter(|c| c.status == Status::Pass).count();
+        let failed = self.checks.iter().filter(|c| c.status == Status::Fail).count();
+        let skipped = self.checks.iter().filter(|c| c.status == Status::Skip).count();
         Report {
             mode: mode.into(),
             ok: failed == 0,
@@ -201,12 +171,7 @@ pub fn summary(r: &Report) -> String {
             Status::Fail => "✘",
             Status::Skip => "·",
         };
-        s.push_str(&format!(
-            "  {mark} {:<36} {:>6.1}s {}\n",
-            c.id,
-            c.duration_s,
-            c.message.as_deref().unwrap_or("")
-        ));
+        s.push_str(&format!("  {mark} {:<36} {:>6.1}s {}\n", c.id, c.duration_s, c.message.as_deref().unwrap_or("")));
     }
     s
 }

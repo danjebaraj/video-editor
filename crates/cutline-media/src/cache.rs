@@ -21,9 +21,7 @@ impl Cache {
     }
 
     pub fn path(&self, key: &str, ext: &str) -> PathBuf {
-        self.root
-            .join(&key[..2.min(key.len())])
-            .join(format!("{key}.{ext}"))
+        self.root.join(&key[..2.min(key.len())]).join(format!("{key}.{ext}"))
     }
 
     pub fn get_json<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
@@ -65,10 +63,7 @@ fn walk(p: &Path, f: &mut dyn FnMut(&Path, &std::fs::Metadata)) {
 }
 
 pub fn stats(root: &Path) -> CacheStats {
-    let mut s = CacheStats {
-        root: root.display().to_string(),
-        ..Default::default()
-    };
+    let mut s = CacheStats { root: root.display().to_string(), ..Default::default() };
     walk(root, &mut |_, m| {
         s.files += 1;
         s.bytes += m.len();
@@ -79,20 +74,12 @@ pub fn stats(root: &Path) -> CacheStats {
 /// Delete files not modified within `older_than` (or everything when `None`). Returns stats of
 /// what was removed.
 pub fn clean(root: &Path, older_than: Option<Duration>) -> CacheStats {
-    let mut s = CacheStats {
-        root: root.display().to_string(),
-        ..Default::default()
-    };
+    let mut s = CacheStats { root: root.display().to_string(), ..Default::default() };
     let now = SystemTime::now();
     walk(root, &mut |p, m| {
         let old = match older_than {
             None => true,
-            Some(d) => m
-                .modified()
-                .ok()
-                .and_then(|t| now.duration_since(t).ok())
-                .map(|age| age > d)
-                .unwrap_or(false),
+            Some(d) => m.modified().ok().and_then(|t| now.duration_since(t).ok()).map(|age| age > d).unwrap_or(false),
         };
         if old && std::fs::remove_file(p).is_ok() {
             s.files += 1;

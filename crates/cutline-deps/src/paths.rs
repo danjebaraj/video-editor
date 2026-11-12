@@ -93,14 +93,7 @@ pub fn find_chrome() -> Option<PathBuf> {
             }
         }
     }
-    for n in [
-        "google-chrome",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-        "chrome",
-        "msedge",
-    ] {
+    for n in ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome", "msedge"] {
         if let Ok(p) = which::which(n) {
             cands.push(p);
         }

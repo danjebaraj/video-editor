@@ -77,8 +77,7 @@ fn frameid_survives_x264_and_scale() {
     // stretched scale: x * 1080/1280, y * 1920/720
     let l = FrameIdLayout::top_row().transform(1080.0 / 1280.0, 1920.0 / 720.0, 0.0, 0.0);
     let (_, _, bw, bh) = l.bbox();
-    let frames =
-        read_all_frames(tc, &out, Some((0, 0, bw.ceil() as u32, bh.ceil() as u32))).unwrap();
+    let frames = read_all_frames(tc, &out, Some((0, 0, bw.ceil() as u32, bh.ceil() as u32))).unwrap();
     assert_eq!(frames.len(), 300);
     for (i, f) in frames.iter().enumerate() {
         assert_eq!(decode_frame_id(f, &l), Some(i as u16), "frame {i}");

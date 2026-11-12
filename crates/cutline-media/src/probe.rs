@@ -70,9 +70,7 @@ pub fn parse_rational(s: &str) -> Option<f64> {
 }
 
 fn s(v: &serde_json::Value) -> Option<String> {
-    v.as_str()
-        .map(str::to_string)
-        .filter(|x| !x.is_empty() && x != "unknown")
+    v.as_str().map(str::to_string).filter(|x| !x.is_empty() && x != "unknown")
 }
 
 const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"];
@@ -90,10 +88,7 @@ fn pix_has_alpha(p: &str) -> bool {
 
 fn bit_depth(p: &str) -> u32 {
     for d in [16, 14, 12, 10, 9] {
-        if p.contains(&format!("p{d}"))
-            || p.ends_with(&format!("{d}le"))
-            || p.ends_with(&format!("{d}be"))
-        {
+        if p.contains(&format!("p{d}")) || p.ends_with(&format!("{d}le")) || p.ends_with(&format!("{d}be")) {
             return d;
         }
     }
@@ -107,36 +102,22 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
     let mut cmd = tc.ffprobe_cmd();
     cmd.args(["-print_format", "json", "-show_format", "-show_streams"]);
     if is_seq {
-        cmd.args([
-            "-f",
-            "image2",
-            "-framerate",
-            &format!("{}", fps_hint.unwrap_or(30.0)),
-        ]);
+        cmd.args(["-f", "image2", "-framerate", &format!("{}", fps_hint.unwrap_or(30.0))]);
     } else if !path.exists() {
         bail!("file not found: {}", path.display());
     }
     cmd.arg(path);
     let out = cmd.output().context("running ffprobe")?;
     if !out.status.success() {
-        bail!(
-            "ffprobe failed on {}: {}",
-            path.display(),
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
+        bail!("ffprobe failed on {}: {}", path.display(), String::from_utf8_lossy(&out.stderr).trim());
     }
     let j: serde_json::Value = serde_json::from_slice(&out.stdout)?;
     let fmt = &j["format"];
     let streams = j["streams"].as_array().cloned().unwrap_or_default();
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
 
-    let vs = streams.iter().find(|st| {
-        st["codec_type"] == "video" && st["disposition"]["attached_pic"].as_i64() != Some(1)
-    });
+    let vs =
+        streams.iter().find(|st| st["codec_type"] == "video" && st["disposition"]["attached_pic"].as_i64() != Some(1));
     let a = streams.iter().find(|st| st["codec_type"] == "audio");
 
     let video = vs.map(|v| {
@@ -152,36 +133,22 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
             }
         }
         if rotation == 0 {
-            if let Some(r) = v["tags"]["rotate"]
-                .as_str()
-                .and_then(|x| x.parse::<i32>().ok())
-            {
+            if let Some(r) = v["tags"]["rotate"].as_str().and_then(|x| x.parse::<i32>().ok()) {
                 rotation = -r; // tag is clockwise, displaymatrix counter-clockwise
             }
         }
         let rot_norm = rotation.rem_euclid(360);
-        let (dw, dh) = if rot_norm == 90 || rot_norm == 270 {
-            (height, width)
-        } else {
-            (width, height)
-        };
+        let (dw, dh) = if rot_norm == 90 || rot_norm == 270 { (height, width) } else { (width, height) };
         let r = s(&v["r_frame_rate"]).unwrap_or_else(|| "0/1".into());
-        let avg = s(&v["avg_frame_rate"])
-            .filter(|x| x != "0/0")
-            .unwrap_or_else(|| r.clone());
+        let avg = s(&v["avg_frame_rate"]).filter(|x| x != "0/0").unwrap_or_else(|| r.clone());
         let rf = parse_rational(&r).unwrap_or(0.0);
         let af = parse_rational(&avg).unwrap_or(rf);
         let vfr = rf > 0.0 && af > 0.0 && ((rf - af).abs() / rf) > 0.01;
         let pix = s(&v["pix_fmt"]).unwrap_or_default();
-        let alpha_mode = v["tags"]["alpha_mode"].as_str() == Some("1")
-            || v["tags"]["ALPHA_MODE"].as_str() == Some("1");
+        let alpha_mode = v["tags"]["alpha_mode"].as_str() == Some("1") || v["tags"]["ALPHA_MODE"].as_str() == Some("1");
         let vp9_alpha = codec == "vp9" && alpha_mode;
         let vp8_alpha = codec == "vp8" && alpha_mode;
-        let fps_str = if is_seq {
-            format!("{}", fps_hint.unwrap_or(30.0))
-        } else {
-            avg.clone()
-        };
+        let fps_str = if is_seq { format!("{}", fps_hint.unwrap_or(30.0)) } else { avg.clone() };
         VideoInfo {
             alpha: pix_has_alpha(&pix) || vp9_alpha || vp8_alpha,
             needs_libvpx_decoder: vp9_alpha || vp8_alpha,
@@ -206,24 +173,15 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
     });
     let audio = a.map(|a| AudioInfo {
         codec: s(&a["codec_name"]).unwrap_or_default(),
-        sample_rate: a["sample_rate"]
-            .as_str()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(0),
+        sample_rate: a["sample_rate"].as_str().and_then(|x| x.parse().ok()).unwrap_or(0),
         channels: a["channels"].as_u64().unwrap_or(0) as u32,
         channel_layout: s(&a["channel_layout"]),
     });
     let format = s(&fmt["format_name"]).unwrap_or_default();
-    let mut duration = fmt["duration"]
-        .as_str()
-        .and_then(|x| x.parse().ok())
-        .unwrap_or(0.0);
+    let mut duration = fmt["duration"].as_str().and_then(|x| x.parse().ok()).unwrap_or(0.0);
     if duration == 0.0 {
         if let Some(v) = vs {
-            duration = v["duration"]
-                .as_str()
-                .and_then(|x| x.parse().ok())
-                .unwrap_or(0.0);
+            duration = v["duration"].as_str().and_then(|x| x.parse().ok()).unwrap_or(0.0);
         }
     }
     let kind = if is_seq {
@@ -236,17 +194,10 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
         "video"
     }
     .to_string();
-    let faststart = if format.contains("mp4") || format.contains("mov") {
-        moov_before_mdat(path).ok()
-    } else {
-        None
-    };
+    let faststart = if format.contains("mp4") || format.contains("mov") { moov_before_mdat(path).ok() } else { None };
     Ok(MediaInfo {
         path: ps,
-        size: fmt["size"]
-            .as_str()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(0),
+        size: fmt["size"].as_str().and_then(|x| x.parse().ok()).unwrap_or(0),
         bit_rate: fmt["bit_rate"].as_str().and_then(|x| x.parse().ok()),
         format,
         duration,
@@ -295,14 +246,7 @@ pub fn measure_loudness(tc: &Toolchain, path: &Path) -> Result<Loudness> {
     let out = std::process::Command::new(&tc.ffmpeg)
         .args(["-hide_banner", "-nostdin", "-nostats", "-i"])
         .arg(path)
-        .args([
-            "-vn",
-            "-af",
-            "ebur128=peak=true:framelog=quiet",
-            "-f",
-            "null",
-            "-",
-        ])
+        .args(["-vn", "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"])
         .output()?;
     let err = String::from_utf8_lossy(&out.stderr);
     parse_ebur128_summary(&err).context("could not parse ebur128 summary")
@@ -313,11 +257,7 @@ pub fn parse_ebur128_summary(s: &str) -> Option<Loudness> {
     let tail = &s[idx..];
     let grab = |key: &str| -> Option<f64> {
         let p = tail.find(key)?;
-        tail[p + key.len()..]
-            .split_whitespace()
-            .next()?
-            .parse()
-            .ok()
+        tail[p + key.len()..].split_whitespace().next()?.parse().ok()
     };
     Some(Loudness {
         integrated_lufs: grab("I:")?,

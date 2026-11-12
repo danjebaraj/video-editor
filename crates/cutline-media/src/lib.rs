@@ -1,5 +1,6 @@
 //! Media probing, fingerprinting and on-disk caches.
 
+pub mod assets;
 pub mod cache;
 pub mod probe;
 
@@ -36,11 +37,7 @@ pub fn fingerprint_any(path: &Path) -> Result<String> {
     let s = path.to_string_lossy();
     if s.contains('%') {
         let dir = path.parent().unwrap_or(Path::new("."));
-        let mut names: Vec<_> = std::fs::read_dir(dir)?
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_file())
-            .collect();
+        let mut names: Vec<_> = std::fs::read_dir(dir)?.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
         names.sort();
         let mut h = Sha256::new();
         for n in names {

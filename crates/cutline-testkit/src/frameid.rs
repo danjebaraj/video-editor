@@ -23,37 +23,17 @@ pub struct FrameIdLayout {
 impl FrameIdLayout {
     /// Spec default: top-left row of 16 64×64 blocks.
     pub fn top_row() -> Self {
-        Self {
-            x0: 0.0,
-            y0: 0.0,
-            bw: 64.0,
-            bh: 64.0,
-            cols: 16,
-            rows: 1,
-        }
+        Self { x0: 0.0, y0: 0.0, bw: 64.0, bh: 64.0, cols: 16, rows: 1 }
     }
 
     /// 8×2 grid of `b`-px blocks centered horizontally at vertical offset `y0` within width `w`.
     pub fn centered(w: u32, y0: f64, b: f64) -> Self {
-        Self {
-            x0: (w as f64 - 8.0 * b) / 2.0,
-            y0,
-            bw: b,
-            bh: b,
-            cols: 8,
-            rows: 2,
-        }
+        Self { x0: (w as f64 - 8.0 * b) / 2.0, y0, bw: b, bh: b, cols: 8, rows: 2 }
     }
 
     /// Apply `out = in * scale + offset` (uniform scale + translation, e.g. a cover crop).
     pub fn transform(&self, sx: f64, sy: f64, ox: f64, oy: f64) -> Self {
-        Self {
-            x0: self.x0 * sx + ox,
-            y0: self.y0 * sy + oy,
-            bw: self.bw * sx,
-            bh: self.bh * sy,
-            ..*self
-        }
+        Self { x0: self.x0 * sx + ox, y0: self.y0 * sy + oy, bw: self.bw * sx, bh: self.bh * sy, ..*self }
     }
 
     /// Layout after scaling a `sw×sh` source to cover `tw×th` (scale up, center crop).
@@ -76,33 +56,19 @@ impl FrameIdLayout {
     pub fn block(&self, i: u32) -> (f64, f64, f64, f64) {
         let c = i % self.cols;
         let r = i / self.cols;
-        (
-            self.x0 + c as f64 * self.bw,
-            self.y0 + r as f64 * self.bh,
-            self.bw,
-            self.bh,
-        )
+        (self.x0 + c as f64 * self.bw, self.y0 + r as f64 * self.bh, self.bw, self.bh)
     }
 
     /// Bounding box of the grid.
     pub fn bbox(&self) -> (f64, f64, f64, f64) {
-        (
-            self.x0,
-            self.y0,
-            self.bw * self.cols as f64,
-            self.bh * self.rows as f64,
-        )
+        (self.x0, self.y0, self.bw * self.cols as f64, self.bh * self.rows as f64)
     }
 
     /// ffmpeg `geq` luma expression drawing the pattern over the input (`lum(X,Y)` elsewhere).
     /// Use on a `yuv444p` (or gray) input; chroma must be neutralized separately in the region.
     pub fn geq_luma_expr(&self) -> String {
         let (x0, y0, w, h) = self.bbox();
-        let inside = format!(
-            "between(X,{x0},{x1}-1)*between(Y,{y0},{y1}-1)",
-            x1 = x0 + w,
-            y1 = y0 + h
-        );
+        let inside = format!("between(X,{x0},{x1}-1)*between(Y,{y0},{y1}-1)", x1 = x0 + w, y1 = y0 + h);
         let col = format!("floor((X-{x0})/{bw})", bw = self.bw);
         let row = format!("floor((Y-{y0})/{bh})", bh = self.bh);
         let bit = format!("(15-({row}*{cols}+{col}))", cols = self.cols);
@@ -112,11 +78,7 @@ impl FrameIdLayout {
 
     pub fn geq_chroma_expr(&self, plane: &str) -> String {
         let (x0, y0, w, h) = self.bbox();
-        format!(
-            "if(between(X,{x0},{x1}-1)*between(Y,{y0},{y1}-1),128,{plane}(X,Y))",
-            x1 = x0 + w,
-            y1 = y0 + h
-        )
+        format!("if(between(X,{x0},{x1}-1)*between(Y,{y0},{y1}-1),128,{plane}(X,Y))", x1 = x0 + w, y1 = y0 + h)
     }
 }
 

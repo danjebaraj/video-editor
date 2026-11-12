@@ -36,3 +36,30 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-12 — Fonts
 - **Decision:** bundle Anton, Bebas Neue, Poppins (Regular/Bold/ExtraBold, static), Inter and Montserrat (variable) from google/fonts, each with its OFL license file.
 - **Reason:** libass uses only the default instance of a variable font, so heavy caption and title styles use the static Poppins ExtraBold, Anton and Bebas Neue.
+
+## 2026-11-12 — `reframe` unifies geometry modes
+- **Decision:** one `reframe: {mode}` field carries every geometry mode (`cover`/`center`, `fit_blur`, `fit_pad`, `track_face`, `manual`, `split`). The project-level `default_reframe` defaults to `cover`.
+- **Alternatives:** a separate `geometry` field next to `reframe`.
+- **Reason:** the spec's example uses `reframe.mode` for both, and one field avoids conflicting settings.
+
+## 2026-11-12 — Effect times are clip-relative timeline seconds
+- **Decision:** `effects[].at` counts seconds from the clip's start on the timeline (after speed changes).
+- **Reason:** that is what Claude sees in `expand`/review output; source-relative times would shift under speed changes.
+
+## 2026-11-12 — Frame-accurate segment seeking
+- **Decision:** snap the in point to the source frame grid, seek a quarter frame early (`-ss` before `-i`), then `setpts=PTS-STARTPTS` and `fps`. Pad and trim to the exact frame count (`tpad`+`trim`); audio is sample-exact (`apad`+`atrim`), with sample counts derived from timeline frame boundaries so they never drift.
+- **Reason:** guarantees the exact frame mapping the selftest asserts.
+
+## 2026-11-12 — Assembly timebase
+- **Decision:** every segment input is normalized with `settb=AVTB` before concat/xfade.
+- **Reason:** xfade refuses inputs whose timebases differ (concat outputs AVTB, mov inputs use the stream timebase).
+
+## 2026-11-12 — Orchestration lives in `cutline-render::pipeline`, delivery in `cutline-qa::deliver`
+- **Decision:** load → probe → resolve → extras → plan → execute is a library API so the selftest and the CLI share it. QA and the side files (`.qa.json`, `.render_report.json`, `.srt`, `credits.txt`) are written by `cutline-qa::deliver`.
+
+## 2026-11-12 — Audio is rendered separately and muxed
+- **Decision:** segment mezzanines carry dialogue audio (PCM f32). An audio stage builds `mix.wav` (and from M2 a loudness-normalized `final.wav`), which the final encode muxes.
+- **Reason:** two-pass loudness needs the complete mix, and the video graph stays independent of audio changes.
+
+## 2026-11-12 — `cut` transitions
+- **Decision:** `{transition: {type: "cut"}}` has zero overlap whatever its duration. `audio: "cut"` on a visual transition hard-cuts the audio at the overlap midpoint with 10 ms micro-fades.
