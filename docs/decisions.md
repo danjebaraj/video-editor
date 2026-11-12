@@ -148,3 +148,14 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-12 — Dev profile without debug info
 - **Decision:** `[profile.dev] debug = 0`.
 - **Reason:** test binaries linking ffmpeg-heavy crates pushed `target/` to 29 GB and filled the disk.
+
+## 2026-11-12 — Explicit frame color properties (`setparams`)
+- **Decision:** segment and final graphs end with `setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv`.
+- **Reason:** with ffmpeg 9, frames leaving overlay/subtitle filters carry "unspecified" primaries/transfer, which override the `-color_*` output options. Pinned-ffmpeg renders then failed the color-tag QA check (caught by selftest under 9.0.2).
+
+## 2026-11-12 — Review pack composition in Rust
+- **Decision:** review images are composed with the `image` crate. Labels are drawn with the bundled Inter font via `ab_glyph`; frames are grabbed through ffmpeg PNG pipes with explicit BT.709 conversion. The pack uses an up-to-date final render when one exists (newer than the project file), otherwise the draft preview. It always produces `preview_540p.mp4` and `audio.png` from the draft's stems.
+- **Music-vs-voice suggestion:** compares integrated loudness of the music stem (plus the envelope duck amount) with the voice/dialogue stem, and flags it when music is less than 18 LU below the voice.
+
+## 2026-11-12 — Selftest goldens
+- **Decision:** `selftest --full` compares against the golden sets in the source tree (dev builds) or `CUTLINE_GOLDEN_DIR`. When neither exists it checks durations, safe zones and rendering only, and says so in the report.

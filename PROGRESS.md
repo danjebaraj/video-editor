@@ -11,7 +11,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 | M4 Text & graphics | ✅ done |
 | M5 Transcription/captions/edit assist | ✅ done (whisper WER test skips here; runs on macOS CI) |
 | M6 Auto-reframe | ✅ done |
-| M7 QA/review/selftest | ⏳ |
+| M7 QA/review/selftest | ✅ done |
 | M8 HTML/SVG/Lottie | ⏳ |
 | M9 Windows/packaging/docs | ⏳ |
 
@@ -119,6 +119,18 @@ Acceptance (`crates/cutline-render/tests/m6_reframe.rs`, `crates/cutline-reframe
 - Panned public-domain face fixture with the real YuNet detector: tracking error ≤ 8 % of width after 1 s, ≤ 2 direction changes/s, pan speed ≤ max; the face sits near the center of the rendered 9:16 frames. The same checks also pass with an injected mock detector (default build).
 - Mock-detector unit tests: dead zone, hold + drift-to-center, scene-cut reset, max speed, track selection.
 - `fit_blur` fallback with a warning when no faces are found.
+
+## M7 — QA, review pack, selftest
+Built:
+- All §7.2 checks run automatically after `render` (exit 1 on errors unless `--allow-qa-errors`), plus standalone `cutline qa <video> --target … [--project p]`.
+- `cutline review <project> [--out review/]`: `contact_sheet.jpg` (≤ 24 stamped tiles), `cuts/*.jpg` (before|after pairs, ≤ 8), `captions/*.jpg` (safe-zone overlay + caption box, ≤ 4), `reframe/*.jpg` (source frames with crop rectangles, ≤ 4), `audio.png`, `timeline.txt`, `qa.json`, `summary.md` (QA + suggestions: static stretches > 5 s, cps, safe zone, hook, black/freeze/silence, music vs voice ≤ −18 LU, progress bar on Shorts), `preview_540p.mp4`. Images are ≤ 1568 px, ≤ 20 in total.
+- `selftest --full` adds: every transition (frame count + goldens), every caption style and text template (goldens + safe zones), whisper WER (skips without whisper/TTS), reframe tracking (real detector; skips when not compiled), alpha correctness, loudness accuracy (±0.5 LU), A/V sync (beep+flash ≤ 1 frame), punch-in smoothness, and a performance benchmark (cold vs caption-only warm). Writes `selftest_report.json`.
+
+Acceptance:
+- Fault injection (`crates/cutline-qa/tests/m7_qa.rs`): wrong fps → geometry_fps error; loud audio → loudness error; 2 s black gap → black_frames (and none when intended); missing faststart → container error; captions outside the safe zone / too fast → warnings; missing hook → warning.
+- Review-pack size limits and image budget (same file).
+- `selftest --full`: here 12 pass, 1 skipped (whisper WER: no whisper-cli/TTS), with the onnx feature + model (reframe passes). Without `--features onnx`, reframe is skipped too. **macOS run: not done here**; CI runs `selftest --quick`.
+- Performance here (4-core x86 container, ffmpeg 6.1): the 5.75 s Shorts selftest project renders in ~28 s cold and ~12 s warm (caption-only change). Far from the Apple Silicon target; recorded in the report rather than tuned.
 
 ## Blockers
 - Building whisper.cpp from source was not permitted in this container, so real-speech transcription is untested here (see decisions); macOS CI covers it.

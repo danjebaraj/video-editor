@@ -20,7 +20,9 @@ pub fn run_selftest(mode: Mode, workdir: PathBuf) -> Report {
     r.run("testkit/frameid_roundtrip", check_frameid);
     r.run("probe/alpha", check_probe_alpha);
     r.run("pipeline/shorts_render", check_shorts_pipeline);
-    let _ = mode;
+    if mode == Mode::Full {
+        crate::suite_full::run_all(&mut r);
+    }
     r.finish(if mode == Mode::Quick { "quick" } else { "full" })
 }
 

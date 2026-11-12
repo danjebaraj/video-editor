@@ -557,7 +557,7 @@ pub fn jobs_for_display(a: &AudioPlan) -> Vec<Job> {
 /// Momentary loudness curve (t, LUFS) of a file via `ebur128` frame log.
 pub fn momentary(tc: &Toolchain, p: &Path) -> Result<Vec<(f64, f64)>> {
     let o = std::process::Command::new(&tc.ffmpeg)
-        .args(["-hide_banner", "-nostdin", "-nostats", "-i"])
+        .args(["-hide_banner", "-nostdin", "-nostats", "-loglevel", "verbose", "-i"])
         .arg(p)
         .args(["-vn", "-af", "ebur128=framelog=verbose", "-f", "null", "-"])
         .output()?;

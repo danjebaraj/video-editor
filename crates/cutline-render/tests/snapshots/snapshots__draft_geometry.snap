@@ -2,16 +2,16 @@
 source: crates/cutline-render/tests/snapshots.rs
 expression: s
 ---
-# segment x → /proj/.cutline/cache/segments/73772dc368d26d9c698c4dbe50f7361e.mov
-ffmpeg -hide_banner -nostdin -y -loglevel error -ss 0 -t 1.066667 -i /proj/a.mp4 -/filter_complex <work>/seg_000_x.filter -map '[vout]' -map '[aout]' -c:v prores_ks -profile:v 0 -vendor apl0 -pix_fmt yuv422p10le -bits_per_mb 8000 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a pcm_f32le -ar 48000 -ac 2 -map_metadata -1 -fflags +bitexact -flags:v +bitexact -flags:a +bitexact -frames:v 30 /proj/.cutline/cache/segments/73772dc368d26d9c698c4dbe50f7361e.tmp.mov
+# segment x → /proj/.cutline/cache/segments/fc9827483c5dde8a08e36df58c45d993.mov
+ffmpeg -hide_banner -nostdin -y -loglevel error -ss 0 -t 1.066667 -i /proj/a.mp4 -/filter_complex <work>/seg_000_x.filter -map '[vout]' -map '[aout]' -c:v prores_ks -profile:v 0 -vendor apl0 -pix_fmt yuv422p10le -bits_per_mb 8000 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a pcm_f32le -ar 48000 -ac 2 -map_metadata -1 -fflags +bitexact -flags:v +bitexact -flags:a +bitexact -frames:v 30 /proj/.cutline/cache/segments/fc9827483c5dde8a08e36df58c45d993.tmp.mov
 ## <work>/seg_000_x.filter
 [0:v]setpts=PTS-STARTPTS,fps=30[vn];
 [vn]scale=540:960:force_original_aspect_ratio=increase:force_divisible_by=2:flags=lanczos:in_color_matrix=bt709:in_range=limited:out_color_matrix=bt709:out_range=tv,crop=540:960,setsar=1[vg];
-[vg]tpad=stop_mode=clone:stop=30,trim=end_frame=30,setpts=PTS-STARTPTS,format=yuv422p10le[vout];
+[vg]tpad=stop_mode=clone:stop=30,trim=end_frame=30,setpts=PTS-STARTPTS,format=yuv422p10le,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
 [0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=flt:channel_layouts=stereo,apad=whole_len=48000,atrim=end_sample=48000,afade=t=in:d=0.01,afade=t=out:st=0.99:d=0.01[aout]
 
 # audio stems
-ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/73772dc368d26d9c698c4dbe50f7361e.mov -/filter_complex <work>/audio_stems.filter -map '[stem_dialogue]' -c:a pcm_f32le -ar 48000 <work>/stem_dialogue.wav
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/fc9827483c5dde8a08e36df58c45d993.mov -/filter_complex <work>/audio_stems.filter -map '[stem_dialogue]' -c:a pcm_f32le -ar 48000 <work>/stem_dialogue.wav
 ## <work>/audio_stems.filter
 [0:a]apad=whole_len=48000,atrim=end_sample=48000[dialogue];
 [dialogue]highpass=f=80:poles=2,afftdn=nr=10:nf=-50:tn=1,deesser=i=0.4:m=0.5:f=0.5:s=o,equalizer=f=4000:t=q:w=1.0:g=2,equalizer=f=320:t=q:w=1.2:g=-2,acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2,alimiter=limit=0.89:attack=5:release=50:level=disabled,atrim=end_sample=48000,aformat=sample_fmts=flt:channel_layouts=stereo[stem_dialogue]
@@ -28,7 +28,7 @@ ffmpeg -hide_banner -nostdin -nostats -i <work>/mix.wav -af loudnorm=I=-14:TP=-1
 ffmpeg -hide_banner -nostdin -y -i <work>/mix.wav -af 'loudnorm=I=-14:TP=-1:LRA=7:measured_I=<I>:measured_TP=<TP>:measured_LRA=<LRA>:measured_thresh=<thresh>:offset=<offset>:linear=true:print_format=json,aresample=48000' -c:a pcm_f32le <work>/final_audio.wav
 
 # final encode
-ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/73772dc368d26d9c698c4dbe50f7361e.mov -i <work>/final_audio.wav -/filter_complex <work>/final.filter -map '[vout]' -map 1:a -c:v libx264 -preset veryfast -crf 23 -profile:v high -level:v 4.2 -bf 2 -g 15 -x264-params keyint_min=1:scenecut=0 -pix_fmt yuv420p -r 30 -fps_mode cfr -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart -map_metadata -1 -frames:v 30 -t 1 /proj/out/d-draft.mp4
+ffmpeg -hide_banner -nostdin -y -loglevel error -i /proj/.cutline/cache/segments/fc9827483c5dde8a08e36df58c45d993.mov -i <work>/final_audio.wav -/filter_complex <work>/final.filter -map '[vout]' -map 1:a -c:v libx264 -preset veryfast -crf 23 -profile:v high -level:v 4.2 -bf 2 -g 15 -x264-params keyint_min=1:scenecut=0 -pix_fmt yuv420p -r 30 -fps_mode cfr -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv -c:a aac -b:a 320k -ar 48000 -ac 2 -movflags +faststart -map_metadata -1 -frames:v 30 -t 1 /proj/out/d-draft.mp4
 ## <work>/final.filter
 [0:v]settb=AVTB,setpts=PTS-STARTPTS[s0];
-[s0]format=yuv420p[vout]
+[s0]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]

@@ -195,7 +195,8 @@ pub fn still(tc: &Toolchain, out: &Path, w: u32, h: u32, color: &str) -> Result<
 /// Beep+flash pairs for A/V sync: white frame and a 1 kHz beep at each time in `at`.
 pub fn beep_flash(tc: &Toolchain, out: &Path, w: u32, h: u32, fps: u32, dur: f64, at: &[f64]) -> Result<()> {
     let fd = 1.0 / fps as f64;
-    let on: Vec<String> = at.iter().map(|t| format!("between(t,{t},{})", t + fd * 0.999)).collect();
+    // geq's time variable is `T`; aevalsrc's is `t`
+    let on: Vec<String> = at.iter().map(|t| format!("between(T,{t},{})", t + fd * 0.999)).collect();
     let on_a: Vec<String> = at.iter().map(|t| format!("between(t,{t},{})", t + 0.05)).collect();
     let mut c = tc.ffmpeg_cmd();
     c.args([

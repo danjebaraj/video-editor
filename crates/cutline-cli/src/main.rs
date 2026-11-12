@@ -116,6 +116,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: TemplatesCmd,
     },
+    /// Review pack: contact sheet, cuts, captions, reframe, audio.png, timeline, QA, summary.
+    Review {
+        project: PathBuf,
+        #[arg(long, default_value = "review")]
+        out: PathBuf,
+    },
     /// Run QA on any video file.
     Qa {
         video: PathBuf,
@@ -262,6 +268,7 @@ fn dispatch(cli: Cli) -> CmdResult {
             edit::preview(&project, &at, range.as_deref(), safe_zones, out)
         }
         Cmd::Templates { cmd: TemplatesCmd::List } => templates_list(),
+        Cmd::Review { project, out } => edit::review(&project, &out),
         Cmd::Qa { video, target, project } => edit::qa(&video, &target, project.as_deref()),
         Cmd::Selftest { quick: _, full, keep, out } => selftest(full, keep, out),
         Cmd::Probe { files, loudness } => {

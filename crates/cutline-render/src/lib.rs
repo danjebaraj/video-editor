@@ -346,6 +346,8 @@ fn hw_encoder_works(tc: &Toolchain, enc: &str) -> bool {
             "null",
             "-",
         ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -377,7 +379,11 @@ fn final_job(
     j.args(ov.input_args.clone());
     j.args(["-i".to_string(), wav.to_string_lossy().to_string()]);
     let audio_idx = next_input;
-    lines.push(format!("[{cur}]format=yuv420p[vout]"));
+    // stamp color properties on the frames: newer ffmpeg lets (unspecified) frame properties
+    // override the -color_* output options after overlays
+    lines.push(format!(
+        "[{cur}]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]"
+    ));
     let script = work.join("final.filter");
     let text = lines.join(";\n") + "\n";
     j.args(tc.filter_complex_file_args(&script));

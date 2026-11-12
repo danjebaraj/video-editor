@@ -197,6 +197,7 @@ pub fn build(
     tail.push(format!("trim=end_frame={frames}"));
     tail.push("setpts=PTS-STARTPTS".into());
     tail.push("format=yuv422p10le".into());
+    tail.push("setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv".into());
     v.push(format!("[{vlab}]{}[vout]", tail.join(",")));
 
     // ---------------- audio (dialogue)
