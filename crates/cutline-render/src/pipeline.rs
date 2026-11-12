@@ -126,6 +126,7 @@ pub fn prepare(l: &Loaded, export_name: Option<String>, e: &Export, draft: bool)
     }
     let tl = tl.context("timeline did not resolve")?;
     let extras = crate::extras::compute(l, &p, &tl, draft)?;
+    diags.extend(extras.warnings.clone());
     Ok(Prepared { export_name, project: p, timeline: tl, diags, extras })
 }
 

@@ -10,7 +10,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 | M3 Motion/transitions/overlays/color | ✅ done |
 | M4 Text & graphics | ✅ done |
 | M5 Transcription/captions/edit assist | ✅ done (whisper WER test skips here; runs on macOS CI) |
-| M6 Auto-reframe | ⏳ |
+| M6 Auto-reframe | ✅ done |
 | M7 QA/review/selftest | ⏳ |
 | M8 HTML/SVG/Lottie | ⏳ |
 | M9 Windows/packaging/docs | ⏳ |
@@ -108,6 +108,17 @@ Acceptance:
 - Jump cuts at the expected points (±1 frame) on a synthetic file with known gaps, with no silence > `min_silence` in the rendered output.
 - Filler removal on a fixture transcript (cuts land between neighbours; SRT drops the fillers).
 - Scribe import: hand-made fixture in the documented shape plus a variant-tolerance test.
+
+## M6 — Auto-reframe
+Built:
+- `cutline-reframe`: `Detector` trait + `FnDetector` mock + injectable factory; YuNet 2023mar on ONNX Runtime (`onnx` feature: letterboxed BGR input, anchor-free decode, NMS); analysis by ffmpeg raw-video pipe at 6 fps / 640 px; `scdet` scene cuts; tracks, subject selection (`most_persistent`, `largest`, `left`, `right`, `index`); smoothing with dead zone, critically damped spring, max pan speed, hold + drift-to-center, scene-cut reset; bias (default keeps the face at 38 % height); per-frame crop path → `sendcmd`; manual keyframes (x, y, zoom with eased interpolation); split layout (explicit regions or the two most persistent faces).
+- Render integration: cached analysis (`.cutline/cache/reframe`), geometry override per clip, `fit_blur` fallback (configurable via `reframe.fallback`) with a `W_REFRAME_NO_FACES` warning in the render report. Crop paths are kept for the review pack (M7).
+- `doctor` reports detector status; `deps install face-model` (OpenCV Zoo, sha recorded).
+
+Acceptance (`crates/cutline-render/tests/m6_reframe.rs`, `crates/cutline-reframe`):
+- Panned public-domain face fixture with the real YuNet detector: tracking error ≤ 8 % of width after 1 s, ≤ 2 direction changes/s, pan speed ≤ max; the face sits near the center of the rendered 9:16 frames. The same checks also pass with an injected mock detector (default build).
+- Mock-detector unit tests: dead zone, hold + drift-to-center, scene-cut reset, max speed, track selection.
+- `fit_blur` fallback with a warning when no faces are found.
 
 ## Blockers
 - Building whisper.cpp from source was not permitted in this container, so real-speech transcription is untested here (see decisions); macOS CI covers it.

@@ -23,7 +23,7 @@ pub fn lut_path(name: &str, l: &Loaded) -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
-pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, _draft: bool) -> Result<PlanExtras> {
+pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<PlanExtras> {
     let brand = load_brand(l, p)?;
     let pad = crate::overlay::ff_color(&brand.colors.background);
     let mut extras = PlanExtras {
@@ -55,6 +55,11 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, _draft: bool) -> Result<P
             .or_else(|| c.clip.color.as_ref().and(brand.lut.clone()));
         if let Some(name) = lut {
             x.lut_path = lut_path(&name, l);
+        }
+        let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
+        let g = if draft { full.draft() } else { full };
+        if let Some(path) = crate::reframe::apply(l, p, tl, &g, c, &mut x, &mut extras.warnings)? {
+            extras.crop_paths.insert(c.id.clone(), path);
         }
         extras.clip.insert(c.id.clone(), x);
     }

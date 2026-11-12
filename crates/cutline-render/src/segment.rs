@@ -35,6 +35,8 @@ pub struct SegmentSpec {
 pub struct ClipExtras {
     /// Geometry chain replacing the default (e.g. track_face crop via sendcmd).
     pub geometry_override: Option<String>,
+    /// Geometry mode replacing the clip's (e.g. fit_blur fallback when no faces are found).
+    pub mode_override: Option<ReframeMode>,
     pub deps: Vec<PathBuf>,
     /// Resolved LUT file path, if any.
     pub lut_path: Option<PathBuf>,
@@ -158,7 +160,7 @@ pub fn build(
         input.extend(["-ss", &f(seek), "-t", &f(len), "-i", &path].map(String::from));
     }
     let has_audio = m.facts.has_audio && !is_still && c.kind != AssetKind::ImageSequence;
-    let mode = c.clip.reframe.as_ref().map(|r| r.mode).unwrap_or(default_mode);
+    let mode = extras.mode_override.unwrap_or_else(|| c.clip.reframe.as_ref().map(|r| r.mode).unwrap_or(default_mode));
 
     // ---------------- video
     let mut v = vec![];

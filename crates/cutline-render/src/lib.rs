@@ -10,6 +10,7 @@ pub mod extras;
 pub mod job;
 pub mod overlay;
 pub mod pipeline;
+pub mod reframe;
 pub mod segment;
 pub mod transitions;
 
@@ -221,6 +222,10 @@ pub struct PlanExtras {
     pub text_boxes: Vec<TextBox>,
     /// SRT captions in timeline time.
     pub srt: String,
+    /// Non-fatal findings from extras (e.g. W_REFRAME_NO_FACES).
+    pub warnings: Vec<cutline_core::Diagnostic>,
+    /// Reframe crop paths per clip id (for the review pack).
+    pub crop_paths: std::collections::BTreeMap<String, cutline_reframe::CropPath>,
 }
 
 /// Template image overlay (full-target pixel coordinates).
@@ -506,4 +511,9 @@ pub fn dry_run_text(tc: &Toolchain, plan: &Plan) -> String {
 /// Map target name to its string for file names.
 pub fn target_label(t: TargetName) -> &'static str {
     target_str(t)
+}
+
+/// Face detector availability (`yunet`, `model missing`, `not compiled …`).
+pub fn reframe_detector_status() -> &'static str {
+    cutline_reframe::detector_status()
 }

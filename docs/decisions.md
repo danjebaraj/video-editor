@@ -136,3 +136,15 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 
 ## 2026-11-12 — Auto-directive expansion
 - **Decision:** `jump_cuts` intersects silencedetect spans with transcript gaps (silencedetect alone when there is no transcript), keeps `keep_padding` inside each silence, and splits the clip. The first piece keeps the original id (so anchors survive); later pieces are `<id>~N`. Every generated item carries `generated_by`. Fillers are cut between neighbouring words with 30 ms margins. Punch-ins are placed every `every` seconds of timeline, one per clip, alternating `scale[0]`/`scale[1]`, skipping clips with other motion. `sfx_on_transitions` fills transitions that have no `sfx`. The expanded project has `auto` removed and is what `expand` prints and what renders use.
+
+## 2026-11-12 — Face detection: YuNet via `ort`, behind the `onnx` feature
+- **Decision:** `cutline-reframe/onnx` (forwarded as `onnx` by the render, qa and cli crates) compiles the YuNet 2023mar detector on ONNX Runtime (`ort` 2.0.0-rc.15; prebuilt runtime downloaded at build time). There is one process-wide ORT environment. Default builds have no detector: `track_face` then falls back to `fit_blur` with `W_REFRAME_NO_FACES`. CI and release builds enable `onnx`.
+- **Reason:** the user chose optional features for heavy native dependencies. The feature is built and tested in this environment, including on the NASA public-domain face fixture.
+
+## 2026-11-12 — Crop path via sendcmd
+- **Decision:** the camera path is computed in Rust from 6 fps / 640 px analysis: greedy IoU-free nearest-center tracks, subject selection, dead zone with hysteresis, critically damped spring (ω = 6), max pan speed, hold then drift to center after 1.5 s lost, snap at `scdet` scene cuts. It is emitted as a `sendcmd` script driving `crop@rf` (x/y, and w/h for manual zoom keys), then scaled to the target. Crops use even pixel positions.
+- **Reason:** deterministic, debuggable (the `.cmd` file is a readable cache artifact) and testable without ffmpeg.
+
+## 2026-11-12 — Dev profile without debug info
+- **Decision:** `[profile.dev] debug = 0`.
+- **Reason:** test binaries linking ffmpeg-heavy crates pushed `target/` to 29 GB and filled the disk.

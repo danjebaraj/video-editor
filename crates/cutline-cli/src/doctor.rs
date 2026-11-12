@@ -97,8 +97,12 @@ pub fn run() -> CmdResult {
         lines.push(format!("✔ whisper models: {}", whisper.join(", ")));
     }
     let face = models.join("face_detection_yunet_2023mar.onnx").exists();
+    let det = cutline_reframe_status();
     if !face {
-        lines.push("· face model not installed (reframe falls back to center/fit_blur)".into());
+        lines.push("· face model not installed (track_face falls back to fit_blur)".into());
+        fixes.push("cutline deps install face-model".into());
+    } else {
+        lines.push(format!("✔ face model installed; detector: {det}"));
     }
 
     let free = fs2::available_space(paths::data_dir().parent().unwrap_or(std::path::Path::new("."))).ok();
@@ -131,6 +135,7 @@ pub fn run() -> CmdResult {
         "whisper_models": whisper,
         "whisper_cli": whisper_cli,
         "face_model": face,
+        "face_detector": det,
         "tools_dir": paths::tools_dir(),
         "cache_dir": paths::cache_dir(),
         "disk_free_bytes": free,
@@ -149,4 +154,8 @@ fn which_any(names: &[&str]) -> Option<std::path::PathBuf> {
 fn which_path(n: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path).map(|d| d.join(paths::exe_name(n))).find(|p| p.is_file())
+}
+
+fn cutline_reframe_status() -> &'static str {
+    cutline_render::reframe_detector_status()
 }
