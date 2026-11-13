@@ -17,6 +17,8 @@ fn diags(r: Result<pipeline::Loaded, LoadError>) -> Vec<(String, String)> {
 fn tapes_record_once_and_report_failures() {
     let Some(_) = test_toolchain() else { return };
     let Some(vhs) = cutline_render::terminal::vhs_binary() else {
+        // CI installs vhs and sets CUTLINE_REQUIRE_VHS so this cannot silently skip there
+        assert!(std::env::var_os("CUTLINE_REQUIRE_VHS").is_none(), "CUTLINE_REQUIRE_VHS is set but vhs was not found");
         eprintln!("SKIP: vhs not found (set CUTLINE_VHS)");
         return;
     };

@@ -36,6 +36,22 @@ jobs:
           cargo run -q -p cutline-cli -- deps install whisper-model base.en
       - name: Face model (reframe tests with the onnx feature)
         run: cargo run -q -p cutline-cli -- deps install face-model
+      # vhs + ttyd for the `.tape` asset test; CUTLINE_REQUIRE_VHS makes that test fail
+      # instead of skipping if vhs is missing
+      - name: vhs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install vhs
+          echo "CUTLINE_REQUIRE_VHS=1" >> "$GITHUB_ENV"
+      - name: vhs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /etc/apt/keyrings
+          curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
+          sudo apt-get update
+          sudo apt-get install -y vhs ttyd
+          echo "CUTLINE_REQUIRE_VHS=1" >> "$GITHUB_ENV"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
