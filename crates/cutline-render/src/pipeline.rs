@@ -70,7 +70,12 @@ pub fn parse_file_with_cues(
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
     let mut v = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let dir = path.parent().unwrap_or(Path::new("."));
-    let (notes, cues) = crate::cues::resolve(&mut v, dir);
+    let beat_notes = crate::beatrefs::resolve(&mut v, dir);
+    if has_errors(&beat_notes) {
+        return Err(LoadError::Invalid(beat_notes));
+    }
+    let (mut notes, cues) = crate::cues::resolve(&mut v, dir);
+    notes.extend(beat_notes);
     if has_errors(&notes) {
         return Err(LoadError::Invalid(notes));
     }
@@ -94,8 +99,13 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
     let text = std::fs::read_to_string(&path)
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
-    let v0 = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
+    let mut v0 = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let tc = cutline_deps::toolchain().map_err(LoadError::Tool)?;
+    // `bar:`/`beat:` times become seconds first (they depend only on the music layer)
+    let beat_notes = crate::beatrefs::resolve(&mut v0, &dir);
+    if has_errors(&beat_notes) {
+        return Err(LoadError::Invalid(beat_notes));
+    }
     let mut starts: std::collections::BTreeMap<usize, f64> = Default::default();
     let mut tapes: Option<std::collections::BTreeMap<String, String>> = None;
     let mut media: Option<ProjectMedia> = None;
@@ -148,6 +158,7 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
             || next.iter().all(|(k, v)| starts.get(k).is_some_and(|s| (s - v).abs() < 1e-6));
         if anchored.is_empty() || settled {
             diags.extend(notes);
+            diags.extend(beat_notes);
             return Ok(Loaded { path, dir, project, media: media.unwrap(), diags, timeline, cues });
         }
         last_anchor = anchored.first().map(|a| a.layer);

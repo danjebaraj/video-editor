@@ -45,6 +45,11 @@ pub fn parse_time(s: &str) -> Result<TimeValue, String> {
             "time `{s}` is a cue reference, which cutline resolves when it loads a project file (from the voice-over transcript); cue references are allowed in layer start/end, sfx at, clip end_at and marker at"
         ));
     }
+    if t.starts_with("bar:") || t.starts_with("beat:") {
+        return Err(format!(
+            "time `{s}` is a beat reference, which cutline resolves when it loads a project file (from the music layer); beat references are allowed in layer start/end, sfx at, clip end_at and marker at"
+        ));
+    }
     if let Some(f) = t.strip_prefix("f:") {
         return f.trim().parse::<i64>().map(TimeValue::Frames).map_err(|_| format!("invalid frame count `{s}`"));
     }

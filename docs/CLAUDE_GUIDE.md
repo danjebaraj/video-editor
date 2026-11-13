@@ -71,7 +71,18 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - Set `profile: "screencast"` (sharper text encoding; no QA warnings for paused screens). Add
   `chroma: "444"` for downloads/docs where colored text must not fringe.
 - Point at UI with `{type: "zoom_to", rect: {x, y, w, h}, start, end}` instead of working out
-  zoom scales and focus points.
+  zoom scales and focus points. Zooms are sub-pixel smooth and use the recording's full
+  resolution, so do not pre-crop or pre-scale footage outside cutline.
+- **Keep recordings at 1×.** `end_at` trims a clip to its slot; it never changes the speed. If
+  `W_FIT_HOLD` says a clip runs out of footage, give it more footage (earlier `in`, later
+  `out`), cut sooner, or accept the held last frame when the screen is still anyway. Use
+  `speed`/`fit: "speed"` only for a deliberate fast-forward or slow-down.
+- **Cut between app shots; do not dissolve.** A dissolve between two screens shows both
+  screens' text at once (`W_SCREEN_DISSOLVES`). Put plain cuts between recordings (no
+  `transition` item), and keep a `fade` for the title card and the end card. When a change of
+  place needs marking, use one moving transition (`slideleft`, `zoomin`, `whip_left`), not many.
+- Let each shot settle: the action a line of narration describes should start a beat after the
+  cut, and the result should stay on screen about a second before the next cut.
 
 ### Hide private details
 
@@ -89,8 +100,9 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - Name the beats under `cues` (`{clocks: "World clocks"}`) and use `"cue:clocks"` in timeline
   times: clip `end_at` (the cut lands on the cue), layer `start`/`end`, sfx `at`, marker `at`.
   Offsets: `"cue:clocks+0.3"`.
-- `end_at` fits each clip: give `in`+`out` to let cutline pick the speed, or only `in` to trim.
-  No hand arithmetic for clip lengths, speeds or transition overlaps.
+- `end_at` fits each clip by trimming at normal speed: give `in` (and `out` as a limit). No
+  hand arithmetic for clip lengths or transition overlaps. `W_FIT_HOLD` means the footage ended
+  before the cut and the last frame is held.
 - Set the VO asset's `script` to the text you generated it from: captions then show your exact
   wording (names, capitals, punctuation) instead of recogniser slips, and cue phrases copied
   from the script match exactly. Audio tags like `[warm]` are ignored.
@@ -99,8 +111,19 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ## Audio
 
-- Cut on the beat: `auto: {snap_to_beats: {}}` nudges cuts (by at most `max_shift`, 0.15 s) onto
-  the music's beats; `cutline beats project.json5` shows the tempo.
+- **Cut on the music.** `cutline beats project.json5` lists the bars and beats on the timeline.
+  Never work out beat times by hand:
+  - Narration-led edit: time cuts with `end_at: "cue:…"` and add `auto: {snap_to_beats: {}}`.
+    Each cut moves to the first beat of a bar when one is within 0.35 s (`downbeat_reach`),
+    otherwise to the nearest beat within 0.15 s (`max_shift`). `cutline expand` lists the moves.
+  - Music-led edit (montage, title sequence): write `end_at: "bar:5"` (or `"bar:5.3"`,
+    `"beat:17"`).
+  - Bar starts carry the weight: put section changes and the title/end card on a bar; use
+    in-between beats for quick cuts inside a section.
+  - A beat reads as a cut only when the picture changes at once: use plain cuts on beats. A
+    dissolve centred on a beat feels late and soft.
+  - The music layer needs a numeric `start` for `bar:`/`beat:` times (use `src_in` to choose
+    where the track begins); `align: "end"` cannot be combined with them.
 - Music under narration: set `audio.music_level: 18` instead of guessing `gain_db`, and put
   `align: "end"` (with a `fade_in`) on the music layer so the track's real ending closes the
   video rather than a fade-out mid-phrase.

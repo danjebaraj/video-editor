@@ -3,6 +3,7 @@
 use crate::escape::f;
 use crate::transitions;
 use crate::Geometry;
+use cutline_core::model::Ease;
 use cutline_core::timeline::Timeline;
 
 /// Video graph joining `[i:v]` segment inputs. Returns (graph lines, output label).
@@ -27,7 +28,37 @@ pub fn join_video(tl: &Timeline, g: &Geometry) -> (Vec<String>, String) {
                 let base = flush(&mut run, &mut lines, &mut fresh, cur.take());
                 let out = fresh("x");
                 let offset = g.fps.frames_to_secs(len_frames - t.frames);
-                lines.push(transitions::pair(&base, &inp, &t.transition, t.frames, offset, g, &out));
+                let ease =
+                    t.transition.ease.unwrap_or_else(|| cutline_core::catalog::default_transition_ease(&t.transition.kind));
+                if ease == Ease::Linear {
+                    lines.push(transitions::pair(&base, &inp, &t.transition, t.frames, offset, g, &out));
+                } else {
+                    // xfade pairs frames by count and takes its progress from the first
+                    // input's timestamps. Bending those timestamps inside the overlap eases
+                    // every transition kind at no cost; the frames themselves are untouched,
+                    // and the timestamps are made regular again right after.
+                    let d = g.fps.frames_to_secs(t.frames);
+                    let u = format!("clip((T-{})/{},0,1)", f(offset), f(d));
+                    let warped = fresh("w");
+                    lines.push(format!(
+                        "{base}setpts='if(between(T,{o},{e}),({o}+{d}*{ez})/TB,PTS)'[{warped}]",
+                        o = f(offset),
+                        e = f(offset + d - 0.5 / g.fps.as_f64()),
+                        d = f(d),
+                        ez = crate::effects::ease_expr(ease, &u),
+                    ));
+                    let raw = fresh("x");
+                    lines.push(transitions::pair(
+                        &format!("[{warped}]"),
+                        &inp,
+                        &t.transition,
+                        t.frames,
+                        offset,
+                        g,
+                        &raw,
+                    ));
+                    lines.push(format!("[{raw}]setpts=N/({})/TB[{out}]", g.fps.ff()));
+                }
                 cur = Some(format!("[{out}]"));
                 len_frames += c.frames - t.frames;
             }

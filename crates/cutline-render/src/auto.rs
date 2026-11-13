@@ -501,20 +501,26 @@ pub fn beats_for(l: &Loaded, asset: &str) -> Result<Option<cutline_audio::beats:
     if !m.facts.has_audio {
         return Ok(None);
     }
+    beats_of(&m.path, &m.fingerprint)
+}
+
+/// Tempo and beats of an audio file (source seconds), cached by content fingerprint.
+pub fn beats_of(path: &std::path::Path, fingerprint: &str) -> Result<Option<cutline_audio::beats::Beats>> {
     let cache = Cache::global("beats");
-    let key = cutline_media::hash_key(&[m.fingerprint.as_bytes(), b"beats-v1"]);
+    let key = cutline_media::hash_key(&[fingerprint.as_bytes(), b"beats-v4"]);
     if let Some(b) = cache.get_json::<Option<cutline_audio::beats::Beats>>(&key) {
         return Ok(b);
     }
     let tc = cutline_deps::toolchain()?;
-    let samples = cutline_audio::wav::decode_mono(tc, &m.path, cutline_audio::beats::RATE)?;
+    let samples = cutline_audio::wav::decode_mono(tc, path, cutline_audio::beats::RATE)?;
     let b = cutline_audio::beats::detect(&samples);
     cache.put_json(&key, &b)?;
     Ok(b)
 }
 
-/// `auto.snap_to_beats`: move each cut (in order, so later cuts see earlier moves) to the
-/// nearest beat of the music within `max_shift`, by fitting the outgoing clip with `end_at`.
+/// `auto.snap_to_beats`: move each cut (in order, so later cuts see earlier moves) onto the
+/// music, by fitting the outgoing clip with `end_at`: to the first beat of a bar within
+/// `downbeat_reach` when the bars are clear, else to the nearest beat within `max_shift`.
 fn snap_to_beats(
     l: &Loaded,
     q: &mut Project,
@@ -566,6 +572,14 @@ fn snap_to_beats(
     let (ls, le) = (tl.secs(ml.start), tl.secs(ml.end));
     let grid: Vec<f64> =
         beats.times.iter().map(|b| ls + b - src_in).filter(|t| *t >= ls - 1e-9 && *t <= le + 1e-9).collect();
+    let bars: Vec<f64> = if beats.bar_confidence >= cutline_audio::beats::BAR_CONFIDENT && sb.downbeat_reach > 0.0 {
+        beats.downbeats.iter().map(|b| ls + b - src_in).filter(|t| *t >= ls - 1e-9 && *t <= le + 1e-9).collect()
+    } else {
+        vec![]
+    };
+    let nearest = |v: &[f64], cut: f64| -> Option<f64> {
+        v.iter().cloned().min_by(|a, b| (a - cut).abs().partial_cmp(&(b - cut).abs()).unwrap())
+    };
     let half_frame = 0.5 / tl.fps.as_f64();
     let n = tl.clips.len();
     let (mut moved, mut kept) = (0, 0);
@@ -576,32 +590,56 @@ fn snap_to_beats(
             Some(t) if t.frames > 0 => cur.secs(t.start) + cur.secs(t.frames) / 2.0,
             _ => cur.secs(c.end()),
         };
-        let Some(&beat) = grid.iter().min_by(|a, b| (*a - cut).abs().partial_cmp(&(*b - cut).abs()).unwrap()) else {
+        let Some(near) = nearest(&grid, cut) else {
             break;
         };
-        let shift = beat - cut;
-        if shift.abs() <= half_frame || shift.abs() > sb.max_shift || !c.clip.speed_ramp.is_empty() {
-            kept += 1;
+        // candidates in order of preference: the bar start within reach, then the nearest beat
+        let mut cands: Vec<(f64, bool)> = vec![];
+        if let Some(b) = nearest(&bars, cut).filter(|b| (b - cut).abs() <= sb.downbeat_reach) {
+            cands.push((b, true));
+        }
+        if (near - cut).abs() <= sb.max_shift && !cands.iter().any(|(b, _)| (b - near).abs() < 1e-9) {
+            cands.push((near, false));
+        }
+        if cands.first().is_some_and(|(b, _)| (b - cut).abs() <= half_frame) || !c.clip.speed_ramp.is_empty() {
+            kept += 1; // already there, or the clip's length is not ours to change
             continue;
         }
         let mi = c.main_index;
-        let before = q.main[mi].clone();
-        if let MainItem::Clip(cl) = &mut q.main[mi] {
-            cl.duration = None;
-            cl.end_at = Some(TimeValue::Seconds(round6(beat)));
+        let id = c.id.clone();
+        let mut done = false;
+        for (beat, on_bar) in cands {
+            let shift = beat - cut;
+            if shift.abs() <= half_frame {
+                break;
+            }
+            let before = q.main[mi].clone();
+            if let MainItem::Clip(cl) = &mut q.main[mi] {
+                cl.duration = None;
+                cl.end_at = Some(TimeValue::Seconds(round6(beat)));
+            }
+            let (ok_tl, d) = resolve(q, &l.media, &ctx);
+            // a move that leaves the clip holding its last frame is not worth the beat
+            let holds = d.iter().any(|x| x.code == "W_FIT_HOLD" && x.path == format!("/main/{mi}/end_at"));
+            if ok_tl.is_none() || cutline_core::diag::has_errors(&d) || holds {
+                q.main[mi] = before; // the clip cannot stretch that far (e.g. not enough footage)
+                continue;
+            }
+            moved += 1;
+            done = true;
+            notes.push(Diagnostic::warning(
+                "I_BEAT_SNAP",
+                format!("/main/{mi}"),
+                format!(
+                    "cut after `{id}` moved {shift:+.3}s onto the {} at {beat:.3}s",
+                    if on_bar { "bar start" } else { "beat" }
+                ),
+            ));
+            break;
         }
-        let (ok_tl, d) = resolve(q, &l.media, &ctx);
-        if ok_tl.is_none() || cutline_core::diag::has_errors(&d) {
-            q.main[mi] = before; // the clip cannot stretch that far (e.g. not enough footage)
+        if !done {
             kept += 1;
-            continue;
         }
-        moved += 1;
-        notes.push(Diagnostic::warning(
-            "I_BEAT_SNAP",
-            format!("/main/{mi}"),
-            format!("cut after `{}` moved {shift:+.3}s onto the beat at {beat:.3}s", c.id),
-        ));
     }
     notes.push(Diagnostic::warning(
         "I_BEAT_SNAP",

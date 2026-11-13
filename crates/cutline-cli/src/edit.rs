@@ -581,16 +581,38 @@ pub fn beats(path: &Path, asset: Option<&str>) -> CmdResult {
             .ok_or_else(|| CliError::usage(anyhow::anyhow!("no music audio layer; pass --asset")))?,
     };
     let b = cutline_render::auto::beats_for(&l, &id).map_err(CliError::tool)?;
+    // the same beats on the timeline (what `bar:N` / `beat:N` and snap_to_beats use)
+    let raw = std::fs::read_to_string(&l.path).ok().and_then(|t| cutline_core::parse::parse_json5(&t).ok());
+    let grid = raw.as_ref().and_then(|v| cutline_render::beatrefs::grid(v, &l.dir).ok()).filter(|g| g.asset == id);
+    let list = |v: &[f64], n: usize| v.iter().take(n).map(|t| format!("{t:.3}")).collect::<Vec<_>>().join(" ");
     let h = match &b {
-        Some(b) => format!(
-            "{id}: {:.1} BPM, {} beats\nfirst beats (s): {}",
-            b.bpm,
-            b.times.len(),
-            b.times.iter().take(12).map(|t| format!("{t:.3}")).collect::<Vec<_>>().join(" ")
-        ),
+        Some(b) => {
+            let clear = b.bar_confidence >= cutline_render::beatrefs::BAR_CONFIDENT;
+            let mut h = vec![format!(
+                "{id}: {:.2} BPM{}, {} beats, {} bars (bar starts {}, confidence {:.2})",
+                b.bpm,
+                if b.steady { " (steady: exact grid)" } else { " (tempo moves: tracked beats)" },
+                b.times.len(),
+                b.downbeats.len(),
+                if clear { "clear" } else { "uncertain" },
+                b.bar_confidence
+            )];
+            match &grid {
+                Some(g) => {
+                    h.push(format!("timeline bars 1–{} (s): {}", g.bars.len().min(16), list(&g.bars, 16)));
+                    h.push(format!("timeline beats 1–{} (s): {}", g.beats.len().min(16), list(&g.beats, 16)));
+                    h.push("use `end_at: \"bar:5\"`, `\"bar:5.3\"` (third beat of bar 5) or `\"beat:17\"`; `auto: {snap_to_beats: {}}` moves cuts onto them".into());
+                }
+                None => {
+                    h.push(format!("source bars (s): {}", list(&b.downbeats, 16)));
+                    h.push(format!("source beats (s): {}", list(&b.times, 16)));
+                }
+            }
+            h.join("\n")
+        }
         None => format!("{id}: no steady beat found"),
     };
-    Ok(Output::ok(json!({"asset": id, "beats": b}), h))
+    Ok(Output::ok(json!({"asset": id, "beats": b, "timeline": grid}), h))
 }
 
 pub fn record(path: &Path, asset: Option<&str>) -> CmdResult {

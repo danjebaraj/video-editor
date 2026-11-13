@@ -114,9 +114,15 @@ fn tracks_panned_face_with_mock_detector() {
     cutline_reframe::set_detector_factory(None);
     let path = pr.extras.crop_paths.get("c").expect("crop path").clone();
     check_path(&path, 0.5);
-    // renders, and the segment uses the sendcmd crop
+    // the pan moves in fractions of a source pixel: during the steady part of the move the
+    // window advances by nearly the same amount every frame (whole-pixel crops alternate steps)
+    let steps: Vec<f64> = (100..200).map(|i| path.x[i + 1] - path.x[i]).collect();
+    let mean = steps.iter().sum::<f64>() / steps.len() as f64;
+    assert!(mean > 1.0, "the window pans ({mean:.2} px/frame)");
+    assert!(steps.iter().all(|s| (s - mean).abs() < 0.25), "uneven pan steps: {steps:.2?}");
+    // renders, and the segment resamples the moving window sub-pixel
     let (plan, _) = pipeline::render(&l, &pr, &RenderOptions::default()).unwrap();
-    assert!(plan.segments[0].spec.filter.contains("crop@rf"), "{}", plan.segments[0].spec.filter);
+    assert!(plan.segments[0].spec.filter.contains("perspective="), "{}", plan.segments[0].spec.filter);
     assert!(plan.output.exists());
 }
 

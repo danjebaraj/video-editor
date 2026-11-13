@@ -276,6 +276,16 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         "transition duration must be 0–5 s",
                     ));
                 }
+                if matches!(t.ease, Some(Ease::Back) | Some(Ease::Spring)) {
+                    d.push(
+                        Diagnostic::error(
+                            "E_BAD_VALUE",
+                            format!("{base}/transition/ease"),
+                            "a transition cannot use `back` or `spring` (its progress must not run backwards)",
+                        )
+                        .hint("use in_out_cubic, in_out_quad, out_cubic, out_expo or linear"),
+                    );
+                }
                 if clips.is_empty() || pending_trans.is_some() {
                     d.push(Diagnostic::error(
                         "E_TRANSITION_POSITION",
@@ -405,7 +415,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         Some(content)
                     }
                 };
-                let (src_in, src_out, tl_secs);
+                let (src_in, mut src_out, tl_secs);
                 if is_visual_still(kind) {
                     let dur = match fit_frames {
                         Some(ff) => fps.frames_to_secs(ff),
@@ -416,13 +426,43 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     tl_secs = dur;
                 } else {
                     src_in = c.in_.map(|t| t.seconds(src_fps, media_dur)).unwrap_or(0.0);
+                    let fit_speed = c.fit == Some(EndFit::Speed);
                     src_out = match (c.out, c.duration, fit_frames) {
+                        (Some(o), _, Some(ff)) if !fit_speed => {
+                            // trim to the slot; `out` only limits how far the footage may run
+                            let o = o.seconds(src_fps, media_dur);
+                            let want = src_in + fps.frames_to_secs(ff) * speed;
+                            let hold = (want - o) / speed;
+                            if hold > 1.5 / fps.as_f64() {
+                                d.push(
+                                    Diagnostic::warning(
+                                        "W_FIT_HOLD",
+                                        format!("{base}/end_at"),
+                                        format!(
+                                            "clip `{}` runs out of footage {hold:.2}s before its cut; the last frame is held",
+                                            c.id
+                                        ),
+                                    )
+                                    .hint("move `out` later or `in` earlier, cut sooner, or set `fit: \"speed\"` to slow the clip down instead"),
+                                );
+                            }
+                            want.min(o)
+                        }
                         (Some(o), _, _) => o.seconds(src_fps, media_dur),
                         (None, _, Some(ff)) => src_in + fps.frames_to_secs(ff) * speed,
                         (None, Some(dd), None) => src_in + dd.seconds(src_fps, media_dur) * speed,
                         (None, None, None) => media_dur,
                     };
-                    if let (Some(ff), Some(_)) = (fit_frames, c.out) {
+                    if c.fit.is_some() && (fit_frames.is_none() || c.out.is_none()) {
+                        d.push(
+                            Diagnostic::warning(
+                                "W_FIT_UNUSED",
+                                format!("{base}/fit"),
+                                "`fit` only applies to a clip with `end_at`, `in` and `out`",
+                            ),
+                        );
+                    }
+                    if let (Some(ff), Some(_), true) = (fit_frames, c.out, fit_speed) {
                         // in and out fixed: the speed absorbs the difference
                         speed = (src_out - src_in) / fps.frames_to_secs(ff);
                         if !(0.25..=4.0).contains(&speed) && src_out > src_in {
@@ -436,22 +476,28 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                                         fps.frames_to_secs(ff)
                                     ),
                                 )
-                                .hint("widen or narrow `in`/`out`, or remove `out` to trim instead of changing speed"),
+                                .hint("widen or narrow `in`/`out`, or remove `fit: \"speed\"` to trim instead"),
                             );
                         }
-                    } else if fit_frames.is_some() && f.is_some() && src_out > media_dur + 0.5 / src_fps.as_f64() {
+                    } else if fit_frames.is_some()
+                        && c.out.is_none()
+                        && f.is_some()
+                        && src_out > media_dur + 0.5 / src_fps.as_f64()
+                    {
+                        // no `out`: the asset's end is the limit; hold its last frame
+                        let hold = (src_out - media_dur) / speed;
                         d.push(
-                            Diagnostic::error(
-                                "E_TIME_OUT_OF_RANGE",
+                            Diagnostic::warning(
+                                "W_FIT_HOLD",
                                 format!("{base}/end_at"),
                                 format!(
-                                    "end_at needs footage up to {src_out:.3}s at speed {speed}, but the asset is {media_dur:.3}s long"
+                                    "clip `{}` runs out of footage {hold:.2}s before its cut (the asset is {media_dur:.3}s long); the last frame is held",
+                                    c.id
                                 ),
                             )
-                            .hint("set `out` so cutline speeds the clip up to fit, raise `speed`, or move `in` earlier"),
+                            .hint("move `in` earlier, cut sooner, or use more footage"),
                         );
-                        ok = false;
-                        continue;
+                        src_out = media_dur;
                     }
                     if f.is_some() && src_in >= media_dur - 1e-6 {
                         d.push(
@@ -499,7 +545,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 }
                 // fitted clips take the exact frame count (no rounding drift against the cue)
                 let mut frames = fit_frames.unwrap_or_else(|| fps.secs_to_frames(tl_secs));
-                let clip_secs = tl_secs;
+                let clip_secs = fit_frames.map(|ff| fps.frames_to_secs(ff)).unwrap_or(tl_secs);
                 for (ei, e) in c.effects.iter().enumerate() {
                     check_effect(e, clip_secs, &format!("{base}/effects/{ei}"), &mut d);
                 }
@@ -580,6 +626,30 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             "a transition cannot end the storyline",
         ));
         ok = false;
+    }
+    // Dissolving one screen recording into another double-exposes two layouts of text.
+    if spec.screencast {
+        let soft: Vec<&TTransition> = transitions
+            .iter()
+            .filter(|t| t.frames > 0 && matches!(t.transition.kind.as_str(), "fade" | "dissolve"))
+            .filter(|t| {
+                let is_rec = |c: &TClip| c.kind == AssetKind::Video;
+                is_rec(&clips[t.after]) && clips.get(t.after + 1).is_some_and(is_rec)
+            })
+            .collect();
+        if soft.len() >= 2 {
+            d.push(
+                Diagnostic::warning(
+                    "W_SCREEN_DISSOLVES",
+                    format!("/main/{}/transition", soft[0].main_index),
+                    format!(
+                        "{} dissolves join two screen recordings; mid-dissolve both screens' text shows at once and reads as ghosting",
+                        soft.len()
+                    ),
+                )
+                .hint("cut between app shots (remove the transition; land the cut on a bar or beat) and keep dissolves for the title and end card"),
+            );
+        }
     }
     let total = clips.last().map(|c| c.end()).unwrap_or(0);
     if let Some(maxd) = spec.max_duration {
