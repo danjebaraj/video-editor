@@ -18,6 +18,14 @@ use std::path::{Path, PathBuf};
 /// Envelope sample rate (Hz); upsampled by ffmpeg before multiplying.
 pub const ENV_RATE: u32 = 1000;
 
+/// Audio encoder settings of every rendered export. The loudness pass trial-encodes with
+/// exactly these, so keep them shared.
+pub const AUDIO_ENCODE_ARGS: [&str; 8] = ["-c:a", "aac", "-b:a", "320k", "-ar", "48000", "-ac", "2"];
+
+/// How many times the loudness pass may lower the limiter ceiling to keep the encoded
+/// audio's true peak under the target.
+const ENCODED_TP_ATTEMPTS: usize = 4;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DuckPlan {
     pub params: Duck,
@@ -49,6 +57,8 @@ pub struct LoudnessResult {
     pub input_tp: f64,
     pub output_i: f64,
     pub output_tp: f64,
+    /// True peak after the AAC encode of the export (what QA and platforms measure).
+    pub encoded_tp: f64,
     pub output_lra: f64,
     pub correction_db: f64,
     pub speech_spans: usize,
@@ -488,26 +498,57 @@ pub fn execute(tc: &Toolchain, a: &AudioPlan) -> Result<Option<LoudnessResult>> 
     let delta = i - meas.integrated_lufs;
     let mut correction = 0.0;
     let mut out_meas = meas.clone();
-    if delta.abs() > 0.2 || meas.true_peak_dbtp > tp {
-        correction = delta;
-        let lim = 10f64.powf((tp - 0.3) / 20.0);
-        let af = format!("volume={}dB,aresample=192000,alimiter=limit={:.5}:attack=1:release=50:level=disabled:latency=1,aresample=48000", f(delta), lim);
-        run_af(tc, &tmp, &af, Some(&a.final_wav))?;
-        out_meas = cutline_media::probe::measure_loudness(tc, &a.final_wav)?;
-        let _ = std::fs::remove_file(&tmp);
-    } else {
-        std::fs::rename(&tmp, &a.final_wav)?;
+    let mut correct = delta.abs() > 0.2 || meas.true_peak_dbtp > tp;
+    // Limiter ceiling (sample peak at 192 kHz, a little under the true-peak target).
+    let mut ceiling = tp - 0.3;
+    let mut encoded_tp = f64::NAN;
+    for _ in 0..ENCODED_TP_ATTEMPTS {
+        if correct {
+            correction = delta;
+            let lim = 10f64.powf(ceiling / 20.0);
+            let af = format!("volume={}dB,aresample=192000,alimiter=limit={:.5}:attack=1:release=50:level=disabled:latency=1,aresample=48000", f(delta), lim);
+            run_af(tc, &tmp, &af, Some(&a.final_wav))?;
+            out_meas = cutline_media::probe::measure_loudness(tc, &a.final_wav)?;
+        } else {
+            std::fs::copy(&tmp, &a.final_wav)?;
+        }
+        // The lossy encode of the final mux raises peaks (a little on speech and music, by
+        // well over 1 dB on sharp transients), so check the encoded result, not the WAV.
+        encoded_tp = encoded_true_peak(tc, &a.final_wav)?;
+        if encoded_tp <= tp {
+            break;
+        }
+        ceiling -= encoded_tp - tp + 0.1;
+        correct = true;
     }
+    let _ = std::fs::remove_file(&tmp);
     Ok(Some(LoudnessResult {
         input_i: m.input_i,
         input_tp: m.input_tp,
         output_i: out_meas.integrated_lufs,
         output_tp: out_meas.true_peak_dbtp,
+        encoded_tp,
         output_lra: out_meas.lra,
         correction_db: correction,
         speech_spans: spans.len(),
         speech_source: src,
     }))
+}
+
+/// True peak (dBTP) of `wav` after encoding it the way the final mux does.
+fn encoded_true_peak(tc: &Toolchain, wav: &Path) -> Result<f64> {
+    let enc = wav.with_extension("tpcheck.m4a");
+    let out = std::process::Command::new(&tc.ffmpeg)
+        .args(["-hide_banner", "-nostdin", "-y", "-nostats", "-loglevel", "error", "-i"])
+        .arg(wav)
+        .args(AUDIO_ENCODE_ARGS)
+        .arg(&enc)
+        .output()
+        .context("spawning ffmpeg (true-peak check encode)")?;
+    anyhow::ensure!(out.status.success(), "true-peak check encode failed: {}", String::from_utf8_lossy(&out.stderr));
+    let tp = cutline_media::probe::measure_loudness(tc, &enc).context("measuring the encoded audio")?.true_peak_dbtp;
+    let _ = std::fs::remove_file(&enc);
+    Ok(tp)
 }
 
 fn run_af(tc: &Toolchain, input: &Path, af: &str, out: Option<&Path>) -> Result<String> {
