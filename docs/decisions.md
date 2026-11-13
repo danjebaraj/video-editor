@@ -226,3 +226,8 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 - **Decision:** `audio.music_level` measures the voice (or dialogue) and music stems after they are rendered and before the mix, and applies `voice − level − (music + duck)` dB to the music stem: the same measure `review` reports, which now uses the chosen level as its aim. `align: end` on an audio layer sets `src_in = duration − span` (or starts a shorter asset later) during timeline resolution, so audio planning, captions and QA see an ordinary layer.
 - **Not done:** snapping cuts to musical beats (needs beat tracking; left for later).
 - **Reason:** both replace trial-and-error renders: the Glance demo needed two renders to find `gain_db: -9` (17.1 LU); `music_level: 18` lands at 18 in one.
+
+## 2026-11-13 — Cheaper HTML capture for drafts and stills
+- **Decision:** drafts and previews capture HTML/SVG/Lottie at device scale 0.5 (same CSS layout) and at most 15 fps; `preview --at` (stills only) captures HTML clips and layers that are on screen at none of the requested times at 1 fps. Final renders are unchanged. Both settings are part of the HTML cache key.
+- **Alternatives:** compositing only the requested frames (a second render path through the whole pipeline).
+- **Reason:** profiling a cold preview of the Glance demo showed headless Chrome frame capture took ~76 of 86 s; segments, audio and the 540p proxy took ~6 s. Now ~11 s (stills away from HTML) to ~22 s.

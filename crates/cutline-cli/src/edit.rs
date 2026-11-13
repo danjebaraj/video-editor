@@ -369,7 +369,17 @@ pub fn preview(path: &Path, at: &[String], range: Option<&str>, safe_zones: bool
     }
     let tc = cutline_deps::toolchain().tool_err()?;
     let (name, e) = pipeline::exports(&l.project).into_iter().next().unwrap();
-    let pr = pipeline::prepare(&l, name, &e, true).map_err(CliError::validation)?;
+    // stills only: HTML that is on screen at none of the requested times need not be captured
+    // frame by frame
+    let stills: Option<Vec<f64>> = match (&l.timeline, range) {
+        (Some(tl), None) if !at.is_empty() => at
+            .iter()
+            .map(|t| cutline_core::time::parse_time(t).map(|v| v.seconds(tl.fps, tl.duration())))
+            .collect::<Result<Vec<f64>, String>>()
+            .ok(),
+        _ => None,
+    };
+    let pr = pipeline::prepare_for(&l, name, &e, true, stills.as_deref()).map_err(CliError::validation)?;
     let out_dir = out.unwrap_or_else(|| l.dir.join(".cutline").join("preview"));
     std::fs::create_dir_all(&out_dir).map_err(CliError::internal)?;
     let proxy = out_dir.join("preview_540p.mp4");

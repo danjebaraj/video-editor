@@ -137,6 +137,17 @@ pub struct Prepared {
 
 /// Resolve one export and compute the plan extras.
 pub fn prepare(l: &Loaded, export_name: Option<String>, e: &Export, draft: bool) -> Result<Prepared> {
+    prepare_for(l, export_name, e, draft, None)
+}
+
+/// `prepare` for a render only looked at at `stills` (timeline seconds): see `extras::compute_for`.
+pub fn prepare_for(
+    l: &Loaded,
+    export_name: Option<String>,
+    e: &Export,
+    draft: bool,
+    stills: Option<&[f64]>,
+) -> Result<Prepared> {
     let brand = crate::extras::load_brand(l, &l.project)?;
     let (expanded, notes) = crate::auto::expand(l, &l.project, &brand)?;
     let p = for_export(&expanded, e);
@@ -146,7 +157,7 @@ pub fn prepare(l: &Loaded, export_name: Option<String>, e: &Export, draft: bool)
         bail!(LoadError::Invalid(diags));
     }
     let tl = tl.context("timeline did not resolve")?;
-    let extras = crate::extras::compute(l, &p, &tl, draft)?;
+    let extras = crate::extras::compute_for(l, &p, &tl, draft, stills)?;
     diags.extend(extras.warnings.clone());
     Ok(Prepared { export_name, project: p, timeline: tl, diags, extras })
 }

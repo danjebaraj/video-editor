@@ -30,7 +30,8 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
      `preview_540p.mp4`.
    - Read `summary.md` first, then look at the images. Iterate until there are **no QA errors** and
      the suggestions are addressed. Use `cutline preview project.json5 --at 3.2 7.5 --safe-zones`
-     for quick stills while iterating.
+     for quick stills while iterating (drafts capture HTML graphics at half density and 15 fps;
+     stills skip frame capture for graphics not on screen at the requested times).
 6. **Render.** `cutline render project.json5` (all exports; `--export name` for one). QA runs
    automatically; the command fails on QA errors unless `--allow-qa-errors`. Outputs next to the
    video: `<name>.qa.json`, `<name>.render_report.json`, `<name>.srt`, `credits.txt`. Then:
