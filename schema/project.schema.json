@@ -407,6 +407,17 @@
             "string",
             "null"
           ]
+        },
+        "snap_to_beats": {
+          "description": "Move cuts onto the music's beats (fitting each clip with `end_at`).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SnapToBeats"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -3089,6 +3100,29 @@
         "left",
         "right"
       ]
+    },
+    "SnapToBeats": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "Asset whose beats are used (default: the only music-role audio layer's asset).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "max_shift": {
+          "description": "Largest move of a cut, in seconds (default 0.15). Cuts farther from a beat stay put.",
+          "type": "number",
+          "format": "double",
+          "default": 0.15
+        }
+      },
+      "additionalProperties": false
     },
     "SpeedKey": {
       "type": "object",

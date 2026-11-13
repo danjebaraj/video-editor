@@ -29,8 +29,7 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
      target), `timeline.txt`, `qa.json`, `summary.md` (QA + suggested improvements),
      `preview_540p.mp4`.
    - Read `summary.md` first, then look at the images. It flags text templates that sit over
-     detailed content (measured from frames with and without the text, so it also catches text
-     wider than its layout box). Iterate until there are **no QA errors** and
+     detailed content (measured from frames with and without the text). Iterate until there are **no QA errors** and
      the suggestions are addressed. Use `cutline preview project.json5 --at 3.2 7.5 --safe-zones`
      for quick stills while iterating (drafts capture HTML graphics at half density and 15 fps;
      stills skip frame capture for graphics not on screen at the requested times).
@@ -66,7 +65,8 @@ Segments are cached: changing captions, text or music does not re-render clips.
 ## Screen recordings
 
 - Record terminal footage from VHS tapes: use the `.tape` file itself as the asset path and cutline
-  records it (and re-records only when the tape changes). End each tape by quitting the program
+  records it (and re-records only when the tape changes; run `cutline record project.json5` when
+  the screen shows live data you want fresh). End each tape by quitting the program
   it started (e.g. `Hide`, `Type "q"`): VHS kills the terminal, and some programs then linger.
 - Set `profile: "screencast"` (sharper text encoding; no QA warnings for paused screens). Add
   `chroma: "444"` for downloads/docs where colored text must not fringe.
@@ -83,7 +83,8 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ## Narrated videos: time the edit to the voice-over
 
-- Put the VO on an `audio` layer with a numeric `start`, and give its asset a `transcript` (or
+- Put the VO on an `audio` layer with a numeric `start` (or `anchor` it to a clip, e.g. the one after
+  the title), and give its asset a `transcript` (or
   run `cutline transcribe` once so it is cached).
 - Name the beats under `cues` (`{clocks: "World clocks"}`) and use `"cue:clocks"` in timeline
   times: clip `end_at` (the cut lands on the cue), layer `start`/`end`, sfx `at`, marker `at`.
@@ -98,6 +99,8 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ## Audio
 
+- Cut on the beat: `auto: {snap_to_beats: {}}` nudges cuts (by at most `max_shift`, 0.15 s) onto
+  the music's beats; `cutline beats project.json5` shows the tempo.
 - Music under narration: set `audio.music_level: 18` instead of guessing `gain_db`, and put
   `align: "end"` (with a `fade_in`) on the music layer so the track's real ending closes the
   video rather than a fade-out mid-phrase.

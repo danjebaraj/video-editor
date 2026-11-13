@@ -1,6 +1,7 @@
 //! Audio building blocks: role chains, speech activity, ducking envelopes, loudness, WAV I/O
 //! and the `audio.png` visualizer.
 
+pub mod beats;
 pub mod chains;
 pub mod envelope;
 pub mod loudness;

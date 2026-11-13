@@ -634,6 +634,7 @@ dependencies = [
  "cutline-core",
  "cutline-deps",
  "image",
+ "rustfft",
  "serde",
  "serde_json",
 ]

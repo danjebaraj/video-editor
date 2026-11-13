@@ -15,6 +15,8 @@ cutline init my-short --target shorts --assets footage/
 cutline validate my-short/project.json5
 cutline expand   my-short/project.json5     # explicit timeline (auto jump cuts, fillers, punch-ins)
 cutline cues     my-short/project.json5     # where each voice-over cue landed
+cutline beats    my-short/project.json5     # tempo and beat times of the music
+cutline record   my-short/project.json5     # record VHS .tape assets again (fresh live data)
 cutline review   my-short/project.json5     # review/ pack for vision
 cutline render   my-short/project.json5     # final render + QA + .srt + credits
 cutline guide                               # the workflow Claude should follow
@@ -41,7 +43,7 @@ cutline guide                               # the workflow Claude should follow
   `bold_pop`, `karaoke`, `word_by_word`, `clean_sentence`, `boxed`; emphasis and emoji; SRT.
 - **Script timing:** name phrases in the voice-over (`cues`) and cut, place text and SFX on
   them (`"cue:clocks"`); clips fit themselves to the cut with `end_at`.
-- **Edit assist:** automatic jump cuts, filler removal, punch-in cadence, SFX on transitions,
+- **Edit assist:** cuts snapped to the music's beats (`snap_to_beats`), automatic jump cuts, filler removal, punch-in cadence, SFX on transitions,
   all expanded to inspectable timeline items.
 - **Audio:** role stems, voice chains, transcript/VAD-driven ducking, music level set relative to
   the voice (`music_level`), backtimed music endings (`align: end`), two-pass loudness

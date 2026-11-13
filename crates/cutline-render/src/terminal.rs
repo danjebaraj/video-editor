@@ -78,10 +78,16 @@ fn vhs_version(vhs: &Path) -> String {
 
 /// Record `tape` into the cache (or reuse an earlier recording of the same tape).
 pub fn record(vhs: &Path, tape: &Path, cache: &Path) -> Result<PathBuf> {
+    record_with(vhs, tape, cache, false)
+}
+
+/// `record`; with `force`, record again even when the tape is cached (fresh live data such as
+/// clocks or process lists). The new recording replaces the cached one only once it succeeds.
+pub fn record_with(vhs: &Path, tape: &Path, cache: &Path, force: bool) -> Result<PathBuf> {
     let text = std::fs::read_to_string(tape).with_context(|| format!("cannot read {}", tape.display()))?;
     let key = cutline_media::hash_key(&[text.as_bytes(), vhs_version(vhs).as_bytes(), b"tape-v1"]);
     let out = cache.join(format!("{key}.mp4"));
-    if out.is_file() {
+    if out.is_file() && !force {
         return Ok(out);
     }
     std::fs::create_dir_all(cache)?;
@@ -113,6 +119,25 @@ pub fn record(vhs: &Path, tape: &Path, cache: &Path) -> Result<PathBuf> {
     }
     std::fs::rename(&tmp, &out)?;
     Ok(out)
+}
+
+/// Re-record the `.tape` assets of the project at `project` (all, or the one named `only`).
+/// Returns `(asset id, recording)` for each.
+pub fn rerecord(project: &Path, only: Option<&str>) -> Result<Vec<(String, PathBuf)>> {
+    let project = std::fs::canonicalize(project).with_context(|| format!("cannot open {}", project.display()))?;
+    let p = crate::pipeline::parse_file(&project).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let dir = project.parent().unwrap_or(Path::new("."));
+    let tapes: Vec<(&String, &cutline_core::model::Asset)> =
+        p.assets.iter().filter(|(id, a)| is_tape(&a.path) && only.map_or(true, |o| o == id.as_str())).collect();
+    if tapes.is_empty() {
+        match only {
+            Some(o) => bail!("no `.tape` asset named `{o}`"),
+            None => bail!("the project has no `.tape` assets"),
+        }
+    }
+    let vhs = vhs_binary().context("`vhs` not found (install it or set CUTLINE_VHS)")?;
+    let cache = crate::cutline_dir(dir).join("cache").join("terminal");
+    tapes.into_iter().map(|(id, a)| Ok((id.clone(), record_with(&vhs, &dir.join(&a.path), &cache, true)?))).collect()
 }
 
 #[cfg(test)]

@@ -199,7 +199,8 @@ pub fn expand(path: &Path) -> CmdResult {
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
     }
-    let expanded = cutline_render::extras::expand_project(&l).map_err(CliError::internal)?;
+    let brand = cutline_render::extras::load_brand(&l, &l.project).map_err(CliError::internal)?;
+    let (expanded, notes) = cutline_render::auto::expand(&l, &l.project, &brand).map_err(CliError::internal)?;
     let (tl, d) = cutline_core::resolve(&expanded, &l.media, &pipeline::context(&l.dir));
     if has_errors(&d) {
         return Ok(diag_output(&d));
@@ -208,9 +209,14 @@ pub fn expand(path: &Path) -> CmdResult {
     let edl = edl_table(&tl);
     let pj = serde_json::to_value(&expanded).map_err(CliError::internal)?;
     let text = serde_json::to_string_pretty(&pj).unwrap_or_default();
+    let note_lines: String = notes
+        .iter()
+        .map(|n| format!("\n· {} {}: {}", n.code, if n.path.is_empty() { "/" } else { &n.path }, n.message))
+        .collect();
+    let note_block = if notes.is_empty() { String::new() } else { format!("\n\nAuto directives:{note_lines}") };
     Ok(Output::ok(
-        json!({"project": pj, "edl": edl_json(&tl), "duration": tl.duration(), "frames": tl.total_frames}),
-        format!("{text}\n\n{edl}"),
+        json!({"project": pj, "edl": edl_json(&tl), "duration": tl.duration(), "frames": tl.total_frames, "notes": notes}),
+        format!("{text}\n\n{edl}{note_block}"),
     ))
 }
 
@@ -552,6 +558,46 @@ pub fn cues(path: &Path) -> CmdResult {
         json!({"cues": l.cues, "warnings": l.diags.iter().filter(|x| x.code.contains("CUE")).collect::<Vec<_>>()}),
         h.join("\n"),
     ))
+}
+
+pub fn beats(path: &Path, asset: Option<&str>) -> CmdResult {
+    use cutline_core::model::{Layer, Role};
+    let l = load_or_return!(path);
+    let id = match asset {
+        Some(a) => a.to_string(),
+        None => l
+            .project
+            .layers
+            .iter()
+            .find_map(|x| match x {
+                Layer::Audio { asset, role, .. }
+                    if role.or(l.project.assets.get(asset).and_then(|a| a.role)).unwrap_or(Role::Music)
+                        == Role::Music =>
+                {
+                    Some(asset.clone())
+                }
+                _ => None,
+            })
+            .ok_or_else(|| CliError::usage(anyhow::anyhow!("no music audio layer; pass --asset")))?,
+    };
+    let b = cutline_render::auto::beats_for(&l, &id).map_err(CliError::tool)?;
+    let h = match &b {
+        Some(b) => format!(
+            "{id}: {:.1} BPM, {} beats\nfirst beats (s): {}",
+            b.bpm,
+            b.times.len(),
+            b.times.iter().take(12).map(|t| format!("{t:.3}")).collect::<Vec<_>>().join(" ")
+        ),
+        None => format!("{id}: no steady beat found"),
+    };
+    Ok(Output::ok(json!({"asset": id, "beats": b}), h))
+}
+
+pub fn record(path: &Path, asset: Option<&str>) -> CmdResult {
+    let done = cutline_render::terminal::rerecord(path, asset).map_err(CliError::tool)?;
+    let h: Vec<String> = done.iter().map(|(id, p)| format!("✔ {id}: recorded {}", p.display())).collect();
+    let j: Vec<_> = done.iter().map(|(id, p)| json!({"asset": id, "recording": p})).collect();
+    Ok(Output::ok(json!({"recorded": j}), h.join("\n")))
 }
 
 pub fn chapters(path: &Path) -> CmdResult {

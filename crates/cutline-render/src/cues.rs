@@ -33,9 +33,30 @@ pub struct ResolvedCue {
     pub exact: bool,
 }
 
+/// A voice layer pinned to a clip (`anchor` + `offset`) that a cue was measured from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnchoredVoice {
+    pub layer: usize,
+    pub anchor: String,
+    pub offset: f64,
+}
+
 /// Resolve every cue reference in `v` in place. Returns diagnostics (errors stop the load)
-/// and the resolved cues.
+/// and the resolved cues. Voice layers anchored to a clip are taken to start at 0; use
+/// `resolve_with` to supply their timeline starts.
 pub fn resolve(v: &mut Value, dir: &Path) -> (Vec<Diagnostic>, Vec<ResolvedCue>) {
+    let (d, c, _) = resolve_with(v, dir, &BTreeMap::new());
+    (d, c)
+}
+
+/// `resolve`, with the timeline start (seconds) of anchored voice layers by layer index. Also
+/// returns the anchored layers the cues were measured from, so the caller can find their real
+/// starts and resolve again.
+pub fn resolve_with(
+    v: &mut Value,
+    dir: &Path,
+    anchored_starts: &BTreeMap<usize, f64>,
+) -> (Vec<Diagnostic>, Vec<ResolvedCue>, Vec<AnchoredVoice>) {
     let mut d = vec![];
     let mut refs: Vec<(String, String)> = vec![]; // (pointer, reference)
     collect(v, "", None, &mut refs);
@@ -54,13 +75,13 @@ pub fn resolve(v: &mut Value, dir: &Path) -> (Vec<Diagnostic>, Vec<ResolvedCue>)
     let cues: BTreeMap<String, Cue> =
         v.get("cues").and_then(|c| serde_json::from_value(c.clone()).ok()).unwrap_or_default();
     if allowed.is_empty() || !d.is_empty() {
-        return (d, vec![]);
+        return (d, vec![], vec![]);
     }
-    let mut ctx = match Ctx::new(v, dir) {
+    let mut ctx = match Ctx::new(v, dir, anchored_starts) {
         Ok(c) => c,
         Err(e) => {
             d.push(Diagnostic::error("E_CUE_TRANSCRIPT", "/cues", format!("{e:#}")));
-            return (d, vec![]);
+            return (d, vec![], vec![]);
         }
     };
     let mut resolved: BTreeMap<String, Option<ResolvedCue>> = BTreeMap::new();
@@ -89,7 +110,7 @@ pub fn resolve(v: &mut Value, dir: &Path) -> (Vec<Diagnostic>, Vec<ResolvedCue>)
             *slot = serde_json::json!(round6(t));
         }
     }
-    (d, resolved.into_values().flatten().collect())
+    (d, resolved.into_values().flatten().collect(), ctx.used_anchors)
 }
 
 fn is_timeline_field(ptr: &str) -> bool {
@@ -155,6 +176,8 @@ struct VoiceLayer {
     index: usize,
     start: Result<f64, String>,
     src_in: Result<f64, String>,
+    /// `(anchor clip id, offset)` when the layer is pinned to a clip
+    anchor: Option<(String, f64)>,
 }
 
 struct Ctx<'a> {
@@ -165,10 +188,11 @@ struct Ctx<'a> {
     voice_assets: Vec<String>,
     lang: Option<String>,
     transcripts: BTreeMap<String, Option<Transcript>>,
+    used_anchors: Vec<AnchoredVoice>,
 }
 
 impl<'a> Ctx<'a> {
-    fn new(v: &Value, dir: &'a Path) -> Result<Self> {
+    fn new(v: &Value, dir: &'a Path, anchored_starts: &BTreeMap<usize, f64>) -> Result<Self> {
         let assets: BTreeMap<String, Asset> =
             v.get("assets").map(|a| serde_json::from_value(a.clone())).transpose()?.unwrap_or_default();
         let mut layers: BTreeMap<String, Vec<VoiceLayer>> = BTreeMap::new();
@@ -178,15 +202,27 @@ impl<'a> Ctx<'a> {
                 continue;
             }
             let Some(asset) = l.get("asset").and_then(|a| a.as_str()) else { continue };
-            let start = if l.get("anchor").is_some() {
-                Err("is anchored to a clip".to_string())
-            } else {
-                plain_secs(l.get("start"))
+            let anchor = match l.get("anchor") {
+                None => None,
+                Some(a) => match a.as_str() {
+                    Some(id) => {
+                        let off = l.get("offset").and_then(|o| o.as_f64()).unwrap_or(0.0);
+                        Some((id.to_string(), off))
+                    }
+                    None => None,
+                },
+            };
+            let start = match (&anchor, l.get("anchor")) {
+                // provisional until the caller supplies the anchor clip's timeline start
+                (Some(_), _) => Ok(anchored_starts.get(&i).copied().unwrap_or(0.0)),
+                (None, Some(_)) => Err("has an invalid anchor".to_string()),
+                (None, None) => plain_secs(l.get("start")),
             };
             layers.entry(asset.to_string()).or_default().push(VoiceLayer {
                 index: i,
                 start,
                 src_in: plain_secs(l.get("src_in")),
+                anchor,
             });
             let role = l
                 .get("role")
@@ -197,7 +233,7 @@ impl<'a> Ctx<'a> {
             }
         }
         let lang = v.pointer("/captions/lang").and_then(|l| l.as_str()).map(String::from);
-        Ok(Self { dir, assets, layers, voice_assets, lang, transcripts: BTreeMap::new() })
+        Ok(Self { dir, assets, layers, voice_assets, lang, transcripts: BTreeMap::new(), used_anchors: vec![] })
     }
 
     /// The asset's transcript (script-aligned when it has a `script`), or `None` after
@@ -276,6 +312,12 @@ impl<'a> Ctx<'a> {
                 return None;
             }
         };
+        if let Some((anchor, offset)) = &layer.anchor {
+            let av = AnchoredVoice { layer: layer.index, anchor: anchor.clone(), offset: *offset };
+            if !self.used_anchors.contains(&av) {
+                self.used_anchors.push(av);
+            }
+        }
         let (start, src_in) = match (&layer.start, &layer.src_in) {
             (Ok(s), Ok(i)) => (*s, *i),
             (Err(e), _) | (_, Err(e)) => {
@@ -285,7 +327,9 @@ impl<'a> Ctx<'a> {
                         format!("/layers/{}", layer.index),
                         format!("the `{asset}` layer's start/src_in {e}; cues need plain seconds there"),
                     )
-                    .hint("give the voice layer a numeric `start` (cue times are measured from it)"),
+                    .hint(
+                        "give the voice layer a numeric `start` or an `anchor` clip (cue times are measured from it)",
+                    ),
                 );
                 return None;
             }

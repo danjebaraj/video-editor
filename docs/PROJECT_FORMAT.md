@@ -52,7 +52,7 @@ cue). See [Cues](#cues).
 
 | Field | Default | Notes |
 |---|---|---|
-| `path` | required | image sequences use a printf pattern: `frames/%05d.png`. A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video |
+| `path` | required | image sequences use a printf pattern: `frames/%05d.png`. A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video. Editing the tape re-records it; `cutline record project.json5 [--asset id]` records again on demand (fresh clocks, process lists) |
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |
@@ -191,6 +191,7 @@ narration bed.
 | `remove_fillers` | `enabled` true, `words` [um, uh, erm, uhm, hmm] |
 | `punch_ins` | `every` 4.0, `scale` [1.08, 1.15], `skip_if_other_motion` true, `duration` 0.25 |
 | `sfx_on_transitions` | SFX asset/alias for transitions without one |
+| `snap_to_beats` | `enabled` true, `asset` (default: the only music-role audio layer), `max_shift` 0.15 s. Each cut within `max_shift` of a beat of the music moves onto it (in order, so later cuts see the ripple) by fitting the outgoing clip with `end_at`; cuts farther away, clips with a `speed_ramp`, and moves the footage cannot cover stay put. `cutline expand` lists every move; `cutline beats` shows the tempo and beat times |
 
 Generated items carry `generated_by`; `cutline expand` shows them. Jump-cut pieces keep the first
 piece's id (`talk`, `talk~2`, …).
@@ -225,10 +226,13 @@ layers: [
 | `occurrence` | 1 | which occurrence of the phrase |
 | `edge` | `start` | `start` (first word begins) or `end` (last word ends) |
 
-The asset must be played by exactly one `audio` layer with a numeric `start` (default 0); a cue
-is that start + the word time − the layer's `src_in`. Errors: `E_UNKNOWN_CUE`,
+The asset must be played by exactly one `audio` layer, with a numeric `start` (default 0) or
+pinned to a clip with `anchor` + `offset`; a cue is the layer's timeline start + the word time −
+the layer's `src_in`. With an anchored voice the cues are resolved, the timeline is built, and the
+anchor clip's real start is fed back until it settles; anchoring the voice to a clip whose own
+position depends on those cues is `E_CUE_CYCLE`. Errors: `E_UNKNOWN_CUE`,
 `E_CUE_NOT_FOUND` (the hint lists the closest phrases), `E_CUE_NOT_ALLOWED` (a cue in a source
-time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`; for `end_at`:
+time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`, `E_CUE_CYCLE`; for `end_at`:
 `E_END_AT_BEFORE_START`, `E_FIT_SPEED`, `E_FIELD_CONFLICT`.
 
 ## Export
