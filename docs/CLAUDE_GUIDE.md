@@ -60,7 +60,14 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - B-roll every 20–40 s (`broll` layers, PiP with `radius`/`border`/`shadow` or full-frame).
 - Leave the last 20 s free for the YouTube end screen (`end_card` template draws placeholders).
 
-## Screen recordings: hide private details
+## Screen recordings
+
+- Set `profile: "screencast"` (sharper text encoding; no QA warnings for paused screens). Add
+  `chroma: "444"` for downloads/docs where colored text must not fringe.
+- Point at UI with `{type: "zoom_to", rect: {x, y, w, h}, start, end}` instead of working out
+  zoom scales and focus points.
+
+### Hide private details
 
 - Look for usernames, home paths, emails, tokens and hostnames in every frame (`review`'s
   contact sheet) and cover them with `mask` layers: `{type: "mask", rect: {x, y, w, h},

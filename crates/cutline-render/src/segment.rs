@@ -28,6 +28,8 @@ pub struct SegmentSpec {
     /// Extra files the filter depends on (sendcmd, LUTs) — hashed into the key.
     pub deps: Vec<PathBuf>,
     pub has_source_audio: bool,
+    /// ProRes 4444 (yuv444p10le) instead of 422 HQ.
+    pub chroma444: bool,
 }
 
 /// Extra per-clip inputs computed outside (reframe crop paths etc.).
@@ -44,6 +46,8 @@ pub struct ClipExtras {
     pub lut_path: Option<PathBuf>,
     /// Pad color for fit_pad (brand background).
     pub pad_color: String,
+    /// Keep full chroma resolution (4:4:4 mezzanine) for a 4:4:4 deliverable.
+    pub chroma444: bool,
 }
 
 fn atempo_chain(speed: f64) -> Vec<String> {
@@ -201,7 +205,7 @@ pub fn build(
     tail.push(format!("tpad=stop_mode=clone:stop={}", frames));
     tail.push(format!("trim=end_frame={frames}"));
     tail.push("setpts=PTS-STARTPTS".into());
-    tail.push("format=yuv422p10le".into());
+    tail.push(if extras.chroma444 { "format=yuv444p10le" } else { "format=yuv422p10le" }.into());
     tail.push("setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv".into());
     v.push(format!("[{vlab}]{}[vout]", tail.join(",")));
 
@@ -256,6 +260,7 @@ pub fn build(
         filter,
         deps,
         has_source_audio: has_audio,
+        chroma444: extras.chroma444,
     }
 }
 
@@ -266,12 +271,14 @@ pub fn job(s: &SegmentSpec, tc: &cutline_deps::Toolchain, script: &Path, out_tmp
     j.args(s.input_args.clone());
     j.args(tc.filter_complex_file_args(script));
     j.args(["-map", "[vout]", "-map", "[aout]"]);
-    if draft {
-        j.args(["-c:v", "prores_ks", "-profile:v", "0"]);
-    } else {
-        j.args(["-c:v", "prores_ks", "-profile:v", "3"]);
-    }
-    j.args(["-vendor", "apl0", "-pix_fmt", "yuv422p10le", "-bits_per_mb", "8000"]);
+    // ProRes Proxy (draft), 422 HQ, or 4444 for 4:4:4 deliverables
+    let (profile, pix) = match (draft, s.chroma444) {
+        (true, _) => ("0", "yuv422p10le"),
+        (false, false) => ("3", "yuv422p10le"),
+        (false, true) => ("4", "yuv444p10le"),
+    };
+    j.args(["-c:v", "prores_ks", "-profile:v", profile]);
+    j.args(["-vendor", "apl0", "-pix_fmt", pix, "-bits_per_mb", "8000"]);
     j.args(["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]);
     j.args(["-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2"]);
     j.args(["-map_metadata", "-1", "-fflags", "+bitexact", "-flags:v", "+bitexact", "-flags:a", "+bitexact"]);

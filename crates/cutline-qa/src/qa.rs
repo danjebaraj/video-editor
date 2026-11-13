@@ -50,6 +50,10 @@ pub struct QaContext {
     pub first_text_at: Option<f64>,
     pub is_shorts: bool,
     pub max_cps: f64,
+    /// `profile: screencast`: frozen spans are normal (pauses between keystrokes).
+    pub screencast: bool,
+    /// `chroma: "444"`: a 4:4:4 High 4:4:4 Predictive stream is also correct.
+    pub chroma444: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,16 +112,23 @@ pub fn run_qa(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext) -> R
         "format": fmt_name, "vcodec": v["codec_name"], "profile": v["profile"], "pix_fmt": v["pix_fmt"],
         "acodec": a["codec_name"], "aprofile": a["profile"], "sample_rate": a["sample_rate"], "channels": a["channels"], "faststart": faststart
     });
+    let is444 = ctx.chroma444 && v["profile"] == "High 4:4:4 Predictive" && v["pix_fmt"] == "yuv444p";
     let ok = fmt_name.contains("mp4")
         && v["codec_name"] == "h264"
-        && v["profile"] == "High"
-        && v["pix_fmt"] == "yuv420p"
+        && ((v["profile"] == "High" && v["pix_fmt"] == "yuv420p") || is444)
         && a["codec_name"] == "aac"
         && a["profile"] == "LC"
         && a["sample_rate"] == "48000"
         && a["channels"] == 2
         && faststart;
-    b.add("container_codec", Sev::Error, ok, if ok { "MP4 / H.264 High yuv420p / AAC-LC 48k stereo / faststart" } else { "container or codec settings differ from the delivery profile" }, measured,
+    let summary = if !ok {
+        "container or codec settings differ from the delivery profile"
+    } else if is444 {
+        "MP4 / H.264 High 4:4:4 yuv444p / AAC-LC 48k stereo / faststart"
+    } else {
+        "MP4 / H.264 High yuv420p / AAC-LC 48k stereo / faststart"
+    };
+    b.add("container_codec", Sev::Error, ok, summary, measured,
         json!({"format": "mp4", "vcodec": "h264", "profile": "High", "pix_fmt": "yuv420p", "acodec": "aac", "aprofile": "LC", "sample_rate": "48000", "channels": 2, "faststart": true}));
 
     // geometry / fps

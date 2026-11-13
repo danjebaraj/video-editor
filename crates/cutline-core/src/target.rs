@@ -19,6 +19,10 @@ pub struct TargetSpec {
     pub lra_max: f64,
     /// Expected video bitrate range (kb/s) for the QA info check.
     pub bitrate_kbps: (u32, u32),
+    /// `profile: screencast` (set from the project, not the preset).
+    pub screencast: bool,
+    /// 4:4:4 chroma deliverable (set from the project / export, not the preset).
+    pub chroma444: bool,
 }
 
 impl TargetSpec {
@@ -66,6 +70,8 @@ pub fn resolve(
             max_chars: 22,
             lra_max: 7.0,
             bitrate_kbps: (2_000, 40_000),
+            screencast: false,
+            chroma444: false,
         },
         TargetName::Long1080p => TargetSpec {
             name,
@@ -78,6 +84,8 @@ pub fn resolve(
             max_chars: 42,
             lra_max: 11.0,
             bitrate_kbps: (2_000, 40_000),
+            screencast: false,
+            chroma444: false,
         },
         TargetName::Long4k => TargetSpec {
             name,
@@ -90,6 +98,8 @@ pub fn resolve(
             max_chars: 42,
             lra_max: 11.0,
             bitrate_kbps: (8_000, 120_000),
+            screencast: false,
+            chroma444: false,
         },
         TargetName::Square => TargetSpec {
             name,
@@ -102,6 +112,8 @@ pub fn resolve(
             max_chars: 26,
             lra_max: 9.0,
             bitrate_kbps: (1_500, 30_000),
+            screencast: false,
+            chroma444: false,
         },
         TargetName::Custom => {
             let (w, h) = (w.unwrap_or(1920) & !1, h.unwrap_or(1080) & !1);
@@ -116,6 +128,8 @@ pub fn resolve(
                 max_chars: if h > w { 22 } else { 42 },
                 lra_max: 11.0,
                 bitrate_kbps: (500, 120_000),
+                screencast: false,
+                chroma444: false,
             }
         }
     }

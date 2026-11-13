@@ -127,6 +127,12 @@ pub fn static_gaps(pr: &Prepared, min: f64) -> Vec<(f64, f64)> {
             if let Some(at) = serde_json::to_value(e).ok().and_then(|v| v["at"].as_f64()) {
                 ev.push(tl.secs(c.start) + at);
             }
+            if let cutline_core::model::Effect::ZoomTo { start, end, .. } = e {
+                ev.push(tl.secs(c.start) + start);
+                if let Some(e) = end {
+                    ev.push(tl.secs(c.start) + e);
+                }
+            }
             if matches!(e, cutline_core::model::Effect::KenBurns { .. } | cutline_core::model::Effect::Zoom { .. }) {
                 // continuous motion: count as change every second
                 let mut t = tl.secs(c.start);

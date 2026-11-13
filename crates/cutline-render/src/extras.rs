@@ -47,6 +47,7 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<Pl
                 .and_then(|r| r.pad_color.as_deref())
                 .map(crate::overlay::ff_color)
                 .unwrap_or_else(|| pad.clone()),
+            chroma444: tl.target.chroma444 && !draft,
             ..Default::default()
         };
         let lut = c

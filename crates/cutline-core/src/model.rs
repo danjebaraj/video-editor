@@ -57,11 +57,36 @@ pub struct Project {
     pub markers: Vec<Marker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exports: Vec<Export>,
+    /// `screencast`: tuned for screen and terminal recordings (sharper text encoding; frozen
+    /// frames are expected, so QA does not warn about them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Profile>,
+    /// Chroma subsampling of the deliverable: `420` (default, plays everywhere) or `444` (full
+    /// color resolution: no fringes on small colored text; not all players support it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma: Option<Chroma>,
     /// Named points in the voice-over, found in its transcript: `{clocks: "World clocks"}`.
     /// Timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can refer to
     /// them as `"cue:clocks"`, `"cue:clocks+0.4"` or `"cue:clocks-0.2"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cues: BTreeMap<String, Cue>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Profile {
+    #[default]
+    Standard,
+    Screencast,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+pub enum Chroma {
+    #[default]
+    #[serde(rename = "420")]
+    C420,
+    #[serde(rename = "444")]
+    C444,
 }
 
 /// A cue: a phrase in a voice track. The short form is just the phrase.
@@ -488,6 +513,23 @@ pub enum Effect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         focus: Option<Point>,
     },
+    /// Zoom so `rect` (fractions of the frame) fills the view, starting at `start`
+    /// (clip-relative) over `duration`; zoom back out from `end` if set.
+    ZoomTo {
+        rect: Rect,
+        #[serde(default)]
+        start: f64,
+        #[serde(default = "zoom_to_dur")]
+        duration: f64,
+        #[serde(default = "in_out_cubic")]
+        ease: Ease,
+        /// Margin around the rect as a fraction of the frame (default 0.03).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        padding: Option<f64>,
+        /// Clip-relative time to start zooming back out (same duration and ease).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<f64>,
+    },
     /// Slow pan+zoom (stills and B-roll).
     KenBurns {
         #[serde(default = "one_f")]
@@ -541,6 +583,30 @@ pub enum Effect {
 
 fn punch_scale() -> f64 {
     1.15
+}
+fn zoom_to_dur() -> f64 {
+    0.6
+}
+fn in_out_cubic() -> Ease {
+    Ease::InOutCubic
+}
+
+/// Scale and focus that make `rect` (plus `padding` on each side) fill the frame, for the
+/// zoom chain (`x' = s·x − (s−1)·focus`). The scale is capped at `max_scale`.
+pub fn zoom_to_params(rect: &Rect, padding: f64, max_scale: f64) -> (f64, Point) {
+    let rw = (rect.w + 2.0 * padding).clamp(1e-3, 1.0);
+    let rh = (rect.h + 2.0 * padding).clamp(1e-3, 1.0);
+    let s = (1.0 / rw).min(1.0 / rh).clamp(1.0, max_scale);
+    if s <= 1.0 + 1e-9 {
+        return (1.0, Point { x: 0.5, y: 0.5 });
+    }
+    let view = 1.0 / s;
+    let axis = |c: f64| {
+        // window start, kept inside the frame, then the fixed point that lands there
+        let start = (c - view / 2.0).clamp(0.0, 1.0 - view);
+        (start * s / (s - 1.0)).clamp(0.0, 1.0)
+    };
+    (s, Point { x: axis(rect.x + rect.w / 2.0), y: axis(rect.y + rect.h / 2.0) })
 }
 fn punch_dur() -> f64 {
     0.25
@@ -1103,6 +1169,9 @@ pub struct Export {
     pub height: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crf: Option<u32>,
+    /// Overrides the project's `chroma` for this export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma: Option<Chroma>,
     /// Output path (relative to the project). Default `out/<name>.mp4`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out: Option<String>,

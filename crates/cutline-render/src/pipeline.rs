@@ -105,6 +105,9 @@ pub fn for_export(p: &Project, e: &Export) -> Project {
     if e.height.is_some() {
         q.height = e.height;
     }
+    if e.chroma.is_some() {
+        q.chroma = e.chroma;
+    }
     q
 }
 

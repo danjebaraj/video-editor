@@ -460,6 +460,7 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
                             e,
                             Effect::PunchIn { .. }
                                 | Effect::Zoom { .. }
+                                | Effect::ZoomTo { .. }
                                 | Effect::KenBurns { .. }
                                 | Effect::Shake { .. }
                         )

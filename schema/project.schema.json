@@ -47,6 +47,17 @@
         }
       ]
     },
+    "chroma": {
+      "description": "Chroma subsampling of the deliverable: `420` (default, plays everywhere) or `444` (full\ncolor resolution: no fringes on small colored text; not all players support it).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Chroma"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "cues": {
       "description": "Named points in the voice-over, found in its transcript: `{clocks: \"World clocks\"}`.\nTimeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can refer to\nthem as `\"cue:clocks\"`, `\"cue:clocks+0.4\"` or `\"cue:clocks-0.2\"`.",
       "type": "object",
@@ -115,6 +126,17 @@
       "type": [
         "string",
         "null"
+      ]
+    },
+    "profile": {
+      "description": "`screencast`: tuned for screen and terminal recordings (sharper text encoding; frozen\nframes are expected, so QA does not warn about them).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Profile"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "safe_zone": {
@@ -513,6 +535,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "Chroma": {
+      "type": "string",
+      "enum": [
+        "420",
+        "444"
+      ]
     },
     "Clip": {
       "type": "object",
@@ -969,6 +998,54 @@
           ]
         },
         {
+          "description": "Zoom so `rect` (fractions of the frame) fills the view, starting at `start`\n(clip-relative) over `duration`; zoom back out from `end` if set.",
+          "type": "object",
+          "properties": {
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.6
+            },
+            "ease": {
+              "$ref": "#/$defs/Ease",
+              "default": "in_out_cubic"
+            },
+            "end": {
+              "description": "Clip-relative time to start zooming back out (same duration and ease).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "padding": {
+              "description": "Margin around the rect as a fraction of the frame (default 0.03).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "type": "number",
+              "format": "double",
+              "default": 0.0
+            },
+            "type": {
+              "type": "string",
+              "const": "zoom_to"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "rect"
+          ]
+        },
+        {
           "description": "Slow pan+zoom (stills and B-roll).",
           "type": "object",
           "properties": {
@@ -1189,6 +1266,17 @@
     "Export": {
       "type": "object",
       "properties": {
+        "chroma": {
+          "description": "Overrides the project's `chroma` for this export.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Chroma"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "crf": {
           "type": [
             "integer",
@@ -2687,6 +2775,13 @@
         {
           "$ref": "#/$defs/Point"
         }
+      ]
+    },
+    "Profile": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "screencast"
       ]
     },
     "PunchIns": {

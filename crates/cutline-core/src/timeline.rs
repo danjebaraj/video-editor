@@ -236,7 +236,9 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
     }
     let first_src_fps =
         p.clips().find_map(|c| facts.get(&c.clip).filter(|f| f.kind == AssetKind::Video).and_then(|f| f.fps));
-    let spec = target::resolve(p.target, p.fps, first_src_fps, p.width, p.height);
+    let mut spec = target::resolve(p.target, p.fps, first_src_fps, p.width, p.height);
+    spec.screencast = p.profile == Some(Profile::Screencast);
+    spec.chroma444 = p.chroma == Some(Chroma::C444);
     let fps = spec.fps;
 
     // ---- main
@@ -840,6 +842,48 @@ fn check_effect(e: &Effect, clip_secs: f64, base: &str, d: &mut Vec<Diagnostic>)
                 if e <= start {
                     d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/end"), "zoom end must be after start"));
                 }
+            }
+            Some(*start)
+        }
+        Effect::ZoomTo { rect, start, duration, padding, end, .. } => {
+            let inside = |v: f64| (0.0..=1.0).contains(&v);
+            if !(inside(rect.x) && inside(rect.y) && rect.w > 0.0 && rect.h > 0.0)
+                || rect.x + rect.w > 1.0 + 1e-9
+                || rect.y + rect.h > 1.0 + 1e-9
+            {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/rect"),
+                        "zoom_to rect must lie inside the frame (fractions 0–1, x+w ≤ 1, y+h ≤ 1)",
+                    )
+                    .hint("e.g. {x: 0.2, y: 0.6, w: 0.4, h: 0.3}"),
+                );
+            } else {
+                let (s, _) = zoom_to_params(rect, padding.unwrap_or(0.03), f64::INFINITY);
+                if s > 3.0 {
+                    d.push(
+                        Diagnostic::warning(
+                            "W_ZOOM_CAPPED",
+                            format!("{base}/rect"),
+                            format!("the rect needs a {s:.1}× zoom; capped at 3× (it will not fill the view)"),
+                        )
+                        .hint("use a larger rect, or accept the cap"),
+                    );
+                }
+            }
+            if duration.is_nan() || *duration <= 0.0 {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/duration"), "duration must be positive"));
+            }
+            if padding.is_some_and(|p| !(0.0..=0.4).contains(&p)) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/padding"), "padding must be within 0–0.4"));
+            }
+            if end.is_some_and(|e| e < start + duration) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    format!("{base}/end"),
+                    "zoom back out (end) must start after the zoom in finishes (start + duration)",
+                ));
             }
             Some(*start)
         }

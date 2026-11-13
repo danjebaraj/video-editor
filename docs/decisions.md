@@ -212,3 +212,12 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 - **Decision:** `mask` is a layer type composited in z order with the other overlays (so a mask can cover a PiP or an image), before the ASS pass (so text and captions stay readable on top). Blur and pixelate crop the region from the current composite and overlay it back with `enable`; fill is a `drawbox`. Default blur sigma is half the region's short side, which removes text that fills the region.
 - **Alternatives:** a per-clip effect (would not cover overlays or span clips); pre-processing the footage.
 - **Reason:** redaction targets what the viewer sees, wherever it comes from, and must follow the same timing rules (anchor/offset, start/end, cues) as everything else.
+
+## 2026-11-13 — Screencast profile and 4:4:4 delivery
+- **Decision:** `profile: screencast` adds x264 `-tune animation` and lowers CRF by 2, and QA's freeze check passes (reporting the spans as expected). `chroma: "444"` switches segments to ProRes 4444 (yuv444p10le) and the deliverable to H.264 High 4:4:4 yuv444p; drafts and hardware encodes stay 4:2:0, and QA accepts either layout when 4:4:4 was requested.
+- **Alternatives:** `-tune stillimage` (worse on scrolling and zooms); 4:4:4 by default for screencasts.
+- **Reason:** terminal and UI footage is flat colour with hard edges and long still stretches. 4:4:4 stays opt-in because platforms re-encode to 4:2:0 and some players cannot decode High 4:4:4.
+
+## 2026-11-13 — zoom_to computes the zoom from a rectangle
+- **Decision:** `zoom_to` derives scale `s = min(1/w', 1/h')` (rect plus padding, capped at 3×) and the fixed point `f = x0·s/(s−1)` that puts the view window `x0` (centred on the rect, clamped inside the frame) on screen, and feeds them to the existing zoom chain as a ramp (+ release for `end`).
+- **Reason:** pointing at a UI element is the common case in screencasts, and the focus-point maths is easy to get wrong by hand.

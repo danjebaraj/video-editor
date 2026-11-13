@@ -35,6 +35,8 @@ cue). See [Cues](#cues).
 | `markers` | [`{at, title}`] | `[]` | chapters |
 | `exports` | [Export] | one export of `target` | multi-target from one edit |
 | `cues` | map name → Cue | `{}` | phrases in the voice-over; see [Cues](#cues) |
+| `profile` | `standard` | `screencast`: tuned for screen/terminal recordings — x264 `-tune animation` and CRF − 2 for sharp text and UI edges; QA's freeze check passes (pauses are normal) |
+| `chroma` | `"420"` | `"444"`: full color resolution (no fringes on small colored text; ProRes 4444 segments, H.264 High 4:4:4). Not every player supports 4:4:4 and platforms re-encode to 4:2:0, so use it for downloads and docs. Drafts and `--hw` stay 4:2:0. Exports can override |
 
 ### Targets
 
@@ -115,6 +117,7 @@ or `.cube` path) + `intensity` (0–1), `exposure` (stops), `contrast`, `saturat
 |---|---|
 | `punch_in` | `at`, `scale` 1.15, `duration` 0.25, `ease` out_cubic, `hold` (release after), `focus` {x,y} |
 | `zoom` | `from` 1, `to`, `start` 0, `end` clip end, `ease`, `focus` |
+| `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0, `duration` 0.6, `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`) |
 | `ken_burns` | `from_scale` 1, `to_scale` 1.15, `from`/`to` {x,y}, `ease` |
 | `shake` | `at`, `duration` 0.3, `intensity` 0.02 |
 | `flash` | `at`, `duration` 0.15, `color` (white) |
@@ -227,7 +230,7 @@ time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`; for `
 
 ## Export
 
-`{name, target, fps, width, height, crf, out}`. With several exports, output files are named
+`{name, target, fps, width, height, crf, chroma, out}`. With several exports, output files are named
 `<name>-<export>.mp4`.
 
 ## Brand file

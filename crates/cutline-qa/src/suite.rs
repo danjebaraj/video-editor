@@ -111,7 +111,12 @@ fn check_shorts_pipeline(d: &Path) -> Result<Outcome> {
                 continue;
             }
             if c.clip.effects.iter().any(|e| {
-                matches!(e, cutline_core::model::Effect::PunchIn { .. } | cutline_core::model::Effect::Zoom { .. })
+                matches!(
+                    e,
+                    cutline_core::model::Effect::PunchIn { .. }
+                        | cutline_core::model::Effect::Zoom { .. }
+                        | cutline_core::model::Effect::ZoomTo { .. }
+                )
             }) {
                 continue; // zoomed frames don't map the pattern 1:1
             }
