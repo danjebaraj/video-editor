@@ -13,7 +13,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 | M6 Auto-reframe | ✅ done |
 | M7 QA/review/selftest | ✅ done |
 | M8 HTML/SVG/Lottie | ✅ done |
-| M9 Windows/packaging/docs | ⏳ |
+| M9 Windows/packaging/docs | ✅ done (Windows CI not run here) |
 
 ## M0 — Foundation
 Built:
@@ -145,6 +145,27 @@ Acceptance (`crates/cutline-html/tests/m8_html.rs`, `crates/cutline-render/tests
 - Two renders produce byte-identical PNG frames.
 - Requests to https:// (img + fetch) and to file:// outside allowed dirs are blocked and logged; the page sees the failure.
 - HTML layer with params, HTML main clip and an HTML lower third composite correctly in a real render.
+
+## M9 — Windows, packaging, docs, polish
+Built:
+- `cutline thumbnail <project> --at <t> --text "…" [--template]` (1280×720 / 1080×1920), `cutline chapters <project>` (YouTube rules with warnings), multi-export from one project (`exports`, `--export name`), `cutline cache stats|clean [--older-than 30d] [--project p]`, `cutline guide`.
+- Docs: `docs/CLAUDE_GUIDE.md` (workflow, Shorts/long-form defaults, error fixes, publishing checklist; printed by `cutline guide`), `docs/PROJECT_FORMAT.md` (every field with defaults), `README.md`.
+- Release: `scripts/release.sh` (universal macOS binary via lipo, Windows zip, Linux tarball; binary + `assets/`) and a tag-triggered release workflow.
+- Windows readiness: no shell spawning anywhere; filter-path escaping turns `C:\…` into `C\\:/…` (unit tested); file URLs for Chrome handle drive letters; `.exe` names for tools; Windows sources for ffmpeg (BtbN) and Chrome (win64); SAPI TTS for the speech test; HW draft encoders `h264_nvenc` / `h264_qsv` / `h264_amf` (probed before use); no symlinks in the tools layout.
+- Fixed: manual reframe zoom stalled ffmpeg (now crop-then-zoom).
+
+Acceptance:
+- Paths with spaces, `ü`, commas, apostrophes and brackets in project/asset folder names, through every escaping-sensitive feature: LUT path, sendcmd file, ASS text + captions, transcript, logo (`crates/cutline-qa/tests/m9_publish.rs`). Verified on Linux; Windows runs it in CI.
+- `deps update` on a simulated new version: stages, selftests (fail → keep, pass → promote), lockfile updated, rollback (`crates/cutline-cli/tests/m0_cli.rs`, local mock HTTP server).
+- Multi-export, chapters, thumbnail tests.
+- **Not run here:** the full suite and `selftest --quick` on windows-latest (CI job configured; allowed to fail per spec until verified). The Windows Chrome/BtbN download paths could not be exercised (github.com release downloads are blocked from this container).
+
+## Summary of what was not verified in this environment
+- macOS runs of anything (no macOS host): covered by the macOS-14 CI job.
+- Windows CI.
+- whisper.cpp transcription and the WER test (building whisper.cpp was not permitted here; the test skips without whisper-cli/TTS; macOS CI installs `whisper-cpp` via Homebrew).
+- Performance targets (60 s Shorts ≤ 90 s cold / ≤ 20 s warm on Apple Silicon): measured only on this 4-core x86 container and recorded by `selftest --full`, not tuned.
+- Pushing to GitHub: the session's git credentials were refused (403), so commits and tags are local.
 
 ## Blockers
 - Building whisper.cpp from source was not permitted in this container, so real-speech transcription is untested here (see decisions); macOS CI covers it.

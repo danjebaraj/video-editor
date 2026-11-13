@@ -167,3 +167,13 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 - **Chrome:** `CUTLINE_CHROME` → `deps install chrome` (Chrome for Testing headless shell, sha recorded) → system Chrome/Chromium/Edge.
 - **Caching:** the mezzanine is keyed by source content + sibling file fingerprints + params + size/fps/duration/alpha + Chrome path. HTML text templates (`*_html`) render full-frame with brand colors and the layer's params.
 - **Lottie:** `lottie-web` 5.13.0 is vendored in `assets/html/` (MIT); the tarball sha256 is recorded in `assets/html/SOURCES.md`.
+
+## 2026-11-13 — Manual reframe zoom after a fixed crop
+- **Decision:** manual reframe keys move a fixed-size crop window (zoom 1) via sendcmd x/y only. Zoom is applied afterwards as a per-frame `scale` plus a centered `crop`, from an eased in-out-cubic expression built from the keys.
+- **Reason:** changing `crop` w/h through sendcmd at runtime stalled ffmpeg's filter graph indefinitely; the paths-with-unicode test caught it.
+
+## 2026-11-13 — Chapters and thumbnails
+- **Decision:** chapters come from `markers`, else clip `chapter` fields, else clip ids (jump-cut pieces merged, ≥ 10 s apart). The first chapter is forced to 00:00; there are warnings for fewer than 3 chapters or any chapter under 10 s. Thumbnails take the frame at timeline time t, use the face crop when a crop path exists, cover-crop to 1280×720 (1080×1920 Shorts), add a small saturation/contrast pop, and render the template text statically (entrance animations stripped) at 1.5× title size.
+
+## 2026-11-13 — Release packaging
+- **Decision:** `scripts/release.sh` builds with `--features onnx` and packs the binary with the `assets/` directory beside it (found via `<exe_dir>/assets`): a universal macOS binary via `lipo`, and a zip on Windows. `.github/workflows/release.yml` runs it on `v*` tags.

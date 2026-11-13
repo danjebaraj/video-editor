@@ -211,6 +211,9 @@ pub struct CropPath {
     pub x: Vec<u32>,
     pub y: Vec<u32>,
     pub fps: f64,
+    /// Manual zoom keys (t, zoom ≥ 1), eased in-out cubic; applied after the fixed-size crop.
+    #[serde(default)]
+    pub zoom_keys: Vec<(f64, f64)>,
 }
 
 impl CropPath {
@@ -253,10 +256,29 @@ impl CropPath {
     }
     /// Geometry filter chain template (`{in}`, `{out}`, `{cin}` placeholders) for the segment.
     pub fn geometry(&self, sendcmd_path: &str, w: u32, h: u32) -> String {
+        let zoom = self.zoom_expr().map(|z| format!(",scale=w='{w}+2*round({w}*(({z})-1)/2)':h='{h}+2*round({h}*(({z})-1)/2)':eval=frame:flags=bicubic,crop={w}:{h}:x='(iw-{w})/2':y='(ih-{h})/2'")).unwrap_or_default();
         format!(
-            "[{{in}}]sendcmd=f={sendcmd_path},crop@rf=w={}:h={}:x={}:y={}:exact=1,scale={w}:{h}:flags=lanczos:{{cin}}:out_color_matrix=bt709:out_range=tv,setsar=1[{{out}}]",
+            "[{{in}}]sendcmd=f={sendcmd_path},crop@rf=w={}:h={}:x={}:y={}:exact=1,scale={w}:{h}:flags=lanczos:{{cin}}:out_color_matrix=bt709:out_range=tv{zoom},setsar=1[{{out}}]",
             self.cw[0], self.ch[0], self.x[0], self.y[0]
         )
+    }
+
+    /// Piecewise in-out-cubic zoom expression of `t` (None when there is no zoom).
+    pub fn zoom_expr(&self) -> Option<String> {
+        if self.zoom_keys.iter().all(|(_, z)| (z - 1.0).abs() < 1e-6) {
+            return None;
+        }
+        let k = &self.zoom_keys;
+        let f = |v: f64| format!("{v:.6}");
+        let mut e = f(k.last()?.1);
+        for i in (0..k.len().saturating_sub(1)).rev() {
+            let (t0, z0) = k[i];
+            let (t1, z1) = k[i + 1];
+            let u = format!("clip((t-{})/{},0,1)", f(t0), f((t1 - t0).max(1e-6)));
+            let ease = format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)");
+            e = format!("if(lt(t,{}),{}+{}*{ease},{e})", f(t1), f(z0), f(z1 - z0));
+        }
+        Some(format!("if(lt(t,{}),{},{e})", f(k[0].0), f(k[0].1)))
     }
 }
 
@@ -327,6 +349,7 @@ pub fn track_path(
         x: xs.iter().map(|x| if cw >= src_w { 0 } else { px(*x, cwn, src_w, cw) }).collect(),
         y: ys.iter().map(|y| if ch >= src_h { 0 } else { px(*y, chn, src_h, ch) }).collect(),
         fps,
+        zoom_keys: vec![],
     })
 }
 
@@ -364,11 +387,21 @@ pub fn manual_path(
         let l = ks.last().unwrap();
         (l.1, l.2, l.3)
     };
-    let mut p = CropPath { src_w, src_h, cw: vec![], ch: vec![], x: vec![], y: vec![], fps };
+    // fixed crop window (zoom 1) positioned by the key centers; zoom is applied after the crop
+    // (changing crop size at runtime stalls ffmpeg's filter graph)
+    let mut p = CropPath {
+        src_w,
+        src_h,
+        cw: vec![],
+        ch: vec![],
+        x: vec![],
+        y: vec![],
+        fps,
+        zoom_keys: ks.iter().map(|k| (k.0, k.3.max(1.0))).collect(),
+    };
     for i in 0..n_frames {
-        let (cx, cy, z) = at(i as f64 / fps);
-        let cw = even(cw0 as f64 / z.max(1.0)).min(src_w);
-        let ch = even(ch0 as f64 / z.max(1.0)).min(src_h);
+        let (cx, cy, _z) = at(i as f64 / fps);
+        let (cw, ch) = (cw0, ch0);
         let x = even((cx * src_w as f64 - cw as f64 / 2.0).clamp(0.0, (src_w - cw) as f64));
         let y = even((cy * src_h as f64 - ch as f64 / 2.0).clamp(0.0, (src_h - ch) as f64));
         p.cw.push(cw);

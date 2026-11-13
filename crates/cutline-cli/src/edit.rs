@@ -512,3 +512,39 @@ pub fn review(path: &Path, out: &Path) -> CmdResult {
     }
     Ok(Output::ok(json!(r), h))
 }
+
+pub fn chapters(path: &Path) -> CmdResult {
+    let l = load_or_return!(path);
+    if has_errors(&l.diags) {
+        return Ok(diag_output(&l.diags));
+    }
+    let (name, e) = pipeline::exports(&l.project).remove(0);
+    let pr = pipeline::prepare(&l, name, &e, false).map_err(classify)?;
+    let (ch, warn) = cutline_qa::publish::chapters(&pr);
+    let text = cutline_qa::publish::chapters_text(&ch);
+    let mut h = text.clone();
+    for w in &warn {
+        h.push_str(&format!("\n⚠ {}", w.message));
+    }
+    Ok(Output::ok(json!({"chapters": ch, "text": text, "warnings": warn}), h))
+}
+
+pub fn thumbnail(path: &Path, at: &str, text: Option<&str>, template: &str, out: Option<PathBuf>) -> CmdResult {
+    let l = load_or_return!(path);
+    if has_errors(&l.diags) {
+        return Ok(diag_output(&l.diags));
+    }
+    let (name, e) = pipeline::exports(&l.project).remove(0);
+    let pr = pipeline::prepare(&l, name, &e, false).map_err(classify)?;
+    let t = cutline_core::time::parse_time(at)
+        .map_err(|e| CliError::usage(anyhow::anyhow!(e)))?
+        .seconds(pr.timeline.fps, pr.timeline.duration());
+    let out = out.unwrap_or_else(|| {
+        l.dir.join("out").join(format!("{}-thumbnail.jpg", cutline_render::output_name(&l.project, &l.path)))
+    });
+    if let Some(d) = out.parent() {
+        std::fs::create_dir_all(d).map_err(CliError::internal)?;
+    }
+    let p = cutline_qa::publish::thumbnail(&l, &pr, t, text, template, &out).map_err(classify)?;
+    Ok(Output::ok(json!({"ok": true, "thumbnail": p}), format!("thumbnail: {}", p.display())))
+}

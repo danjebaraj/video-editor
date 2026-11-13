@@ -122,6 +122,27 @@ enum Cmd {
         #[arg(long, default_value = "review")]
         out: PathBuf,
     },
+    /// Thumbnail (1280×720, or 1080×1920 for Shorts) with template text.
+    Thumbnail {
+        project: PathBuf,
+        #[arg(long)]
+        at: String,
+        #[arg(long)]
+        text: Option<String>,
+        #[arg(long, default_value = "hook_title")]
+        template: String,
+        #[arg(long, short)]
+        out: Option<PathBuf>,
+    },
+    /// YouTube chapter list (from markers, clip `chapter` fields or clip ids).
+    Chapters { project: PathBuf },
+    /// Cache statistics / cleanup.
+    Cache {
+        #[command(subcommand)]
+        cmd: CacheCmd,
+    },
+    /// Print the Claude workflow guide (CLAUDE_GUIDE.md).
+    Guide,
     /// Run QA on any video file.
     Qa {
         video: PathBuf,
@@ -142,6 +163,22 @@ enum Cmd {
         /// Working directory (default: a temp dir).
         #[arg(long)]
         out: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CacheCmd {
+    /// Sizes of the global cache and (optionally) a project's .cutline cache.
+    Stats {
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Delete cache files (all, or older than e.g. 30d / 12h).
+    Clean {
+        #[arg(long)]
+        older_than: Option<String>,
+        #[arg(long)]
+        project: Option<PathBuf>,
     },
 }
 
@@ -271,6 +308,15 @@ fn dispatch(cli: Cli) -> CmdResult {
         }
         Cmd::Templates { cmd: TemplatesCmd::List } => templates_list(),
         Cmd::Review { project, out } => edit::review(&project, &out),
+        Cmd::Thumbnail { project, at, text, template, out } => {
+            edit::thumbnail(&project, &at, text.as_deref(), &template, out)
+        }
+        Cmd::Chapters { project } => edit::chapters(&project),
+        Cmd::Cache { cmd } => match cmd {
+            CacheCmd::Stats { project } => cache_cmd(None, project, false),
+            CacheCmd::Clean { older_than, project } => cache_cmd(older_than, project, true),
+        },
+        Cmd::Guide => Ok(Output::ok(json!({"guide": GUIDE}), GUIDE)),
         Cmd::Qa { video, target, project } => edit::qa(&video, &target, project.as_deref()),
         Cmd::Selftest { quick: _, full, keep, out } => selftest(full, keep, out),
         Cmd::Probe { files, loudness } => {
@@ -441,4 +487,38 @@ fn transcribe(
     let mut j = json!(t);
     j["source"] = json!(source);
     Ok(Output::ok(j, human))
+}
+
+const GUIDE: &str = include_str!("../../../docs/CLAUDE_GUIDE.md");
+
+fn cache_cmd(older: Option<String>, project: Option<PathBuf>, clean: bool) -> CmdResult {
+    use cutline_media::cache::{clean as do_clean, parse_age, stats};
+    let mut roots = vec![cutline_deps::paths::cache_dir()];
+    if let Some(p) = project {
+        let dir = if p.is_dir() { p } else { p.parent().map(|d| d.to_path_buf()).unwrap_or_default() };
+        roots.push(cutline_render::cutline_dir(&dir).join("cache"));
+        roots.push(cutline_render::cutline_dir(&dir).join("tmp"));
+    }
+    let age = match &older {
+        Some(a) => Some(
+            parse_age(a)
+                .ok_or_else(|| CliError::usage(anyhow::anyhow!("bad --older-than `{a}` (use e.g. 30d, 12h, 45m)")))?,
+        ),
+        None => None,
+    };
+    let res: Vec<_> = roots.iter().map(|r| if clean { do_clean(r, age) } else { stats(r) }).collect();
+    let h = res
+        .iter()
+        .map(|s| {
+            format!(
+                "{} {}: {} files, {:.1} MB",
+                if clean { "removed from" } else { "cache" },
+                s.root,
+                s.files,
+                s.bytes as f64 / 1e6
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(Output::ok(json!({"cleaned": clean, "roots": res}), h))
 }
