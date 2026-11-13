@@ -63,6 +63,12 @@ cargo build --release                    # core (no face detector)
 cargo build --release --features onnx    # with YuNet face tracking (downloads ONNX Runtime)
 ```
 
+For local use, `scripts/build-bin.sh` builds a release binary into `bin/` (git-ignored) with
+`assets/` beside it, plus `bin/CUTLINE_MANUAL.md`: a manual for Claude generated from that
+binary (workflow guide, every command's `--help`, the project format, template/transition/effect
+names, and the build machine's `doctor` report) and `bin/project.schema.json`. Rerun it after
+pulling changes to keep both current.
+
 Requires Rust ≥ 1.80. External tools are managed by `cutline deps` (pinned in
 `tools.lock.json`); a system ffmpeg ≥ 6 works as a fallback. `scripts/release.sh` builds a
 universal macOS binary and a Windows zip with the `assets/` directory alongside.
