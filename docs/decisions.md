@@ -240,3 +240,8 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-13 — Discovering a repo-local `.cutline-home`
 - **Decision:** without `CUTLINE_HOME`, cutline uses the nearest `.cutline-home/` that contains `tools/`, searching up from the working directory and then from the binary's folder, before the platform data dir; the cache follows the home as it does with `CUTLINE_HOME`. `doctor` prints the home and how it was found.
 - **Reason:** a checkout's `target/release/cutline` run from another folder (e.g. a video project) reported ffmpeg missing although the repo's `.cutline-home` had everything installed. Requiring `tools/` keeps stray empty folders from hijacking the home.
+
+## 2026-11-13 — VHS tapes as assets
+- **Decision:** an asset whose `path` ends in `.tape` is recorded with `vhs` (`CUTLINE_VHS` or `PATH`) when the project loads, before probing, into `.cutline/cache/terminal/<hash of tape + vhs version>.mp4`, and the asset then points at that file. The tape's `Output` lines are replaced; vhs runs in the tape's folder with cutline's ffmpeg first on `PATH`. A missing vhs (`E_TOOL_MISSING`) or a failed recording (`E_TAPE_FAILED`) is reported on the asset's `path`.
+- **Alternatives:** a separate `cutline record` step; an `AssetKind::Terminal` handled throughout the pipeline.
+- **Reason:** the edit stays reproducible from the project folder, and everything after loading (probe, segments, QA) treats the recording as ordinary footage. Recording is keyed on the tape text only, so a tape that shows live data (clocks, process lists) is re-recorded only when edited.

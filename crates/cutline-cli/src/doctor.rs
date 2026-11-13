@@ -77,6 +77,12 @@ pub fn run() -> CmdResult {
             fixes.push("cutline deps install chrome".into());
         }
     }
+    // vhs (optional: terminal recordings from .tape assets)
+    let vhs = cutline_render::terminal::vhs_binary();
+    match &vhs {
+        Some(p) => lines.push(format!("✔ vhs: {}", p.display())),
+        None => lines.push("· vhs not found (`.tape` terminal-recording assets unavailable; set CUTLINE_VHS)".into()),
+    }
 
     // whisper / face model (optional)
     let models = paths::tools_dir().join("models");
@@ -140,6 +146,7 @@ pub fn run() -> CmdResult {
         "capabilities": caps_json,
         "fonts": {"dir": fonts_dir, "files": fonts},
         "chrome": chrome,
+        "vhs": vhs,
         "whisper_models": whisper,
         "whisper_cli": whisper_cli,
         "face_model": face,

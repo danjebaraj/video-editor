@@ -52,7 +52,7 @@ cue). See [Cues](#cues).
 
 | Field | Default | Notes |
 |---|---|---|
-| `path` | required | image sequences use a printf pattern: `frames/%05d.png` |
+| `path` | required | image sequences use a printf pattern: `frames/%05d.png`. A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video |
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |

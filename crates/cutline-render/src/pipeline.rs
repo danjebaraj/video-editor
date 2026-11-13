@@ -83,7 +83,13 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
     let path = std::fs::canonicalize(path)
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot open {}: {e}", path.display())))?;
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let (project, notes, cues) = parse_file_with_cues(&path)?;
+    let (mut project, notes, cues) = parse_file_with_cues(&path)?;
+    // terminal recordings (`.tape` assets) become cached videos before probing
+    let tape_errs =
+        crate::terminal::record_tapes(&mut project, &dir, &crate::cutline_dir(&dir).join("cache").join("terminal"));
+    if !tape_errs.is_empty() {
+        return Err(LoadError::Invalid(tape_errs));
+    }
     let tc = cutline_deps::toolchain().map_err(LoadError::Tool)?;
     let cache = Cache::new(crate::cutline_dir(&dir).join("cache").join("probe"));
     let media = probe_project(tc, &project, &dir, &cache).map_err(LoadError::Tool)?;

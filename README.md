@@ -29,7 +29,7 @@ cutline guide                               # the workflow Claude should follow
   blur-in, glitch, vignette, motion blur; every xfade transition plus whips, zoom punch, flash
   cut and glitch; overlays (alpha video, images, PNG sequences, B-roll/PiP with rounded corners,
   border, shadow) with enter/exit animations; progress bar; LUTs and color presets.
-- **Screencasts:** `profile: "screencast"` (text-tuned encoding, freeze-tolerant QA), optional
+- **Screencasts:** VHS `.tape` scripts as assets (recorded and cached at load), `profile: "screencast"` (text-tuned encoding, freeze-tolerant QA), optional
   4:4:4 chroma, and `zoom_to` a rectangle of the UI.
 - **Masks:** blur, pixelate or fill a region (with optional replacement text) to hide private
   details in screen recordings.

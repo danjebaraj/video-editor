@@ -13,6 +13,7 @@ pub mod overlay;
 pub mod pipeline;
 pub mod reframe;
 pub mod segment;
+pub mod terminal;
 pub mod transitions;
 
 use anyhow::{Context, Result};
