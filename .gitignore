@@ -5,3 +5,5 @@
 /review/
 /out/
 .DS_Store
+/bin/
+/bin.new/
