@@ -206,13 +206,15 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             }
             None => {}
         }
-        if let Some(t) = &a.transcript {
-            if !ctx.project_dir.join(t).exists() {
-                d.push(Diagnostic::error(
-                    "E_ASSET_NOT_FOUND",
-                    format!("{base}/transcript"),
-                    format!("transcript file not found: {t}"),
-                ));
+        for (field, file) in [("transcript", &a.transcript), ("script", &a.script)] {
+            if let Some(t) = file {
+                if !ctx.project_dir.join(t).exists() {
+                    d.push(Diagnostic::error(
+                        "E_ASSET_NOT_FOUND",
+                        format!("{base}/{field}"),
+                        format!("{field} file not found: {t}"),
+                    ));
+                }
             }
         }
     }
@@ -234,7 +236,9 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
     }
     let first_src_fps =
         p.clips().find_map(|c| facts.get(&c.clip).filter(|f| f.kind == AssetKind::Video).and_then(|f| f.fps));
-    let spec = target::resolve(p.target, p.fps, first_src_fps, p.width, p.height);
+    let mut spec = target::resolve(p.target, p.fps, first_src_fps, p.width, p.height);
+    spec.screencast = p.profile == Some(Profile::Screencast);
+    spec.chroma444 = p.chroma == Some(Chroma::C444);
     let fps = spec.fps;
 
     // ---- main
@@ -320,7 +324,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     ok = false;
                     continue;
                 }
-                let speed = c.speed.unwrap_or(1.0);
+                let mut speed = c.speed.unwrap_or(1.0);
                 if !(0.25..=4.0).contains(&speed) {
                     d.push(Diagnostic::error(
                         "E_SPEED_RANGE",
@@ -339,19 +343,116 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 }
                 let src_fps = f.and_then(|f| f.fps).unwrap_or(fps);
                 let media_dur = f.map(|f| f.duration).unwrap_or(0.0);
+                let freeze_frames: i64 = c
+                    .effects
+                    .iter()
+                    .map(|e| match e {
+                        Effect::Freeze { duration, .. } => fps.secs_to_frames(*duration),
+                        _ => 0,
+                    })
+                    .sum();
+                // `end_at`: content frames that make the cut to the next clip land on it.
+                let fit_frames = match c.end_at {
+                    None => None,
+                    Some(e) => {
+                        let at = format!("{base}/end_at");
+                        if e.is_end() {
+                            d.push(Diagnostic::error("E_BAD_TIME", at, "end_at must be a time, not `end`"));
+                            ok = false;
+                            continue;
+                        }
+                        if c.duration.is_some() || !c.speed_ramp.is_empty() {
+                            d.push(
+                                Diagnostic::error(
+                                    "E_FIELD_CONFLICT",
+                                    at,
+                                    "end_at sets the clip length, so it cannot be combined with `duration` or `speed_ramp`",
+                                )
+                                .hint("remove `duration`/`speed_ramp`, or remove `end_at`"),
+                            );
+                            ok = false;
+                            continue;
+                        }
+                        let prev_end = clips.last().map(|l: &TClip| l.end()).unwrap_or(0);
+                        let tf_in = pending_trans
+                            .as_ref()
+                            .map(|(_, t)| if t.kind == "cut" { 0 } else { fps.secs_to_frames(t.duration) })
+                            .unwrap_or(0);
+                        let tf_out = match p.main.get(mi + 1) {
+                            Some(MainItem::Transition(t)) if t.transition.kind != "cut" => {
+                                fps.secs_to_frames(t.transition.duration)
+                            }
+                            _ => 0,
+                        };
+                        let start = prev_end - tf_in;
+                        let content = e.frames(fps, 0) + tf_out / 2 - start - freeze_frames;
+                        if content < 1 {
+                            d.push(
+                                Diagnostic::error(
+                                    "E_END_AT_BEFORE_START",
+                                    at,
+                                    format!(
+                                        "end_at {:.3}s is not after this clip's start ({:.3}s)",
+                                        e.seconds(fps, 0.0),
+                                        fps.frames_to_secs(start)
+                                    ),
+                                )
+                                .hint("cues and end_at times must increase along `main`"),
+                            );
+                            ok = false;
+                            continue;
+                        }
+                        Some(content)
+                    }
+                };
                 let (src_in, src_out, tl_secs);
                 if is_visual_still(kind) {
-                    let dur = c.duration.or(asset.duration).map(|t| t.seconds(fps, 0.0)).unwrap_or(3.0);
+                    let dur = match fit_frames {
+                        Some(ff) => fps.frames_to_secs(ff),
+                        None => c.duration.or(asset.duration).map(|t| t.seconds(fps, 0.0)).unwrap_or(3.0),
+                    };
                     src_in = 0.0;
                     src_out = dur;
                     tl_secs = dur;
                 } else {
                     src_in = c.in_.map(|t| t.seconds(src_fps, media_dur)).unwrap_or(0.0);
-                    src_out = match (c.out, c.duration) {
-                        (Some(o), _) => o.seconds(src_fps, media_dur),
-                        (None, Some(dd)) => src_in + dd.seconds(src_fps, media_dur) * speed,
-                        (None, None) => media_dur,
+                    src_out = match (c.out, c.duration, fit_frames) {
+                        (Some(o), _, _) => o.seconds(src_fps, media_dur),
+                        (None, _, Some(ff)) => src_in + fps.frames_to_secs(ff) * speed,
+                        (None, Some(dd), None) => src_in + dd.seconds(src_fps, media_dur) * speed,
+                        (None, None, None) => media_dur,
                     };
+                    if let (Some(ff), Some(_)) = (fit_frames, c.out) {
+                        // in and out fixed: the speed absorbs the difference
+                        speed = (src_out - src_in) / fps.frames_to_secs(ff);
+                        if !(0.25..=4.0).contains(&speed) && src_out > src_in {
+                            d.push(
+                                Diagnostic::error(
+                                    "E_FIT_SPEED",
+                                    format!("{base}/end_at"),
+                                    format!(
+                                        "fitting {:.3}s of footage into {:.3}s needs speed {speed:.2}, outside 0.25–4",
+                                        src_out - src_in,
+                                        fps.frames_to_secs(ff)
+                                    ),
+                                )
+                                .hint("widen or narrow `in`/`out`, or remove `out` to trim instead of changing speed"),
+                            );
+                        }
+                    } else if fit_frames.is_some() && f.is_some() && src_out > media_dur + 0.5 / src_fps.as_f64() {
+                        d.push(
+                            Diagnostic::error(
+                                "E_TIME_OUT_OF_RANGE",
+                                format!("{base}/end_at"),
+                                format!(
+                                    "end_at needs footage up to {src_out:.3}s at speed {speed}, but the asset is {media_dur:.3}s long"
+                                ),
+                            )
+                            .hint("set `out` so cutline speeds the clip up to fit, raise `speed`, or move `in` earlier"),
+                        );
+                        ok = false;
+                        continue;
+                    }
                     if f.is_some() && src_in >= media_dur - 1e-6 {
                         d.push(
                             Diagnostic::error(
@@ -396,14 +497,13 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         ramp_duration(src_out - src_in, &c.speed_ramp)
                     };
                 }
-                let mut frames = fps.secs_to_frames(tl_secs);
+                // fitted clips take the exact frame count (no rounding drift against the cue)
+                let mut frames = fit_frames.unwrap_or_else(|| fps.secs_to_frames(tl_secs));
                 let clip_secs = tl_secs;
                 for (ei, e) in c.effects.iter().enumerate() {
                     check_effect(e, clip_secs, &format!("{base}/effects/{ei}"), &mut d);
-                    if let Effect::Freeze { duration, .. } = e {
-                        frames += fps.secs_to_frames(*duration);
-                    }
                 }
+                frames += freeze_frames;
                 if let Some(cg) = &c.color {
                     check_color(cg, ctx, &format!("{base}/color"), &mut d);
                 }
@@ -451,6 +551,12 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         });
                     }
                 }
+                let mut clip = (**c).clone();
+                if fit_frames.is_some() && !is_visual_still(kind) {
+                    // keep the clip copy consistent with what `end_at` resolved to
+                    clip.speed = Some(crate::time::round6(speed));
+                    clip.out = Some(TimeValue::Seconds(crate::time::round6(src_out)));
+                }
                 clips.push(TClip {
                     main_index: mi,
                     index,
@@ -462,7 +568,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     speed,
                     start,
                     frames,
-                    clip: (**c).clone(),
+                    clip,
                 });
             }
         }
@@ -515,6 +621,28 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     )
                     .hint(format!("available: {}", catalog::TEXT_TEMPLATES.join(", "))),
                 );
+            }
+        }
+        if let Layer::Mask { rect, strength, text_size, .. } = l {
+            let inside = |v: f64| (0.0..=1.0).contains(&v);
+            if !(inside(rect.x) && inside(rect.y) && rect.w > 0.0 && rect.h > 0.0)
+                || rect.x + rect.w > 1.0 + 1e-9
+                || rect.y + rect.h > 1.0 + 1e-9
+            {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/rect"),
+                        "mask rect must lie inside the frame: x, y, w, h are fractions (0–1) with x+w ≤ 1 and y+h ≤ 1",
+                    )
+                    .hint("e.g. {x: 0.2, y: 0.44, w: 0.75, h: 0.03}; divide pixel values by the frame width/height"),
+                );
+            }
+            if strength.is_some_and(|s| !(0.0..=10.0).contains(&s) || s == 0.0) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/strength"), "strength must be within (0, 10]"));
+            }
+            if text_size.is_some_and(|s| s.is_nan() || s <= 0.0) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/text_size"), "text_size must be positive"));
             }
         }
         if let Some(v) = l.visual() {
@@ -581,6 +709,8 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         Some(o - i)
                     }
                     Layer::Audio { r#loop: Some(true), .. } => None,
+                    // backtimed music runs to the timeline end unless told otherwise
+                    Layer::Audio { align: Some(AudioAlign::End), .. } => None,
                     Layer::Audio { src_in, .. } => {
                         media_len.map(|ml| ml - src_in.map(|t| t.seconds(fps, ml)).unwrap_or(0.0))
                     }
@@ -617,7 +747,30 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             continue;
         }
         let z = l.visual().and_then(|v| v.z).unwrap_or(li as i32);
-        layers.push(TLayer { index: li, start, end: end.min(total), z, layer: l.clone() });
+        let end = end.min(total);
+        let (mut start, mut layer) = (start, l.clone());
+        if let Layer::Audio { align: Some(AudioAlign::End), src_in, r#loop, .. } = &mut layer {
+            if src_in.is_some() || *r#loop == Some(true) {
+                d.push(
+                    Diagnostic::error(
+                        "E_FIELD_CONFLICT",
+                        format!("{base}/align"),
+                        "align: end chooses the source start itself, so it cannot be combined with `src_in` or `loop`",
+                    )
+                    .hint("remove `src_in`/`loop`, or remove `align`"),
+                );
+            } else if let Some(ml) = media_len {
+                let span = fps.frames_to_secs(end - start);
+                if ml >= span {
+                    // trim the head so the asset's last sample lands on the layer end
+                    *src_in = Some(TimeValue::Seconds(crate::time::round6(ml - span)));
+                } else {
+                    // shorter than the span: start later instead
+                    start = end - fps.secs_to_frames(ml);
+                }
+            }
+        }
+        layers.push(TLayer { index: li, start, end, z, layer });
     }
 
     // ---- captions / audio settings
@@ -664,6 +817,18 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         .hint(catalog::VOICE_CHAINS.join(", ")),
                     );
                 }
+            }
+        }
+        if let Some(m) = a.music_level {
+            if !(3.0..=40.0).contains(&m) {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        "/audio/music_level",
+                        "music_level is how many LU the music sits below the voice: 3–40",
+                    )
+                    .hint("18 is a typical bed under narration; 12 for a livelier mix"),
+                );
             }
         }
         if let Some(l) = &a.loudness {
@@ -714,6 +879,48 @@ fn check_effect(e: &Effect, clip_secs: f64, base: &str, d: &mut Vec<Diagnostic>)
                 if e <= start {
                     d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/end"), "zoom end must be after start"));
                 }
+            }
+            Some(*start)
+        }
+        Effect::ZoomTo { rect, start, duration, padding, end, .. } => {
+            let inside = |v: f64| (0.0..=1.0).contains(&v);
+            if !(inside(rect.x) && inside(rect.y) && rect.w > 0.0 && rect.h > 0.0)
+                || rect.x + rect.w > 1.0 + 1e-9
+                || rect.y + rect.h > 1.0 + 1e-9
+            {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/rect"),
+                        "zoom_to rect must lie inside the frame (fractions 0–1, x+w ≤ 1, y+h ≤ 1)",
+                    )
+                    .hint("e.g. {x: 0.2, y: 0.6, w: 0.4, h: 0.3}"),
+                );
+            } else {
+                let (s, _) = zoom_to_params(rect, padding.unwrap_or(0.03), f64::INFINITY);
+                if s > 3.0 {
+                    d.push(
+                        Diagnostic::warning(
+                            "W_ZOOM_CAPPED",
+                            format!("{base}/rect"),
+                            format!("the rect needs a {s:.1}× zoom; capped at 3× (it will not fill the view)"),
+                        )
+                        .hint("use a larger rect, or accept the cap"),
+                    );
+                }
+            }
+            if duration.is_nan() || *duration <= 0.0 {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/duration"), "duration must be positive"));
+            }
+            if padding.is_some_and(|p| !(0.0..=0.4).contains(&p)) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/padding"), "padding must be within 0–0.4"));
+            }
+            if end.is_some_and(|e| e < start + duration) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    format!("{base}/end"),
+                    "zoom back out (end) must start after the zoom in finishes (start + duration)",
+                ));
             }
             Some(*start)
         }

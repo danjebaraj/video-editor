@@ -3,6 +3,7 @@
 pub mod assemble;
 pub mod audio_plan;
 pub mod auto;
+pub mod cues;
 pub mod custom_transitions;
 pub mod effects;
 pub mod escape;
@@ -12,6 +13,7 @@ pub mod overlay;
 pub mod pipeline;
 pub mod reframe;
 pub mod segment;
+pub mod terminal;
 pub mod transitions;
 
 use anyhow::{Context, Result};
@@ -266,11 +268,17 @@ fn normalize_paths(s: &str, roots: &[&Path]) -> String {
     out
 }
 
+/// Whether the deliverable is 4:4:4 (`chroma: "444"`; drafts and hardware encodes stay 4:2:0).
+pub fn final_chroma444(tl: &Timeline, opts: &RenderOptions) -> bool {
+    tl.target.chroma444 && !opts.draft && !opts.hw
+}
+
 /// Encoder args for the final deliverable.
 pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Toolchain) -> Vec<String> {
     let gop = ((g.fps.as_f64() / 2.0).round() as i64).max(1).to_string();
     let mut v: Vec<String> = vec![];
     let hw = if opts.draft || opts.hw { draft_hw_encoder(tc) } else { None };
+    let uses_hw = hw.is_some();
     match hw {
         Some(enc) => {
             v.extend([String::from("-c:v"), enc.clone()]);
@@ -281,8 +289,20 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
             }
         }
         None => {
-            let (preset, crf) = if opts.draft { ("veryfast", 23) } else { ("slow", tl.target.crf) };
+            let (preset, crf) = if opts.draft {
+                ("veryfast", 23)
+            } else if tl.target.screencast {
+                // text and UI edges need more bits than camera footage
+                ("slow", tl.target.crf.saturating_sub(2))
+            } else {
+                ("slow", tl.target.crf)
+            };
             let level = if g.width * g.height > 1920 * 1088 { "5.1" } else { "4.2" };
+            let profile = if final_chroma444(tl, opts) { "high444" } else { "high" };
+            if tl.target.screencast && !opts.draft {
+                // flat areas and hard edges: stronger deblocking, more reference frames
+                v.extend(["-tune", "animation"].map(String::from));
+            }
             v.extend(
                 [
                     "-c:v",
@@ -292,7 +312,7 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
                     "-crf",
                     &crf.to_string(),
                     "-profile:v",
-                    "high",
+                    profile,
                     "-level:v",
                     level,
                     "-bf",
@@ -305,7 +325,8 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
             v.extend(["-x264-params", "keyint_min=1:scenecut=0"].map(String::from));
         }
     }
-    v.extend(["-pix_fmt", "yuv420p", "-r", &g.fps.ff(), "-fps_mode", "cfr"].map(String::from));
+    let pix = if !uses_hw && final_chroma444(tl, opts) { "yuv444p" } else { "yuv420p" };
+    v.extend(["-pix_fmt", pix, "-r", &g.fps.ff(), "-fps_mode", "cfr"].map(String::from));
     v.extend(
         ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
             .map(String::from),
@@ -382,7 +403,8 @@ fn final_job(
     // stamp color properties on the frames: newer ffmpeg lets (unspecified) frame properties
     // override the -color_* output options after overlays
     lines.push(format!(
-        "[{cur}]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]"
+        "[{cur}]format={},setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]",
+        if final_chroma444(tl, opts) { "yuv444p" } else { "yuv420p" }
     ));
     let script = work.join("final.filter");
     let text = lines.join(";\n") + "\n";

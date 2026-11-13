@@ -31,6 +31,8 @@ pub fn qa_context(p: &Project, tl: &Timeline, extras: &cutline_render::PlanExtra
         expected_duration: Some(tl.duration()),
         is_shorts: tl.target.is_vertical(),
         max_cps: 20.0,
+        screencast: tl.target.screencast,
+        chroma444: tl.target.chroma444,
         ..Default::default()
     };
     let lt = p.audio.as_ref().and_then(|a| a.loudness.clone()).unwrap_or_default();

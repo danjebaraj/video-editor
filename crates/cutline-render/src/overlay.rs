@@ -183,6 +183,81 @@ pub fn frame_png(w: u32, h: u32, r: f64, border: f64, border_rgb: [u8; 3], shado
     (buf.into_inner(), tw, th, pad)
 }
 
+/// A mask layer, resolved for one render geometry.
+pub struct MaskSpec<'a> {
+    pub rect: cutline_core::model::Rect,
+    pub mode: cutline_core::model::MaskMode,
+    pub color: Option<&'a str>,
+    pub strength: f64,
+    pub text: Option<&'a str>,
+    pub text_color: Option<&'a str>,
+    /// Text size in px at this geometry.
+    pub text_size: Option<f64>,
+}
+
+/// Pixel rectangle `(x, y, w, h)` of a normalized rect in a `w×h` frame (at least 2×2, inside).
+pub fn mask_px(r: &cutline_core::model::Rect, (w, h): (u32, u32)) -> (u32, u32, u32, u32) {
+    let px = |v: f64, n: u32| ((v * n as f64).round().max(0.0) as u32).min(n);
+    let (x, y) = (px(r.x, w).min(w.saturating_sub(2)), px(r.y, h).min(h.saturating_sub(2)));
+    let mw = px(r.x + r.w, w).saturating_sub(x).clamp(2, w - x);
+    let mh = px(r.y + r.h, h).saturating_sub(y).clamp(2, h - y);
+    (x, y, mw, mh)
+}
+
+/// Filter lines hiding a region of `cur` during `[s, e]`, plus optional replacement text.
+pub fn mask_lines(
+    lines: &mut Vec<String>,
+    cur: &mut String,
+    lab: &str,
+    m: MaskSpec,
+    frame: (u32, u32),
+    (s, e): (f64, f64),
+    fonts_dir: Option<&Path>,
+) {
+    use cutline_core::model::MaskMode;
+    let (x, y, mw, mh) = mask_px(&m.rect, frame);
+    let en = format!("enable='between(t,{},{})'", f(s), f(e));
+    let short = mw.min(mh) as f64;
+    match m.mode {
+        MaskMode::Fill => {
+            let col = ff_color(m.color.unwrap_or("#000000"));
+            lines.push(format!("[{cur}]drawbox=x={x}:y={y}:w={mw}:h={mh}:color={col}:t=fill:{en}[{lab}o]"));
+        }
+        MaskMode::Blur => {
+            // sigma of half the region's short side wipes out text that fills the region
+            let sigma = (0.5 * short * m.strength).clamp(2.0, 150.0);
+            lines.push(format!("[{cur}]split[{lab}a][{lab}b]"));
+            lines.push(format!("[{lab}b]crop={mw}:{mh}:{x}:{y},gblur=sigma={}:steps=3[{lab}c]", f(sigma)));
+            lines.push(format!("[{lab}a][{lab}c]overlay={x}:{y}:{en}[{lab}o]"));
+        }
+        MaskMode::Pixelate => {
+            let block = ((short / 3.0 * m.strength).round() as u32).clamp(2, mw.min(mh).max(2));
+            let (bw, bh) = ((mw / block).max(1), (mh / block).max(1));
+            lines.push(format!("[{cur}]split[{lab}a][{lab}b]"));
+            lines.push(format!(
+                "[{lab}b]crop={mw}:{mh}:{x}:{y},scale={bw}:{bh}:flags=area,scale={mw}:{mh}:flags=neighbor[{lab}c]"
+            ));
+            lines.push(format!("[{lab}a][{lab}c]overlay={x}:{y}:{en}[{lab}o]"));
+        }
+    }
+    *cur = format!("{lab}o");
+    let Some(t) = m.text.filter(|t| !t.is_empty()) else { return };
+    let Some(font) = fonts_dir.map(|d| d.join("Inter[opsz,wght].ttf")).filter(|p| p.exists()) else {
+        tracing::warn!("mask text skipped: bundled Inter font not found");
+        return;
+    };
+    let size = m.text_size.unwrap_or(0.6 * mh as f64).max(4.0);
+    lines.push(format!(
+        "[{cur}]drawtext=fontfile={}:text={}:fontsize={}:fontcolor={}:x={}:y={y}+({mh}-th)/2:{en}[{lab}t]",
+        filter_path(&font),
+        crate::escape::drawtext_text(t),
+        f(size),
+        ff_color(m.text_color.unwrap_or("#9AA0A6")),
+        f(x as f64 + 0.3 * size)
+    ));
+    *cur = format!("{lab}t");
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn apply(
     tl: &Timeline,
@@ -405,6 +480,25 @@ pub fn apply(
                     f(s)
                 ));
                 push_overlay(lines, cur, &format!("{lab}o"), &format!("-W+W*t/{}", f(total)), &y, s, e);
+            }
+            Layer::Mask { rect, mode, color, strength, text, text_color, text_size, .. } => {
+                mask_lines(
+                    lines,
+                    cur,
+                    &lab,
+                    MaskSpec {
+                        rect: *rect,
+                        mode: mode.unwrap_or_default(),
+                        color: color.as_deref(),
+                        strength: strength.unwrap_or(1.0),
+                        text: text.as_deref(),
+                        text_color: text_color.as_deref(),
+                        text_size: text_size.map(|v| v * k),
+                    },
+                    (w, h),
+                    (s, e),
+                    extras.fonts_dir.as_deref(),
+                );
             }
             _ => {}
         }

@@ -24,6 +24,12 @@ pub fn lut_path(name: &str, l: &Loaded) -> Option<PathBuf> {
 }
 
 pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<PlanExtras> {
+    compute_for(l, p, tl, draft, None)
+}
+
+/// `compute`, for a render that will only be looked at at `stills` (timeline seconds): HTML
+/// clips and layers on screen at none of them are captured at 1 fps.
+pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: Option<&[f64]>) -> Result<PlanExtras> {
     let brand = load_brand(l, p)?;
     let pad = crate::overlay::ff_color(&brand.colors.background);
     let mut extras = PlanExtras {
@@ -35,8 +41,9 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<Pl
         ..Default::default()
     };
     text_layers(p, tl, &brand, &mut extras)?;
-    html_layers(l, p, tl, &brand, &mut extras)?;
+    html_layers(l, p, tl, &brand, &mut extras, draft, stills)?;
     captions(l, p, tl, &brand, &mut extras)?;
+    extras.warnings.extend(crate::auto::script_warnings(l, p));
     for c in &tl.clips {
         let mut x = ClipExtras {
             pad_color: c
@@ -46,6 +53,7 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<Pl
                 .and_then(|r| r.pad_color.as_deref())
                 .map(crate::overlay::ff_color)
                 .unwrap_or_else(|| pad.clone()),
+            chroma444: tl.target.chroma444 && !draft,
             ..Default::default()
         };
         let lut = c
@@ -63,7 +71,7 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<Pl
                 | cutline_core::model::AssetKind::Svg
                 | cutline_core::model::AssetKind::Lottie
         ) {
-            x.source_override = Some(html_clip(l, p, tl, c)?);
+            x.source_override = Some(html_clip(l, p, tl, c, draft, stills)?);
         }
         let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
         let g = if draft { full.draft() } else { full };
@@ -278,8 +286,34 @@ fn html_cache(l: &Loaded) -> std::path::PathBuf {
     crate::cutline_dir(&l.dir).join("cache").join("html")
 }
 
+/// HTML capture settings: drafts and previews capture at half pixel density (same CSS layout)
+/// and at most 15 fps, which cuts Chrome's frame capture, the slowest part of a cold preview,
+/// by about 8×. Final renders capture every frame at full size.
+pub fn html_capture(tl: &Timeline, draft: bool, span: (i64, i64), stills: Option<&[f64]>) -> (f64, f64) {
+    let fps = tl.fps.as_f64();
+    let unseen = stills.is_some_and(|ts| {
+        let (a, b) = (tl.secs(span.0), tl.secs(span.1));
+        !ts.iter().any(|t| *t >= a - 0.5 && *t <= b + 0.5)
+    });
+    if unseen {
+        (0.5, 1.0)
+    } else if draft {
+        (0.5, fps.min(15.0))
+    } else {
+        (1.0, fps)
+    }
+}
+
 /// Render an HTML/SVG/Lottie main clip to an opaque mezzanine.
-fn html_clip(l: &Loaded, p: &Project, tl: &Timeline, c: &cutline_core::timeline::TClip) -> Result<std::path::PathBuf> {
+fn html_clip(
+    l: &Loaded,
+    p: &Project,
+    tl: &Timeline,
+    c: &cutline_core::timeline::TClip,
+    draft: bool,
+    stills: Option<&[f64]>,
+) -> Result<std::path::PathBuf> {
+    let (device_scale, fps) = html_capture(tl, draft, (c.start, c.end()), stills);
     let a = &p.assets[&c.asset];
     let m = l.media.get(&c.asset).ok_or_else(|| anyhow::anyhow!("no media for {}", c.asset))?;
     let spec = cutline_html::RenderSpec {
@@ -287,21 +321,30 @@ fn html_clip(l: &Loaded, p: &Project, tl: &Timeline, c: &cutline_core::timeline:
         source: m.path.clone(),
         width: a.width.unwrap_or(tl.target.width),
         height: a.height.unwrap_or(tl.target.height),
-        fps: tl.fps.as_f64(),
+        fps,
         duration: tl.secs(c.frames),
         alpha: false,
         params: a.params.clone().unwrap_or(serde_json::json!({})),
         allow_dirs: vec![l.dir.clone()],
-        device_scale: 1.0,
+        device_scale,
     };
     cutline_html::render_cached(cutline_deps::toolchain()?, &spec, &html_cache(l))
 }
 
 /// Render HTML/SVG/Lottie layers and HTML text templates to alpha mezzanines.
-pub fn html_layers(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, extras: &mut PlanExtras) -> Result<()> {
+pub fn html_layers(
+    l: &Loaded,
+    p: &Project,
+    tl: &Timeline,
+    brand: &Brand,
+    extras: &mut PlanExtras,
+    draft: bool,
+    stills: Option<&[f64]>,
+) -> Result<()> {
     use cutline_core::model::Layer;
     let tc = cutline_deps::toolchain()?;
     for tlay in &tl.layers {
+        let (device_scale, fps) = html_capture(tl, draft, (tlay.start, tlay.end), stills);
         let dur = tl.secs(tlay.end - tlay.start);
         let spec = match &tlay.layer {
             Layer::Html { asset, .. } => {
@@ -316,12 +359,12 @@ pub fn html_layers(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, extras
                     source: m.path.clone(),
                     width: a.width.unwrap_or(tl.target.width),
                     height: a.height.unwrap_or(tl.target.height),
-                    fps: tl.fps.as_f64(),
+                    fps,
                     duration: dur,
                     alpha: a.alpha.unwrap_or(true),
                     params,
                     allow_dirs: vec![l.dir.clone()],
-                    device_scale: 1.0,
+                    device_scale,
                 }
             }
             Layer::Text { template, text, subtitle, params, .. } if template.ends_with("_html") => {
@@ -343,12 +386,12 @@ pub fn html_layers(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, extras
                     source: src,
                     width: tl.target.width,
                     height: tl.target.height,
-                    fps: tl.fps.as_f64(),
+                    fps,
                     duration: dur,
                     alpha: true,
                     params: serde_json::Value::Object(pm),
                     allow_dirs: vec![],
-                    device_scale: 1.0,
+                    device_scale,
                 }
             }
             _ => continue,
@@ -367,9 +410,55 @@ pub fn html_layers(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, extras
                 w: sw,
                 h: sh * 0.3,
                 text: text.clone().unwrap_or_default(),
-                kind: "text".into(),
+                // the box is a rough guess (the template lays itself out in Chrome)
+                kind: "text_html".into(),
             });
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::html_capture;
+    use cutline_core::model::AssetKind;
+    use cutline_core::time::Fps;
+    use cutline_core::timeline::{resolve, Context, MediaFacts, StaticLookup, Timeline};
+
+    fn timeline() -> Timeline {
+        let mut m = StaticLookup::default();
+        let f = MediaFacts {
+            exists: true,
+            kind: AssetKind::Video,
+            duration: 20.0,
+            has_video: true,
+            has_audio: false,
+            alpha: false,
+            width: 1920,
+            height: 1080,
+            fps: Some(Fps::new(30, 1)),
+            rotation: 0,
+        };
+        m.0.insert("v".into(), f);
+        let p = cutline_core::parse::parse_project(
+            "{version: 1, target: 'long_1080p', fps: 30, assets: {v: {path: 'v.mp4'}}, main: [{id: 'c', clip: 'v'}]}",
+        )
+        .unwrap();
+        resolve(&p, &m, &Context::default()).0.unwrap()
+    }
+
+    #[test]
+    fn drafts_capture_half_density_at_15_fps() {
+        let tl = timeline();
+        assert_eq!(html_capture(&tl, false, (0, 300), None), (1.0, 30.0));
+        assert_eq!(html_capture(&tl, true, (0, 300), None), (0.5, 15.0));
+    }
+
+    #[test]
+    fn stills_skip_frame_capture_for_unseen_spans() {
+        let tl = timeline();
+        // span 0–10 s; a still at 4 s sees it, stills at 12 and 15 s do not
+        assert_eq!(html_capture(&tl, true, (0, 300), Some(&[4.0])), (0.5, 15.0));
+        assert_eq!(html_capture(&tl, true, (0, 300), Some(&[12.0, 15.0])), (0.5, 1.0));
+    }
 }

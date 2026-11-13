@@ -184,6 +184,16 @@ pub fn zoom_terms(
                     focus = (p.x, p.y);
                 }
             }
+            Effect::ZoomTo { rect, start, duration, ease: ez, padding, end } => {
+                let (s, p) = cutline_core::model::zoom_to_params(rect, padding.unwrap_or(0.03), 3.0);
+                if s > 1.0 {
+                    terms.push(ScaleTerm::Ramp { a: *start, d: *duration, from: 1.0, to: s, ease: *ez });
+                    if let Some(e) = end {
+                        terms.push(ScaleTerm::Release { a: *e, d: *duration, to: s, ease: *ez });
+                    }
+                    focus = (p.x, p.y);
+                }
+            }
             Effect::KenBurns { from_scale, to_scale, from, to, ease: ez } => {
                 terms.push(ScaleTerm::Ramp { a: 0.0, d: dur, from: *from_scale, to: *to_scale, ease: *ez });
                 let p0 = from.map(|p| (p.x, p.y)).unwrap_or((0.5, 0.5));

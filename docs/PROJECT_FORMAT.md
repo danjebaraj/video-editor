@@ -10,6 +10,10 @@ Anywhere a time is accepted: seconds (`12.4`), timecode (`"01:02.500"`, `"00:01:
 frames (`"f:372"`, at the source fps for source times, the timeline fps otherwise), or `"end"`.
 Cuts snap to the nearest output frame.
 
+Timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can also be **cue
+references**: `"cue:clocks"`, `"cue:clocks+0.4"`, `"cue:clocks-0.2"` (seconds after/before the
+cue). See [Cues](#cues).
+
 ## Top level
 
 | Field | Type | Default | Notes |
@@ -30,6 +34,9 @@ Cuts snap to the nearest output frame.
 | `safe_zone` | `{top, bottom, left, right}` fractions | per target | |
 | `markers` | [`{at, title}`] | `[]` | chapters |
 | `exports` | [Export] | one export of `target` | multi-target from one edit |
+| `cues` | map name → Cue | `{}` | phrases in the voice-over; see [Cues](#cues) |
+| `profile` | `standard` | `screencast`: tuned for screen/terminal recordings — x264 `-tune animation` and CRF − 2 for sharp text and UI edges; QA's freeze check passes (pauses are normal) |
+| `chroma` | `"420"` | `"444"`: full color resolution (no fringes on small colored text; ProRes 4444 segments, H.264 High 4:4:4). Not every player supports 4:4:4 and platforms re-encode to 4:2:0, so use it for downloads and docs. Drafts and `--hw` stay 4:2:0. Exports can override |
 
 ### Targets
 
@@ -45,10 +52,11 @@ Cuts snap to the nearest output frame.
 
 | Field | Default | Notes |
 |---|---|---|
-| `path` | required | image sequences use a printf pattern: `frames/%05d.png` |
+| `path` | required | image sequences use a printf pattern: `frames/%05d.png`. A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video |
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |
+| `script` | — | the text that was spoken (a `.txt`, e.g. the TTS script). Captions, ducking and cues use the script's exact words, timed from the transcript; `[audio tags]` are ignored. `W_SCRIPT_MISMATCH` when under 70 % of the script is heard |
 | `duration` | 3 s | stills / HTML / Lottie / SVG |
 | `alpha` | — | assert alpha exists (`E_ALPHA_NOT_PRESENT` if not) |
 | `fps` | 30 | image sequences / HTML |
@@ -66,6 +74,7 @@ WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
 | `clip` | required | asset id |
 | `in`, `out` | 0, end of asset | source times |
 | `duration` | — | stills; or `in` + duration·speed |
+| `end_at` | — | timeline time of the cut to the next clip (the middle of the outgoing transition), usually `"cue:…"`. The clip is fitted: with `in` and `out` its speed is computed (0.25–4); without `out` the out point is (at `speed`); stills get the duration. Not with `duration` or `speed_ramp`. Jump cuts and filler removal skip fitted clips |
 | `speed` | 1 | 0.25–4; audio pitch preserved (`atempo`) |
 | `speed_ramp` | — | `[{t, speed}]`, source-relative `t` |
 | `reverse` | false | ≤ 10 s clips |
@@ -108,6 +117,7 @@ or `.cube` path) + `intensity` (0–1), `exposure` (stops), `contrast`, `saturat
 |---|---|
 | `punch_in` | `at`, `scale` 1.15, `duration` 0.25, `ease` out_cubic, `hold` (release after), `focus` {x,y} |
 | `zoom` | `from` 1, `to`, `start` 0, `end` clip end, `ease`, `focus` |
+| `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0, `duration` 0.6, `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`) |
 | `ken_burns` | `from_scale` 1, `to_scale` 1.15, `from`/`to` {x,y}, `ease` |
 | `shake` | `at`, `duration` 0.3, `intensity` 0.02 |
 | `flash` | `at`, `duration` 0.15, `color` (white) |
@@ -138,8 +148,9 @@ others until the end. Visual layers take: `position` (preset `center`, `top`, `b
 | `image` | `asset`, `ken_burns` |
 | `html` | `asset` (HTML/SVG/Lottie) |
 | `progress_bar` | `style` (`brand` or color), `edge` (top/bottom), `height` |
-| `audio` | `asset`, `src_in`, `gain_db`, `fade_in`, `fade_out`, `loop`, `role` |
+| `audio` | `asset`, `src_in`, `gain_db`, `fade_in`, `fade_out`, `loop`, `role`, `align` (`end`: backtime so the asset's own ending lands on the layer end — default the timeline end; the head is trimmed, or a shorter asset starts later; not with `src_in`/`loop`) |
 | `sfx` | `asset` (or brand alias), `at` or `anchor`+`offset`, `gain_db`, `pick_from` |
+| `mask` | `rect` `{x, y, w, h}` (fractions of the frame), `mode` (`blur` default, `pixelate`, `fill`), `color` (fill, default `#000000`), `strength` (default 1), `text` (replacement text, Inter), `text_color` (`#9AA0A6`), `text_size` (px at full size; default 60 % of the rect height). Hides part of the frame over the footage and overlays, under text and captions; until the end by default. Use `fill` for secrets: blurred or pixelated text can sometimes be recovered |
 
 Text templates: `hook_title`, `lower_third`, `callout`, `step_counter`, `big_number`, `quote`,
 `cta_subscribe`, `end_card`, `emoji_pop`, and HTML variants `hook_title_html`,
@@ -168,6 +179,9 @@ Text templates: `hook_title`, `lower_third`, `callout`, `step_counter`, `big_num
 `loudness` `{integrated: -14, true_peak: -1.0, lra}`, `voice_chain` (`clean_voice`),
 `dialogue_chain` (= voice_chain), `duck` `{under: [voice, dialogue], target: [music],
 amount_db: -12, attack: 0.12, release: 0.45, mode: "envelope"|"sidechain"}`, `micro_fade` 0.01.
+`music_level` (LU, 3–40): the music stem's gain is measured and set so the ducked music sits
+this far below the voice (`render_report.json` → `loudness.music_gain_db`); 18 is a typical
+narration bed.
 
 ## Auto directives
 
@@ -181,9 +195,45 @@ amount_db: -12, attack: 0.12, release: 0.45, mode: "envelope"|"sidechain"}`, `mi
 Generated items carry `generated_by`; `cutline expand` shows them. Jump-cut pieces keep the first
 piece's id (`talk`, `talk~2`, …).
 
+## Cues
+
+A cue names a phrase in a voice track; cutline finds it in the track's transcript when it loads
+the project and replaces every `"cue:name"` reference with timeline seconds (so `validate`,
+`expand` and `render` see plain numbers). `cutline cues project.json5` lists where each landed.
+
+```json5
+cues: {
+  clocks: "World clocks",                                   // short form: the phrase
+  cal: {phrase: "calendar jumps", edge: "end"},              // when the last word ends
+  again: {phrase: "world clocks", occurrence: 2, asset: "vo"},
+},
+main: [
+  {id: "intro", clip: "title", end_at: "cue:clocks"},       // cut to the next clip on "World"
+  {transition: {type: "fade", duration: 0.4}},
+  {id: "time", clip: "screen", in: 3, out: 18, end_at: "cue:cal"},  // speed computed to fit
+],
+layers: [
+  {type: "audio", asset: "vo", start: 1.2},
+  {type: "text", template: "lower_third", text: "World clocks", start: "cue:clocks+0.3", end: "cue:cal-0.5"},
+],
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `phrase` | required | case and punctuation are ignored; close transcription slips match ("pains" for "panes") with a `W_CUE_FUZZY` warning |
+| `asset` | the only voice-role audio layer's asset | its transcript: the asset `transcript` file, the transcript cache (`cutline transcribe`), or whisper |
+| `occurrence` | 1 | which occurrence of the phrase |
+| `edge` | `start` | `start` (first word begins) or `end` (last word ends) |
+
+The asset must be played by exactly one `audio` layer with a numeric `start` (default 0); a cue
+is that start + the word time − the layer's `src_in`. Errors: `E_UNKNOWN_CUE`,
+`E_CUE_NOT_FOUND` (the hint lists the closest phrases), `E_CUE_NOT_ALLOWED` (a cue in a source
+time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`; for `end_at`:
+`E_END_AT_BEFORE_START`, `E_FIT_SPEED`, `E_FIELD_CONFLICT`.
+
 ## Export
 
-`{name, target, fps, width, height, crf, out}`. With several exports, output files are named
+`{name, target, fps, width, height, crf, chroma, out}`. With several exports, output files are named
 `<name>-<export>.mp4`.
 
 ## Brand file

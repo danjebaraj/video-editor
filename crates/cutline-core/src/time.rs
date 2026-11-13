@@ -40,6 +40,11 @@ pub fn parse_time(s: &str) -> Result<TimeValue, String> {
     if t.eq_ignore_ascii_case("end") {
         return Ok(TimeValue::End);
     }
+    if t.starts_with("cue:") {
+        return Err(format!(
+            "time `{s}` is a cue reference, which cutline resolves when it loads a project file (from the voice-over transcript); cue references are allowed in layer start/end, sfx at, clip end_at and marker at"
+        ));
+    }
     if let Some(f) = t.strip_prefix("f:") {
         return f.trim().parse::<i64>().map(TimeValue::Frames).map_err(|_| format!("invalid frame count `{s}`"));
     }
@@ -96,10 +101,10 @@ impl JsonSchema for TimeValue {
     }
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
-            "description": "Seconds (number), timecode string \"mm:ss.mmm\" / \"hh:mm:ss.mmm\", frames \"f:N\", or \"end\".",
+            "description": "Seconds (number), timecode string \"mm:ss.mmm\" / \"hh:mm:ss.mmm\", frames \"f:N\", \"end\", or (timeline times only) a cue reference \"cue:name\" / \"cue:name+0.5\".",
             "oneOf": [
                 {"type": "number", "minimum": 0},
-                {"type": "string", "pattern": "^(end|f:\\d+|(\\d+:){0,2}\\d+(\\.\\d+)?)$"}
+                {"type": "string", "pattern": "^(end|f:\\d+|(\\d+:){0,2}\\d+(\\.\\d+)?|cue:[A-Za-z0-9_.-]+([+-]\\d+(\\.\\d+)?)?)$"}
             ]
         })
     }

@@ -57,6 +57,95 @@ pub struct Project {
     pub markers: Vec<Marker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exports: Vec<Export>,
+    /// `screencast`: tuned for screen and terminal recordings (sharper text encoding; frozen
+    /// frames are expected, so QA does not warn about them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Profile>,
+    /// Chroma subsampling of the deliverable: `420` (default, plays everywhere) or `444` (full
+    /// color resolution: no fringes on small colored text; not all players support it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma: Option<Chroma>,
+    /// Named points in the voice-over, found in its transcript: `{clocks: "World clocks"}`.
+    /// Timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can refer to
+    /// them as `"cue:clocks"`, `"cue:clocks+0.4"` or `"cue:clocks-0.2"`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cues: BTreeMap<String, Cue>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Profile {
+    #[default]
+    Standard,
+    Screencast,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+pub enum Chroma {
+    #[default]
+    #[serde(rename = "420")]
+    C420,
+    #[serde(rename = "444")]
+    C444,
+}
+
+/// A cue: a phrase in a voice track. The short form is just the phrase.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum Cue {
+    Phrase(String),
+    Spec(CueSpec),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CueSpec {
+    /// Words to find (case and punctuation are ignored; close transcription slips match).
+    pub phrase: String,
+    /// Asset whose transcript is searched. Default: the only voice-role audio layer's asset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+    /// Which occurrence of the phrase (1-based, default 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<usize>,
+    /// `start` (default): when the first word begins; `end`: when the last word ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge: Option<CueEdge>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CueEdge {
+    #[default]
+    Start,
+    End,
+}
+
+impl Cue {
+    pub fn phrase(&self) -> &str {
+        match self {
+            Cue::Phrase(p) => p,
+            Cue::Spec(s) => &s.phrase,
+        }
+    }
+    pub fn asset(&self) -> Option<&str> {
+        match self {
+            Cue::Phrase(_) => None,
+            Cue::Spec(s) => s.asset.as_deref(),
+        }
+    }
+    pub fn occurrence(&self) -> usize {
+        match self {
+            Cue::Phrase(_) => 1,
+            Cue::Spec(s) => s.occurrence.unwrap_or(1),
+        }
+    }
+    pub fn edge(&self) -> CueEdge {
+        match self {
+            Cue::Phrase(_) => CueEdge::Start,
+            Cue::Spec(s) => s.edge.unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
@@ -108,6 +197,10 @@ pub struct Asset {
     /// Transcript for this asset: Scribe JSON or cutline transcript JSON (relative path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<String>,
+    /// The text that was spoken (relative path to a .txt file), e.g. the TTS script. Captions
+    /// and cues then use the script's exact words, timed from the transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
     /// Duration for HTML/Lottie/SVG/still assets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<TimeValue>,
@@ -206,6 +299,11 @@ pub struct Clip {
     /// Timeline duration for stills / generated assets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<TimeValue>,
+    /// Timeline time of the cut to the next clip (the middle of the outgoing transition), e.g.
+    /// `"cue:calendar"`. The clip is fitted to end there: with `in` and `out` both set its
+    /// speed is computed; otherwise `out` is (at `speed`, default 1); stills get the duration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_at: Option<TimeValue>,
     /// Constant speed factor 0.25–4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,
@@ -415,6 +513,23 @@ pub enum Effect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         focus: Option<Point>,
     },
+    /// Zoom so `rect` (fractions of the frame) fills the view, starting at `start`
+    /// (clip-relative) over `duration`; zoom back out from `end` if set.
+    ZoomTo {
+        rect: Rect,
+        #[serde(default)]
+        start: f64,
+        #[serde(default = "zoom_to_dur")]
+        duration: f64,
+        #[serde(default = "in_out_cubic")]
+        ease: Ease,
+        /// Margin around the rect as a fraction of the frame (default 0.03).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        padding: Option<f64>,
+        /// Clip-relative time to start zooming back out (same duration and ease).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<f64>,
+    },
     /// Slow pan+zoom (stills and B-roll).
     KenBurns {
         #[serde(default = "one_f")]
@@ -468,6 +583,30 @@ pub enum Effect {
 
 fn punch_scale() -> f64 {
     1.15
+}
+fn zoom_to_dur() -> f64 {
+    0.6
+}
+fn in_out_cubic() -> Ease {
+    Ease::InOutCubic
+}
+
+/// Scale and focus that make `rect` (plus `padding` on each side) fill the frame, for the
+/// zoom chain (`x' = s·x − (s−1)·focus`). The scale is capped at `max_scale`.
+pub fn zoom_to_params(rect: &Rect, padding: f64, max_scale: f64) -> (f64, Point) {
+    let rw = (rect.w + 2.0 * padding).clamp(1e-3, 1.0);
+    let rh = (rect.h + 2.0 * padding).clamp(1e-3, 1.0);
+    let s = (1.0 / rw).min(1.0 / rh).clamp(1.0, max_scale);
+    if s <= 1.0 + 1e-9 {
+        return (1.0, Point { x: 0.5, y: 0.5 });
+    }
+    let view = 1.0 / s;
+    let axis = |c: f64| {
+        // window start, kept inside the frame, then the fixed point that lands there
+        let start = (c - view / 2.0).clamp(0.0, 1.0 - view);
+        (start * s / (s - 1.0)).clamp(0.0, 1.0)
+    };
+    (s, Point { x: axis(rect.x + rect.w / 2.0), y: axis(rect.y + rect.h / 2.0) })
 }
 fn punch_dur() -> f64 {
     0.25
@@ -678,9 +817,40 @@ pub enum Layer {
         /// Loop the asset to fill the span.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         r#loop: Option<bool>,
+        /// `end`: backtime so the music's real ending lands on the layer end (default: the
+        /// timeline end), instead of fading out mid-phrase.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        align: Option<AudioAlign>,
         /// Override the asset role (voice/music/sfx).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<Role>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Hide part of the frame: usernames, paths, emails, keys. Drawn over the footage and other
+    /// overlays (below text and captions).
+    Mask {
+        /// Region as fractions of the frame: `{x, y, w, h}` (top-left corner, size).
+        rect: Rect,
+        /// blur (default) | pixelate | fill. Use `fill` for secrets: blurred or pixelated text
+        /// can sometimes be recovered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<MaskMode>,
+        /// Fill color (default `#000000`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        /// Blur/pixelation strength multiplier (default 1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strength: Option<f64>,
+        /// Replacement text drawn in the region (left-aligned, vertically centered).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        /// Text color (default `#9AA0A6`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text_color: Option<String>,
+        /// Text size in output px at full resolution (default 60 % of the region height).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text_size: Option<f64>,
         #[serde(flatten)]
         at: Placement,
     },
@@ -713,6 +883,7 @@ impl Layer {
             Layer::Html { .. } => "html",
             Layer::ProgressBar { .. } => "progress_bar",
             Layer::Audio { .. } => "audio",
+            Layer::Mask { .. } => "mask",
             Layer::Sfx { .. } => "sfx",
         }
     }
@@ -724,6 +895,7 @@ impl Layer {
             | Layer::Image { at, .. }
             | Layer::Html { at, .. }
             | Layer::ProgressBar { at, .. }
+            | Layer::Mask { at, .. }
             | Layer::Audio { at, .. } => Some(at),
             Layer::Sfx { .. } => None,
         }
@@ -749,6 +921,15 @@ impl Layer {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskMode {
+    #[default]
+    Blur,
+    Pixelate,
+    Fill,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
@@ -823,6 +1004,19 @@ pub struct AudioSettings {
     /// Micro-fade length at cuts in seconds (default 0.01).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub micro_fade: Option<f64>,
+    /// How far the music sits below the voice, in LU, while ducked (e.g. 18). The music gain
+    /// is measured and set at render time, replacing trial-and-error with `gain_db`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music_level: Option<f64>,
+}
+
+/// How an audio layer's asset lines up with the layer span.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioAlign {
+    /// Backtime: the asset's own ending lands on the layer's end (the start is trimmed, or
+    /// the layer starts later when the asset is shorter).
+    End,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -992,6 +1186,9 @@ pub struct Export {
     pub height: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crf: Option<u32>,
+    /// Overrides the project's `chroma` for this export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma: Option<Chroma>,
     /// Output path (relative to the project). Default `out/<name>.mp4`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out: Option<String>,

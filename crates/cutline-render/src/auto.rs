@@ -49,13 +49,96 @@ pub fn transcript_for(
         &transcript_cache(l),
         allow_whisper,
     )?;
-    let Some((mut t, _src)) = got else { return Ok(None) };
+    let Some((t, _src)) = got else { return Ok(None) };
+    let (mut t, _) = with_script(&l.dir, a, t)?;
     let mut corr: BTreeMap<String, String> = brand.dictionary.clone();
     if let Some(c) = &p.captions {
         corr.extend(c.corrections.clone());
     }
     t.apply_corrections(&corr);
     Ok(Some(t))
+}
+
+/// Transcript (source time) for an asset before the project is probed (used to resolve cues):
+/// the asset's `transcript` file, else the shared cache (keyed like `transcript_for`), else
+/// whisper when `allow_whisper`. `None` when nothing is available.
+pub fn load_transcript(
+    dir: &std::path::Path,
+    asset_id: &str,
+    asset: Option<&cutline_core::model::Asset>,
+    lang: Option<&str>,
+    allow_whisper: bool,
+) -> Result<Option<Transcript>> {
+    let Some(a) = asset else { anyhow::bail!("unknown asset `{asset_id}`") };
+    let tfile = a.transcript.as_ref().map(|t| dir.join(t));
+    let media = dir.join(&a.path);
+    let fingerprint = if tfile.is_some() {
+        String::new()
+    } else {
+        cutline_media::fingerprint_any(&media).map_err(|e| anyhow::anyhow!("cannot read {}: {e}", media.display()))?
+    };
+    let tc = cutline_deps::toolchain()?;
+    let got = cutline_transcribe::get(
+        tc,
+        asset_id,
+        &media,
+        &fingerprint,
+        tfile.as_deref(),
+        &whisper_model(),
+        lang,
+        &Cache::global("transcripts"),
+        allow_whisper,
+    )?;
+    match got {
+        Some((t, _)) => Ok(Some(with_script(dir, a, t)?.0)),
+        None => Ok(None),
+    }
+}
+
+/// Replace a transcript's words with the asset's `script`, keeping the transcript's timing.
+/// Returns the transcript unchanged (and no stats) when the asset has no script.
+pub fn with_script(
+    dir: &std::path::Path,
+    a: &cutline_core::model::Asset,
+    t: Transcript,
+) -> Result<(Transcript, Option<cutline_transcribe::align::AlignStats>)> {
+    let Some(s) = &a.script else { return Ok((t, None)) };
+    let path = dir.join(s);
+    let text = std::fs::read_to_string(&path).map_err(|e| anyhow::anyhow!("script file {}: {e}", path.display()))?;
+    let (aligned, stats) = cutline_transcribe::align::align(&t, &text);
+    Ok((aligned, Some(stats)))
+}
+
+/// Warnings for assets whose script and audio disagree (wrong script file, or a different take).
+pub fn script_warnings(l: &Loaded, p: &Project) -> Vec<Diagnostic> {
+    let mut out = vec![];
+    for (id, a) in &p.assets {
+        if a.script.is_none() {
+            continue;
+        }
+        let lang = p.captions.as_ref().and_then(|c| c.lang.clone());
+        // transcript without the script, to measure how well they match
+        let bare = cutline_core::model::Asset { script: None, ..a.clone() };
+        let Ok(Some(t)) = load_transcript(&l.dir, id, Some(&bare), lang.as_deref(), false) else { continue };
+        let Ok((_, Some(st))) = with_script(&l.dir, a, t) else { continue };
+        if st.match_ratio() < 0.7 {
+            out.push(
+                Diagnostic::warning(
+                    "W_SCRIPT_MISMATCH",
+                    format!("/assets/{}/script", cutline_core::diag::ptr_token(id)),
+                    format!(
+                        "only {:.0}% of the script's {} words were heard in `{id}` ({} missing, {} extra in the audio)",
+                        st.match_ratio() * 100.0,
+                        st.script_words,
+                        st.inserted + st.substituted,
+                        st.dropped
+                    ),
+                )
+                .hint("check that the script file is the text of this take"),
+            );
+        }
+    }
+    out
 }
 
 /// Assets whose speech feeds captions/ducking: explicit `captions.assets`, else every clip
@@ -246,6 +329,11 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
             };
             let tc = &tl0.clips[ci];
             ci += 1;
+            if c.end_at.is_some() {
+                // a fitted clip's length is set by its cue; splitting it would break the fit
+                new_main.push(item.clone());
+                continue;
+            }
             let mut remove: Vec<(f64, f64)> = vec![];
             let transcript = transcript_for(l, p, brand, &c.clip, false)?;
             let mut generated = "";
@@ -372,6 +460,7 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
                             e,
                             Effect::PunchIn { .. }
                                 | Effect::Zoom { .. }
+                                | Effect::ZoomTo { .. }
                                 | Effect::KenBurns { .. }
                                 | Effect::Shake { .. }
                         )

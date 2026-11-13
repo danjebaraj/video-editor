@@ -1,8 +1,10 @@
 //! whisper.cpp integration (sidecar), Scribe import, transcript cache, word mapping.
 
+pub mod align;
 pub mod mapping;
 pub mod model;
 pub mod scribe;
+pub mod text;
 pub mod whisper;
 
 pub use model::{Transcript, Word};

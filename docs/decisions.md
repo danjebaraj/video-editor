@@ -193,3 +193,55 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-12 — Whisper model resolution and caption warnings
 - **Decision:** `whisper::resolve_model()` is used by both `transcribe` and render: `CUTLINE_WHISPER_MODEL`, else `large-v3-turbo-q5_0` if installed, else `base.en` if installed. Render emits `W_CAPTIONS_NO_TRANSCRIPT` when captions are `auto`, speech assets exist and no words were found. Plan diagnostics now appear in render's human output and in `--json` (`exports[].diagnostics`), not only in `render_report.json`.
 - **Reason:** `deps install --all` installs `base.en`, but transcribe and render asked for `large-v3-turbo-q5_0`. After the documented setup, `transcribe` failed and renders silently produced an empty `.srt` with no warning.
+
+## 2026-11-13 — Cues resolve to seconds before the project is typed
+- **Decision:** `"cue:name[±s]"` references are replaced by timeline seconds on the raw JSON in `pipeline::parse_file_with_cues`, using the voice track's transcript (asset `transcript` file, the transcript cache, or whisper). Allowed only in timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`). The voice asset must be played by exactly one audio layer with a numeric `start`.
+- **Alternatives:** a `TimeValue::Cue` variant resolved inside `timeline::resolve`.
+- **Reason:** `TimeValue` is `Copy` and used everywhere, and core has no transcript access. Resolving first means validation, `expand`, QA and rendering only ever see explicit numbers, and errors still carry JSON pointers to the reference or the cue.
+
+## 2026-11-13 — `end_at` is the cut point, not the clip end
+- **Decision:** `end_at` is where the cut to the next clip lands: the midpoint of the outgoing transition (or the clip end without one). With `in` and `out` the speed is computed; otherwise `out` is. Jump cuts and filler removal leave fitted clips whole.
+- **Reason:** a viewer perceives the cut at the transition midpoint, so that is what should sit on the spoken cue. Splitting a fitted clip would change its length and break the fit.
+
+## 2026-11-13 — Script alignment
+- **Decision:** an asset `script` is aligned to its transcript with a banded Needleman–Wunsch over normalised tokens (exact 3, close 2, substitution −1, gap −2). Paired script words take the transcript word's times; unpaired ones are interpolated between neighbours (or share the previous word's span when there is no gap); transcript words absent from the script are dropped. `[bracketed]` audio tags and dash-only tokens are not words. Alignment happens wherever transcripts are loaded (captions, ducking, cues, jump cuts), after the transcript cache, so caches stay script-independent.
+- **Alternatives:** forced alignment on the audio (needs an acoustic model); replacing caption text per segment.
+- **Reason:** the TTS script is known exactly, and the recogniser's word timings are good; only its spelling is unreliable ("pains" for "panes"). Word-level pairing keeps per-word timing for karaoke and bold_pop styles.
+
+## 2026-11-13 — Mask layers in the overlay pass
+- **Decision:** `mask` is a layer type composited in z order with the other overlays (so a mask can cover a PiP or an image), before the ASS pass (so text and captions stay readable on top). Blur and pixelate crop the region from the current composite and overlay it back with `enable`; fill is a `drawbox`. Default blur sigma is half the region's short side, which removes text that fills the region.
+- **Alternatives:** a per-clip effect (would not cover overlays or span clips); pre-processing the footage.
+- **Reason:** redaction targets what the viewer sees, wherever it comes from, and must follow the same timing rules (anchor/offset, start/end, cues) as everything else.
+
+## 2026-11-13 — Screencast profile and 4:4:4 delivery
+- **Decision:** `profile: screencast` adds x264 `-tune animation` and lowers CRF by 2, and QA's freeze check passes (reporting the spans as expected). `chroma: "444"` switches segments to ProRes 4444 (yuv444p10le) and the deliverable to H.264 High 4:4:4 yuv444p; drafts and hardware encodes stay 4:2:0, and QA accepts either layout when 4:4:4 was requested.
+- **Alternatives:** `-tune stillimage` (worse on scrolling and zooms); 4:4:4 by default for screencasts.
+- **Reason:** terminal and UI footage is flat colour with hard edges and long still stretches. 4:4:4 stays opt-in because platforms re-encode to 4:2:0 and some players cannot decode High 4:4:4.
+
+## 2026-11-13 — zoom_to computes the zoom from a rectangle
+- **Decision:** `zoom_to` derives scale `s = min(1/w', 1/h')` (rect plus padding, capped at 3×) and the fixed point `f = x0·s/(s−1)` that puts the view window `x0` (centred on the rect, clamped inside the frame) on screen, and feeds them to the existing zoom chain as a ramp (+ release for `end`).
+- **Reason:** pointing at a UI element is the common case in screencasts, and the focus-point maths is easy to get wrong by hand.
+
+## 2026-11-13 — Music level and backtimed music
+- **Decision:** `audio.music_level` measures the voice (or dialogue) and music stems after they are rendered and before the mix, and applies `voice − level − (music + duck)` dB to the music stem: the same measure `review` reports, which now uses the chosen level as its aim. `align: end` on an audio layer sets `src_in = duration − span` (or starts a shorter asset later) during timeline resolution, so audio planning, captions and QA see an ordinary layer.
+- **Not done:** snapping cuts to musical beats (needs beat tracking; left for later).
+- **Reason:** both replace trial-and-error renders: the Glance demo needed two renders to find `gain_db: -9` (17.1 LU); `music_level: 18` lands at 18 in one.
+
+## 2026-11-13 — Cheaper HTML capture for drafts and stills
+- **Decision:** drafts and previews capture HTML/SVG/Lottie at device scale 0.5 (same CSS layout) and at most 15 fps; `preview --at` (stills only) captures HTML clips and layers that are on screen at none of the requested times at 1 fps. Final renders are unchanged. Both settings are part of the HTML cache key.
+- **Alternatives:** compositing only the requested frames (a second render path through the whole pipeline).
+- **Reason:** profiling a cold preview of the Glance demo showed headless Chrome frame capture took ~76 of 86 s; segments, audio and the 540p proxy took ~6 s. Now ~11 s (stills away from HTML) to ~22 s.
+
+## 2026-11-13 — Text-over-detail review check
+- **Decision:** for each text-template box, review grabs a frame while the text shows and one 0.15 s before it appears (or after it leaves) in the same clip, both scaled to 960 px wide. Columns in the text's rows where new content appeared on a previously flat spot are the glyphs; the footprint grows sideways from the layout box while those stay contiguous. The mean luma gradient of the "before" frame under that footprint (+3 px) above 6 becomes a suggestion. HTML text templates are tagged `text_html` and skipped (their boxes are estimates).
+- **Alternatives:** a ring around the layout box (missed text wider than its box and was fooled by neighbouring content); rendering a second pass without text layers.
+- **Reason:** layout boxes under-measure some rendered text, and motion (zoom drift, ticking clocks) produces frame differences that are not text; requiring a flat spot before the change separates appearing glyphs from moving edges. Calibrated on the Glance demo: 0.4–2.3 for labels over empty UI, 48 for a label over scripture text.
+
+## 2026-11-13 — Discovering a repo-local `.cutline-home`
+- **Decision:** without `CUTLINE_HOME`, cutline uses the nearest `.cutline-home/` that contains `tools/`, searching up from the working directory and then from the binary's folder, before the platform data dir; the cache follows the home as it does with `CUTLINE_HOME`. `doctor` prints the home and how it was found.
+- **Reason:** a checkout's `target/release/cutline` run from another folder (e.g. a video project) reported ffmpeg missing although the repo's `.cutline-home` had everything installed. Requiring `tools/` keeps stray empty folders from hijacking the home.
+
+## 2026-11-13 — VHS tapes as assets
+- **Decision:** an asset whose `path` ends in `.tape` is recorded with `vhs` (`CUTLINE_VHS` or `PATH`) when the project loads, before probing, into `.cutline/cache/terminal/<hash of tape + vhs version>.mp4`, and the asset then points at that file. The tape's `Output` lines are replaced; vhs runs in the tape's folder with cutline's ffmpeg first on `PATH`. A missing vhs (`E_TOOL_MISSING`) or a failed recording (`E_TAPE_FAILED`) is reported on the asset's `path`.
+- **Alternatives:** a separate `cutline record` step; an `AssetKind::Terminal` handled throughout the pipeline.
+- **Reason:** the edit stays reproducible from the project folder, and everything after loading (probe, segments, QA) treats the recording as ordinary footage. Recording is keyed on the tape text only, so a tape that shows live data (clocks, process lists) is re-recorded only when edited.

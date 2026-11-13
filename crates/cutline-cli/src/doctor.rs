@@ -77,6 +77,12 @@ pub fn run() -> CmdResult {
             fixes.push("cutline deps install chrome".into());
         }
     }
+    // vhs (optional: terminal recordings from .tape assets)
+    let vhs = cutline_render::terminal::vhs_binary();
+    match &vhs {
+        Some(p) => lines.push(format!("✔ vhs: {}", p.display())),
+        None => lines.push("· vhs not found (`.tape` terminal-recording assets unavailable; set CUTLINE_VHS)".into()),
+    }
 
     // whisper / face model (optional)
     let models = paths::tools_dir().join("models");
@@ -123,6 +129,14 @@ pub fn run() -> CmdResult {
             lines.push(format!("  {f}"));
         }
     }
+    let (home_dir, src) = paths::home();
+    let home_src = match src {
+        paths::HomeSource::Env => "CUTLINE_HOME",
+        paths::HomeSource::WorkingDir => ".cutline-home above the working directory",
+        paths::HomeSource::Binary => ".cutline-home above the cutline binary",
+        paths::HomeSource::Platform => "platform data directory",
+    };
+    lines.insert(0, format!("· home: {} ({home_src})", home_dir.display()));
     let j = json!({
         "ok": ok,
         "errors": errors,
@@ -132,10 +146,13 @@ pub fn run() -> CmdResult {
         "capabilities": caps_json,
         "fonts": {"dir": fonts_dir, "files": fonts},
         "chrome": chrome,
+        "vhs": vhs,
         "whisper_models": whisper,
         "whisper_cli": whisper_cli,
         "face_model": face,
         "face_detector": det,
+        "home": home_dir,
+        "home_source": home_src,
         "tools_dir": paths::tools_dir(),
         "cache_dir": paths::cache_dir(),
         "disk_free_bytes": free,

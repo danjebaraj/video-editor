@@ -28,6 +28,77 @@ pub struct ReviewReport {
 
 /// Grab one frame (seconds) from any media as RGB. Still images have a single frame and any
 /// `-ss` (even 0) makes ffmpeg output nothing, so `t` is ignored for them.
+/// Mean luma gradient (at 960 px wide) of the background under a text above which the text
+/// competes with the picture. On the Glance demo, labels over empty UI measured 0.4–2.3 and a
+/// label over terminal text 48.
+pub const BUSY_DETAIL: f64 = 6.0;
+
+fn luma(img: &RgbImage, x: u32, y: u32) -> f64 {
+    let p = img.get_pixel(x, y);
+    0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64
+}
+
+/// How busy the picture is under a text, from a frame showing the text (`on`) and one just
+/// before it appears (`off`). The text's real footprint is where the two differ inside a search
+/// area around the layout `bbox` (layout boxes can under-measure rendered text); the detail is
+/// the mean luma gradient of `off` over that footprint, grown by a margin. `None` when the
+/// frames differ almost everywhere (the background moved too much to isolate the text).
+pub fn text_background_detail(on: &RgbImage, off: &RgbImage, bbox: (u32, u32, u32, u32)) -> Option<f64> {
+    let (iw, ih) = (on.width().min(off.width()), on.height().min(off.height()));
+    if iw < 3 || ih < 3 {
+        return None;
+    }
+    let (x, y, w, h) = bbox;
+    let (by0, by1) = (y.max(1), (y + h).min(ih - 1));
+    let (bx0, bx1) = (x.max(1), (x + w).min(iw - 1));
+    if by1 <= by0 || bx1 <= bx0 {
+        return None;
+    }
+    // columns (within the text's rows) where new content appeared on a flat spot: the glyphs.
+    // Requiring `off` to be flat there ignores edges that merely moved (zoom drift, scrolling).
+    let flat = |px: u32, py: u32| {
+        let l = luma(off, px, py);
+        (l - luma(off, px - 1, py)).abs() + (l - luma(off, px, py - 1)).abs() < 20.0
+    };
+    let changed = |px: u32| (by0..by1).any(|py| (luma(on, px, py) - luma(off, px, py)).abs() > 40.0 && flat(px, py));
+    let cols: Vec<bool> = (1..iw - 1).map(changed).collect();
+    let col = |px: u32| cols[(px - 1) as usize];
+    let inside = (bx0..bx1).filter(|&px| col(px)).count();
+    if inside as f64 > 0.97 * (bx1 - bx0) as f64 && (1..iw - 1).filter(|&px| col(px)).count() as f64 > 0.9 * iw as f64 {
+        return None; // everything changed: the background moved
+    }
+    // grow the box sideways while the changes stay contiguous (text the layout under-measured),
+    // so changes elsewhere in the picture (motion) are not mistaken for text
+    let gap = (h / 3).max(6);
+    let grow = |start: u32, step: i64| -> u32 {
+        let (mut edge, mut p, mut miss) = (start, start as i64, 0u32);
+        while p > 0 && p < iw as i64 - 1 && miss <= gap {
+            if col(p as u32) {
+                edge = p as u32;
+                miss = 0;
+            } else {
+                miss += 1;
+            }
+            p += step;
+        }
+        edge
+    };
+    let (fx0, fx1) = (grow(bx0, -1).min(bx0), grow(bx1 - 1, 1).max(bx1 - 1) + 1);
+    // the background the text sits on (a small margin covers anti-aliasing)
+    let (mx, my) = (3, 3);
+    let (x0, y0) = (fx0.saturating_sub(mx).max(1), by0.saturating_sub(my).max(1));
+    let (x1, y1) = ((fx1 + mx).min(iw - 1), (by1 + my).min(ih - 1));
+    let (mut sum, mut n) = (0.0, 0usize);
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let l = luma(off, px, py);
+            sum += (l - luma(off, px - 1, py)).abs() + (l - luma(off, px, py - 1)).abs();
+            n += 1;
+        }
+    }
+    (n > 0).then(|| sum / n as f64)
+}
+
 pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
     let still =
         cutline_core::timeline::default_kind_from_ext(&path.to_string_lossy()) == cutline_core::model::AssetKind::Image;
@@ -126,6 +197,12 @@ pub fn static_gaps(pr: &Prepared, min: f64) -> Vec<(f64, f64)> {
         for e in &c.clip.effects {
             if let Some(at) = serde_json::to_value(e).ok().and_then(|v| v["at"].as_f64()) {
                 ev.push(tl.secs(c.start) + at);
+            }
+            if let cutline_core::model::Effect::ZoomTo { start, end, .. } = e {
+                ev.push(tl.secs(c.start) + start);
+                if let Some(e) = end {
+                    ev.push(tl.secs(c.start) + e);
+                }
             }
             if matches!(e, cutline_core::model::Effect::KenBurns { .. } | cutline_core::model::Effect::Zoom { .. }) {
                 // continuous motion: count as change every second
@@ -323,7 +400,42 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
     let tp = out_dir.join("timeline.txt");
     std::fs::write(&tp, timeline_text(&pr))?;
     files.push(tp);
-    let suggestions = suggestions(&pr, &qa, &plan.audio, tc)?;
+    let mut suggestions = suggestions(&pr, &qa, &plan.audio, tc)?;
+    // ---- text over detailed content: compare a frame without the text with one showing it
+    for b in pr.extras.text_boxes.iter().filter(|b| b.kind == "text") {
+        let t_on = (b.start + b.end) / 2.0;
+        // a moment just before the text appears (or just after it leaves), in the same clip
+        let clip = tl.clip_at(tl.fps.secs_to_frames(t_on));
+        let (c0, c1) = clip.map(|c| (tl.secs(c.start), tl.secs(c.end()))).unwrap_or((0.0, dur));
+        let t_off = if b.start - 0.15 >= c0 {
+            b.start - 0.15
+        } else if b.end + 0.15 < c1.min(dur) {
+            b.end + 0.15
+        } else {
+            continue;
+        };
+        // compare at a fixed 960 px width so the measure does not depend on the render size
+        let norm = |img: RgbImage| {
+            if img.width() == 960 {
+                img
+            } else {
+                let h = (img.height() as f64 * 960.0 / img.width() as f64).round() as u32;
+                image::imageops::resize(&img, 960, h, image::imageops::FilterType::Triangle)
+            }
+        };
+        let (on, off) = (norm(grab(tc, &src, t_on)?), norm(grab(tc, &src, t_off)?));
+        let k = 960.0 / tl.target.width as f64;
+        let sc = |v: f64| (v * k).round().max(0.0) as u32;
+        if let Some(detail) = text_background_detail(&on, &off, (sc(b.x), sc(b.y), sc(b.w), sc(b.h))) {
+            if detail > BUSY_DETAIL {
+                suggestions.push(format!(
+                    "Text \"{}\" at {} sits over detailed content (detail {detail:.0} under it): move it to a quieter area, shorten it, or give it a backing.",
+                    b.text.replace('\n', " "),
+                    format_tc(t_on)
+                ));
+            }
+        }
+    }
     let mut md = format!(
         "# Review: {}\n\nSource: `{}`  \nDuration: {}  \nTarget: {} ({}×{} @ {} fps)\n\n## QA: {} ({} errors, {} warnings)\n\n",
         cutline_render::output_name(&l.project, &l.path),
@@ -428,8 +540,13 @@ pub fn suggestions(
         {
             let duck = audio.duck.as_ref().filter(|d| !d.sidechain).map(|d| d.params.amount_db).unwrap_or(0.0);
             let diff = lm.integrated_lufs + duck - lv.integrated_lufs;
-            if lv.integrated_lufs > -60.0 && diff > -18.0 {
-                s.push(format!("Music is only {:.1} LU below the voice under ducking (aim for ≤ −18 LU): lower the music gain_db or increase duck.amount_db.", -diff));
+            // with music_level set the mix was balanced to it; allow measurement slack
+            let (aim, slack) = match audio.music_level {
+                Some(l) => (l, 1.0),
+                None => (18.0, 0.0),
+            };
+            if lv.integrated_lufs > -60.0 && diff > -aim + slack {
+                s.push(format!("Music is only {:.1} LU below the voice under ducking (aim for ≤ −{aim:.0} LU): set audio.music_level, lower the music gain_db or increase duck.amount_db.", -diff));
             }
         }
     }
@@ -439,4 +556,55 @@ pub fn suggestions(
         s.push("Shorts retention: consider a progress_bar layer.".into());
     }
     Ok(s)
+}
+
+#[cfg(test)]
+mod text_detail_tests {
+    use super::*;
+
+    fn frame(busy_right: bool) -> RgbImage {
+        // dark UI; the right half is "terminal text" (fine stripes) when busy_right
+        RgbImage::from_fn(400, 200, |x, y| {
+            if busy_right && x >= 200 && (x / 2 + y / 3) % 3 == 0 {
+                Rgb([200, 200, 200])
+            } else {
+                Rgb([30, 30, 46])
+            }
+        })
+    }
+
+    fn with_text(mut f: RgbImage, x0: u32, x1: u32) -> RgbImage {
+        for y in 120..140 {
+            for x in x0..x1 {
+                if (x + y) % 4 < 2 {
+                    f.put_pixel(x, y, Rgb([255, 255, 255]));
+                }
+            }
+        }
+        f
+    }
+
+    #[test]
+    fn quiet_background_is_fine() {
+        let off = frame(true);
+        let on = with_text(off.clone(), 20, 150);
+        let d = text_background_detail(&on, &off, (20, 120, 130, 20)).unwrap();
+        assert!(d < BUSY_DETAIL, "{d}");
+    }
+
+    #[test]
+    fn text_running_into_busy_content_is_flagged_even_if_the_box_is_too_small() {
+        let off = frame(true);
+        // the text really spans 20..300, but layout reported only 20..150
+        let on = with_text(off.clone(), 20, 300);
+        let d = text_background_detail(&on, &off, (20, 120, 130, 20)).unwrap();
+        assert!(d > BUSY_DETAIL, "{d}");
+    }
+
+    #[test]
+    fn moving_background_gives_no_verdict() {
+        let off = frame(false);
+        let on = RgbImage::from_pixel(400, 200, Rgb([250, 250, 250]));
+        assert_eq!(text_background_detail(&on, &off, (20, 120, 130, 20)), None);
+    }
 }

@@ -154,8 +154,12 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
     b.add(
         "freeze",
         Sev::Warn,
-        fr.is_empty(),
-        if fr.is_empty() { "no frozen spans > 1 s".to_string() } else { format!("{} frozen spans > 1 s", fr.len()) },
+        fr.is_empty() || ctx.screencast,
+        match (fr.len(), ctx.screencast) {
+            (0, _) => "no frozen spans > 1 s".to_string(),
+            (n, true) => format!("{n} frozen spans > 1 s (expected in a screencast)"),
+            (n, false) => format!("{n} frozen spans > 1 s"),
+        },
         json!(fr),
         json!([]),
     );

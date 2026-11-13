@@ -47,6 +47,24 @@
         }
       ]
     },
+    "chroma": {
+      "description": "Chroma subsampling of the deliverable: `420` (default, plays everywhere) or `444` (full\ncolor resolution: no fringes on small colored text; not all players support it).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Chroma"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cues": {
+      "description": "Named points in the voice-over, found in its transcript: `{clocks: \"World clocks\"}`.\nTimeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can refer to\nthem as `\"cue:clocks\"`, `\"cue:clocks+0.4\"` or `\"cue:clocks-0.2\"`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Cue"
+      }
+    },
     "default_reframe": {
       "description": "Default geometry for clips whose aspect differs from the target (default `cover`).",
       "anyOf": [
@@ -108,6 +126,17 @@
       "type": [
         "string",
         "null"
+      ]
+    },
+    "profile": {
+      "description": "`screencast`: tuned for screen and terminal recordings (sharper text encoding; frozen\nframes are expected, so QA does not warn about them).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Profile"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "safe_zone": {
@@ -228,6 +257,13 @@
             }
           ]
         },
+        "script": {
+          "description": "The text that was spoken (relative path to a .txt file), e.g. the TTS script. Captions\nand cues then use the script's exact words, timed from the transcript.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "synthetic": {
           "description": "Mark this asset as AI-generated (affects the publishing checklist).",
           "type": "boolean"
@@ -266,6 +302,16 @@
         "svg"
       ]
     },
+    "AudioAlign": {
+      "description": "How an audio layer's asset lines up with the layer span.",
+      "oneOf": [
+        {
+          "description": "Backtime: the asset's own ending lands on the layer's end (the start is trimmed, or\nthe layer starts later when the asset is shorter).",
+          "type": "string",
+          "const": "end"
+        }
+      ]
+    },
     "AudioSettings": {
       "type": "object",
       "properties": {
@@ -298,6 +344,14 @@
         },
         "micro_fade": {
           "description": "Micro-fade length at cuts in seconds (default 0.01).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "music_level": {
+          "description": "How far the music sits below the voice, in LU, while ducked (e.g. 18). The music gain\nis measured and set at render time, replacing trial-and-error with `gain_db`.",
           "type": [
             "number",
             "null"
@@ -500,6 +554,13 @@
       },
       "additionalProperties": false
     },
+    "Chroma": {
+      "type": "string",
+      "enum": [
+        "420",
+        "444"
+      ]
+    },
     "Clip": {
       "type": "object",
       "properties": {
@@ -547,6 +608,17 @@
           "items": {
             "$ref": "#/$defs/Effect"
           }
+        },
+        "end_at": {
+          "description": "Timeline time of the cut to the next clip (the middle of the outgoing transition), e.g.\n`\"cue:calendar\"`. The clip is fitted to end there: with `in` and `out` both set its\nspeed is computed; otherwise `out` is (at `speed`, default 1); stills get the duration.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "gain_db": {
           "type": [
@@ -707,6 +779,64 @@
         }
       },
       "additionalProperties": false
+    },
+    "Cue": {
+      "description": "A cue: a phrase in a voice track. The short form is just the phrase.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/CueSpec"
+        }
+      ]
+    },
+    "CueEdge": {
+      "type": "string",
+      "enum": [
+        "start",
+        "end"
+      ]
+    },
+    "CueSpec": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "Asset whose transcript is searched. Default: the only voice-role audio layer's asset.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edge": {
+          "description": "`start` (default): when the first word begins; `end`: when the last word ends.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CueEdge"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurrence": {
+          "description": "Which occurrence of the phrase (1-based, default 1).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "phrase": {
+          "description": "Words to find (case and punctuation are ignored; close transcription slips match).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "phrase"
+      ]
     },
     "Duck": {
       "type": "object",
@@ -883,6 +1013,54 @@
           "required": [
             "type",
             "to"
+          ]
+        },
+        {
+          "description": "Zoom so `rect` (fractions of the frame) fills the view, starting at `start`\n(clip-relative) over `duration`; zoom back out from `end` if set.",
+          "type": "object",
+          "properties": {
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.6
+            },
+            "ease": {
+              "$ref": "#/$defs/Ease",
+              "default": "in_out_cubic"
+            },
+            "end": {
+              "description": "Clip-relative time to start zooming back out (same duration and ease).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "padding": {
+              "description": "Margin around the rect as a fraction of the frame (default 0.03).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "type": "number",
+              "format": "double",
+              "default": 0.0
+            },
+            "type": {
+              "type": "string",
+              "const": "zoom_to"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "rect"
           ]
         },
         {
@@ -1106,6 +1284,17 @@
     "Export": {
       "type": "object",
       "properties": {
+        "chroma": {
+          "description": "Overrides the project's `chroma` for this export.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Chroma"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "crf": {
           "type": [
             "integer",
@@ -2237,6 +2426,17 @@
           "description": "Music / VO bed.",
           "type": "object",
           "properties": {
+            "align": {
+              "description": "`end`: backtime so the music's real ending lands on the layer end (default: the\ntimeline end), instead of fading out mid-phrase.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AudioAlign"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "anchor": {
               "description": "Main clip id this layer follows.",
               "type": [
@@ -2343,6 +2543,118 @@
           "required": [
             "type",
             "asset"
+          ]
+        },
+        {
+          "description": "Hide part of the frame: usernames, paths, emails, keys. Drawn over the footage and other\noverlays (below text and captions).",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "color": {
+              "description": "Fill color (default `#000000`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "description": "blur (default) | pixelate | fill. Use `fill` for secrets: blurred or pixelated text\ncan sometimes be recovered.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MaskMode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "description": "Region as fractions of the frame: `{x, y, w, h}` (top-left corner, size).",
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strength": {
+              "description": "Blur/pixelation strength multiplier (default 1).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "text": {
+              "description": "Replacement text drawn in the region (left-aligned, vertically centered).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text_color": {
+              "description": "Text color (default `#9AA0A6`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text_size": {
+              "description": "Text size in output px at full resolution (default 60 % of the region height).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "mask"
+            }
+          },
+          "required": [
+            "type",
+            "rect"
           ]
         },
         {
@@ -2457,6 +2769,14 @@
         "title"
       ]
     },
+    "MaskMode": {
+      "type": "string",
+      "enum": [
+        "blur",
+        "pixelate",
+        "fill"
+      ]
+    },
     "Point": {
       "type": "object",
       "properties": {
@@ -2484,6 +2804,13 @@
         {
           "$ref": "#/$defs/Point"
         }
+      ]
+    },
+    "Profile": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "screencast"
       ]
     },
     "PunchIns": {
@@ -2804,7 +3131,7 @@
       ]
     },
     "TimeValue": {
-      "description": "Seconds (number), timecode string \"mm:ss.mmm\" / \"hh:mm:ss.mmm\", frames \"f:N\", or \"end\".",
+      "description": "Seconds (number), timecode string \"mm:ss.mmm\" / \"hh:mm:ss.mmm\", frames \"f:N\", \"end\", or (timeline times only) a cue reference \"cue:name\" / \"cue:name+0.5\".",
       "oneOf": [
         {
           "type": "number",
@@ -2812,7 +3139,7 @@
         },
         {
           "type": "string",
-          "pattern": "^(end|f:\\d+|(\\d+:){0,2}\\d+(\\.\\d+)?)$"
+          "pattern": "^(end|f:\\d+|(\\d+:){0,2}\\d+(\\.\\d+)?|cue:[A-Za-z0-9_.-]+([+-]\\d+(\\.\\d+)?)?)$"
         }
       ]
     },

@@ -14,6 +14,7 @@ cutline deps install --all           # ffmpeg (pinned static build), whisper mod
 cutline init my-short --target shorts --assets footage/
 cutline validate my-short/project.json5
 cutline expand   my-short/project.json5     # explicit timeline (auto jump cuts, fillers, punch-ins)
+cutline cues     my-short/project.json5     # where each voice-over cue landed
 cutline review   my-short/project.json5     # review/ pack for vision
 cutline render   my-short/project.json5     # final render + QA + .srt + credits
 cutline guide                               # the workflow Claude should follow
@@ -28,14 +29,22 @@ cutline guide                               # the workflow Claude should follow
   blur-in, glitch, vignette, motion blur; every xfade transition plus whips, zoom punch, flash
   cut and glitch; overlays (alpha video, images, PNG sequences, B-roll/PiP with rounded corners,
   border, shadow) with enter/exit animations; progress bar; LUTs and color presets.
+- **Screencasts:** VHS `.tape` scripts as assets (recorded and cached at load), `profile: "screencast"` (text-tuned encoding, freeze-tolerant QA), optional
+  4:4:4 chroma, and `zoom_to` a rectangle of the UI.
+- **Masks:** blur, pixelate or fill a region (with optional replacement text) to hide private
+  details in screen recordings.
 - **Text:** libass-rendered templates (hook title, lower third, callout, step counter, big
   number, quote, CTA, end card, emoji pop) with bundled fonts, safe zones and auto-fit; HTML
   variants via headless Chrome.
-- **Captions:** whisper.cpp or ElevenLabs Scribe import, words mapped through the edit;
+- **Captions:** whisper.cpp or ElevenLabs Scribe import, words mapped through the edit; a
+  `script` replaces recognised words with the exact text, keeping the audio's timing;
   `bold_pop`, `karaoke`, `word_by_word`, `clean_sentence`, `boxed`; emphasis and emoji; SRT.
+- **Script timing:** name phrases in the voice-over (`cues`) and cut, place text and SFX on
+  them (`"cue:clocks"`); clips fit themselves to the cut with `end_at`.
 - **Edit assist:** automatic jump cuts, filler removal, punch-in cadence, SFX on transitions,
   all expanded to inspectable timeline items.
-- **Audio:** role stems, voice chains, transcript/VAD-driven ducking, two-pass loudness
+- **Audio:** role stems, voice chains, transcript/VAD-driven ducking, music level set relative to
+  the voice (`music_level`), backtimed music endings (`align: end`), two-pass loudness
   (−14 LUFS / −1 dBTP default), micro-fades, `audio.png`.
 - **Reframe:** YuNet face detection (ONNX Runtime, `onnx` feature), tracking with a dead zone,
   spring smoothing, max pan speed, scene-cut resets; manual keys and split layouts.
@@ -56,7 +65,10 @@ Requires Rust ≥ 1.80. External tools are managed by `cutline deps` (pinned in
 `tools.lock.json`); a system ffmpeg ≥ 6 works as a fallback. `scripts/release.sh` builds a
 universal macOS binary and a Windows zip with the `assets/` directory alongside.
 
-Environment overrides: `CUTLINE_HOME` (tools + cache), `CUTLINE_ASSETS`, `CUTLINE_FFMPEG` +
+Tools and caches live in the cutline home: `CUTLINE_HOME` if set, else the nearest
+`.cutline-home/` with a `tools/` folder above the working directory or the `cutline` binary (so a
+repo checkout's `target/release/cutline` finds the repo's tools from anywhere), else the platform
+data directory; `cutline doctor` shows which. Environment overrides: `CUTLINE_HOME` (tools + cache), `CUTLINE_ASSETS`, `CUTLINE_FFMPEG` +
 `CUTLINE_FFPROBE`, `CUTLINE_CHROME`, `CUTLINE_WHISPER_CLI`, `CUTLINE_WHISPER_MODEL`,
 `CUTLINE_FACE_MODEL`, `CUTLINE_LOCKFILE`.
 

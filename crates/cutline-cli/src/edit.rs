@@ -369,7 +369,17 @@ pub fn preview(path: &Path, at: &[String], range: Option<&str>, safe_zones: bool
     }
     let tc = cutline_deps::toolchain().tool_err()?;
     let (name, e) = pipeline::exports(&l.project).into_iter().next().unwrap();
-    let pr = pipeline::prepare(&l, name, &e, true).map_err(CliError::validation)?;
+    // stills only: HTML that is on screen at none of the requested times need not be captured
+    // frame by frame
+    let stills: Option<Vec<f64>> = match (&l.timeline, range) {
+        (Some(tl), None) if !at.is_empty() => at
+            .iter()
+            .map(|t| cutline_core::time::parse_time(t).map(|v| v.seconds(tl.fps, tl.duration())))
+            .collect::<Result<Vec<f64>, String>>()
+            .ok(),
+        _ => None,
+    };
+    let pr = pipeline::prepare_for(&l, name, &e, true, stills.as_deref()).map_err(CliError::validation)?;
     let out_dir = out.unwrap_or_else(|| l.dir.join(".cutline").join("preview"));
     std::fs::create_dir_all(&out_dir).map_err(CliError::internal)?;
     let proxy = out_dir.join("preview_540p.mp4");
@@ -515,6 +525,33 @@ pub fn review(path: &Path, out: &Path) -> CmdResult {
         h.push_str(&format!("  - {s}\n"));
     }
     Ok(Output::ok(json!(r), h))
+}
+
+pub fn cues(path: &Path) -> CmdResult {
+    let l = load_or_return!(path);
+    let mut h = vec![];
+    if l.cues.is_empty() {
+        h.push("no cue references (define `cues` and use \"cue:name\" in timeline times)".to_string());
+    }
+    for c in &l.cues {
+        h.push(format!(
+            "{:<16} {}  \"{}\"{}  ({} {:.2}–{:.2}s)",
+            c.name,
+            format_tc(c.at),
+            c.matched,
+            if c.exact { "" } else { " ~fuzzy" },
+            c.asset,
+            c.source_start,
+            c.source_end
+        ));
+    }
+    for x in l.diags.iter().filter(|x| x.code.contains("CUE")) {
+        h.push(format!("⚠ {} {}: {}", x.code, x.path, x.message));
+    }
+    Ok(Output::ok(
+        json!({"cues": l.cues, "warnings": l.diags.iter().filter(|x| x.code.contains("CUE")).collect::<Vec<_>>()}),
+        h.join("\n"),
+    ))
 }
 
 pub fn chapters(path: &Path) -> CmdResult {

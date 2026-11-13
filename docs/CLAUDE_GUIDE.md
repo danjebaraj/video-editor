@@ -28,9 +28,12 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
      the source), `audio.png` (per-role waveforms, final mix, duck envelope, momentary LUFS vs
      target), `timeline.txt`, `qa.json`, `summary.md` (QA + suggested improvements),
      `preview_540p.mp4`.
-   - Read `summary.md` first, then look at the images. Iterate until there are **no QA errors** and
+   - Read `summary.md` first, then look at the images. It flags text templates that sit over
+     detailed content (measured from frames with and without the text, so it also catches text
+     wider than its layout box). Iterate until there are **no QA errors** and
      the suggestions are addressed. Use `cutline preview project.json5 --at 3.2 7.5 --safe-zones`
-     for quick stills while iterating.
+     for quick stills while iterating (drafts capture HTML graphics at half density and 15 fps;
+     stills skip frame capture for graphics not on screen at the requested times).
 6. **Render.** `cutline render project.json5` (all exports; `--export name` for one). QA runs
    automatically; the command fails on QA errors unless `--allow-qa-errors`. Outputs next to the
    video: `<name>.qa.json`, `<name>.render_report.json`, `<name>.srt`, `credits.txt`. Then:
@@ -60,7 +63,44 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - B-roll every 20–40 s (`broll` layers, PiP with `radius`/`border`/`shadow` or full-frame).
 - Leave the last 20 s free for the YouTube end screen (`end_card` template draws placeholders).
 
+## Screen recordings
+
+- Record terminal footage from VHS tapes: use the `.tape` file itself as the asset path and cutline
+  records it (and re-records only when the tape changes). End each tape by quitting the program
+  it started (e.g. `Hide`, `Type "q"`): VHS kills the terminal, and some programs then linger.
+- Set `profile: "screencast"` (sharper text encoding; no QA warnings for paused screens). Add
+  `chroma: "444"` for downloads/docs where colored text must not fringe.
+- Point at UI with `{type: "zoom_to", rect: {x, y, w, h}, start, end}` instead of working out
+  zoom scales and focus points.
+
+### Hide private details
+
+- Look for usernames, home paths, emails, tokens and hostnames in every frame (`review`'s
+  contact sheet) and cover them with `mask` layers: `{type: "mask", rect: {x, y, w, h},
+  anchor: "clip", duration: 2}`; `rect` is in fractions of the frame.
+- `blur` (default) suits incidental text; use `mode: "fill"` with the background `color` for
+  secrets, optionally with replacement `text` (e.g. `~/Library/…`) so the UI still reads well.
+
+## Narrated videos: time the edit to the voice-over
+
+- Put the VO on an `audio` layer with a numeric `start`, and give its asset a `transcript` (or
+  run `cutline transcribe` once so it is cached).
+- Name the beats under `cues` (`{clocks: "World clocks"}`) and use `"cue:clocks"` in timeline
+  times: clip `end_at` (the cut lands on the cue), layer `start`/`end`, sfx `at`, marker `at`.
+  Offsets: `"cue:clocks+0.3"`.
+- `end_at` fits each clip: give `in`+`out` to let cutline pick the speed, or only `in` to trim.
+  No hand arithmetic for clip lengths, speeds or transition overlaps.
+- Set the VO asset's `script` to the text you generated it from: captions then show your exact
+  wording (names, capitals, punctuation) instead of recogniser slips, and cue phrases copied
+  from the script match exactly. Audio tags like `[warm]` are ignored.
+- `cutline cues project.json5` shows what each cue matched and where it landed; fix
+  `W_CUE_FUZZY` / `E_CUE_NOT_FOUND` from the hint.
+
 ## Audio
+
+- Music under narration: set `audio.music_level: 18` instead of guessing `gain_db`, and put
+  `align: "end"` (with a `fade_in`) on the music layer so the track's real ending closes the
+  video rather than a fade-out mid-phrase.
 
 - Roles: `dialogue` (clip audio), `voice` (VO assets), `music`, `sfx`. Voice/dialogue chain
   `clean_voice` by default (`podcast_warm`, `raw` available).
