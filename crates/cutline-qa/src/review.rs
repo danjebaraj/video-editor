@@ -39,8 +39,9 @@ fn luma(img: &RgbImage, x: u32, y: u32) -> f64 {
 }
 
 /// How busy the picture is under a text, from a frame showing the text (`on`) and one just
-/// before it appears (`off`). The text's real footprint is where the two differ inside a search
-/// area around the layout `bbox` (layout boxes can under-measure rendered text); the detail is
+/// before it appears (`off`). The text's footprint is where new content appeared, starting from
+/// the layout `bbox` and following it sideways (covers templates whose drawn extent differs from
+/// the box, such as animated or effect-heavy ones); the detail is
 /// the mean luma gradient of `off` over that footprint, grown by a margin. `None` when the
 /// frames differ almost everywhere (the background moved too much to isolate the text).
 pub fn text_background_detail(on: &RgbImage, off: &RgbImage, bbox: (u32, u32, u32, u32)) -> Option<f64> {
@@ -67,7 +68,7 @@ pub fn text_background_detail(on: &RgbImage, off: &RgbImage, bbox: (u32, u32, u3
     if inside as f64 > 0.97 * (bx1 - bx0) as f64 && (1..iw - 1).filter(|&px| col(px)).count() as f64 > 0.9 * iw as f64 {
         return None; // everything changed: the background moved
     }
-    // grow the box sideways while the changes stay contiguous (text the layout under-measured),
+    // grow the box sideways while the changes stay contiguous (drawn extent beyond the box),
     // so changes elsewhere in the picture (motion) are not mistaken for text
     let gap = (h / 3).max(6);
     let grow = |start: u32, step: i64| -> u32 {
