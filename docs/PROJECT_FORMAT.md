@@ -14,6 +14,13 @@ Timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can a
 references**: `"cue:clocks"`, `"cue:clocks+0.4"`, `"cue:clocks-0.2"` (seconds after/before the
 cue). See [Cues](#cues).
 
+The same fields take **beat references** from the project's music layer: `"bar:9"` (first beat of
+bar 9), `"bar:9.3"` (its third beat), `"beat:33"`, each with an optional `+0.1`/`-0.1` seconds.
+Bars and beats count from 1 at the first one on or after timeline 0; `cutline beats` lists them.
+They need exactly one audio layer with role `music` and a numeric `start` (no `align`/`anchor`).
+Bars assume 4 beats; `W_BARS_UNCERTAIN` says when the bar starts could not be told apart.
+Errors: `E_BEAT_REF`.
+
 ## Top level
 
 | Field | Type | Default | Notes |
@@ -74,8 +81,9 @@ WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
 | `clip` | required | asset id |
 | `in`, `out` | 0, end of asset | source times |
 | `duration` | — | stills; or `in` + duration·speed |
-| `end_at` | — | timeline time of the cut to the next clip (the middle of the outgoing transition), usually `"cue:…"`. The clip is fitted: with `in` and `out` its speed is computed (0.25–4); without `out` the out point is (at `speed`); stills get the duration. Not with `duration` or `speed_ramp`. Jump cuts and filler removal skip fitted clips |
-| `speed` | 1 | 0.25–4; audio pitch preserved (`atempo`) |
+| `end_at` | — | timeline time of the cut to the next clip (the middle of the outgoing transition): `"cue:…"`, `"bar:…"` or seconds. The clip plays at its `speed` (default 1) and is fitted by trimming: footage past the cut is dropped (`out` is then only a limit); footage that ends early holds its last frame and warns `W_FIT_HOLD`. Stills get the duration. Not with `duration` or `speed_ramp`. Jump cuts and filler removal skip fitted clips |
+| `fit` | `trim` | with `end_at` + `in` + `out`: `speed` plays exactly `in`..`out` at whatever speed (0.25–4) fills the slot |
+| `speed` | 1 | 0.25–4; audio pitch preserved (`atempo`). Any speed other than 1 (also `speed_ramp`, `fit: "speed"`) blends neighbouring frames so motion stays even; text and cursors soften a little while they move, so keep screen recordings at 1 where you can |
 | `speed_ramp` | — | `[{t, speed}]`, source-relative `t` |
 | `reverse` | false | ≤ 10 s clips |
 | `reframe` | `default_reframe` | see Reframe |
@@ -95,11 +103,17 @@ WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
 | `audio` | `crossfade` | or `cut` (hard cut at the midpoint with micro-fades) |
 | `curve` | `tri` | acrossfade curve |
 | `color` | white | `flash_cut` color |
+| `ease` | by type | progress curve: `in_out_cubic` for moving transitions (slides, covers, reveals, whips, zooms), `in_out_quad` for fades and wipes; `linear` for a constant rate. Not `back`/`spring` |
+
+With `profile: "screencast"`, two or more `fade`/`dissolve` transitions between video clips warn
+`W_SCREEN_DISSOLVES`: text from both screens shows at once mid-dissolve. Cut between app shots.
 
 ### Reframe
 
 `mode`: `cover` (default) · `center` · `fit_blur` · `fit_pad` · `track_face` · `manual` · `split`.
-`keys` (manual): `[{t, x, y, zoom}]` (clip-relative `t`, normalized center, zoom ≥ 1).
+`keys` (manual): `[{t, x, y, zoom}]` (clip-relative `t`; `x, y` = crop center in 0..1 of the
+source, clamped so the view stays inside the frame; zoom ≥ 1; eased in-out-cubic between keys;
+`max_pan_speed` does not apply).
 `bias` `{x, y}` (default 0.5, 0.38): where the face sits in the crop. `subject`: `most_persistent`
 (default), `largest`, `left`, `right`, `index` + `subject_index`. `max_pan_speed` (frame widths
 per second, default 0.6). `fallback` (default `fit_blur`) when no faces. `regions` (split): two
@@ -119,6 +133,11 @@ or `.cube` path) + `intensity` (0–1), `exposure` (stops), `contrast`, `saturat
 | `zoom` | `from` 1, `to`, `start` 0, `end` clip end, `ease`, `focus` |
 | `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0, `duration` 0.6, `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`) |
 | `ken_burns` | `from_scale` 1, `to_scale` 1.15, `from`/`to` {x,y}, `ease` |
+
+Zooms (`punch_in`, `zoom`, `zoom_to`, `ken_burns`, `shake`) and reframe moves (`track_face`,
+`manual` keys) move in fractions of a pixel, so slow moves glide. When the source has at least 1.4× the target's pixels and the zoom reaches 1.15×,
+the zoom is taken from the source's detail (2× supersampling) rather than from the downscaled frame.
+
 | `shake` | `at`, `duration` 0.3, `intensity` 0.02 |
 | `flash` | `at`, `duration` 0.15, `color` (white) |
 | `blur_in` | `duration` 0.4 |
@@ -191,7 +210,7 @@ narration bed.
 | `remove_fillers` | `enabled` true, `words` [um, uh, erm, uhm, hmm] |
 | `punch_ins` | `every` 4.0, `scale` [1.08, 1.15], `skip_if_other_motion` true, `duration` 0.25 |
 | `sfx_on_transitions` | SFX asset/alias for transitions without one |
-| `snap_to_beats` | `enabled` true, `asset` (default: the only music-role audio layer), `max_shift` 0.15 s. Each cut within `max_shift` of a beat of the music moves onto it (in order, so later cuts see the ripple) by fitting the outgoing clip with `end_at`; cuts farther away, clips with a `speed_ramp`, and moves the footage cannot cover stay put. `cutline expand` lists every move; `cutline beats` shows the tempo and beat times |
+| `snap_to_beats` | `enabled` true, `asset` (default: the only music-role audio layer), `max_shift` 0.15 s, `downbeat_reach` 0.35 s. Each cut moves onto the music (in order, so later cuts see the ripple) by fitting the outgoing clip with `end_at`: onto the first beat of a bar when one is within `downbeat_reach` and the bars are clear, otherwise onto the nearest beat within `max_shift`. Cuts farther away, clips with a `speed_ramp`, and moves that would run a clip out of footage stay put. `cutline expand` lists every move; `cutline beats` shows tempo, bars and beats on the timeline |
 
 Generated items carry `generated_by`; `cutline expand` shows them. Jump-cut pieces keep the first
 piece's id (`talk`, `talk~2`, …).
@@ -211,7 +230,7 @@ cues: {
 main: [
   {id: "intro", clip: "title", end_at: "cue:clocks"},       // cut to the next clip on "World"
   {transition: {type: "fade", duration: 0.4}},
-  {id: "time", clip: "screen", in: 3, out: 18, end_at: "cue:cal"},  // speed computed to fit
+  {id: "time", clip: "screen", in: 3, end_at: "cue:cal"},   // plays from 3 s at 1×, cut on "cal"
 ],
 layers: [
   {type: "audio", asset: "vo", start: 1.2},
@@ -233,7 +252,8 @@ anchor clip's real start is fed back until it settles; anchoring the voice to a 
 position depends on those cues is `E_CUE_CYCLE`. Errors: `E_UNKNOWN_CUE`,
 `E_CUE_NOT_FOUND` (the hint lists the closest phrases), `E_CUE_NOT_ALLOWED` (a cue in a source
 time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`, `E_CUE_CYCLE`; for `end_at`:
-`E_END_AT_BEFORE_START`, `E_FIT_SPEED`, `E_FIELD_CONFLICT`.
+`E_END_AT_BEFORE_START`, `E_FIELD_CONFLICT`, `W_FIT_HOLD` (footage ends before the cut), and with
+`fit: "speed"` `E_FIT_SPEED`.
 
 ## Export
 
@@ -255,3 +275,6 @@ time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`, `E_CU
 ## Migration notes
 
 - v1 is the first schema. Breaking changes will bump `version` and be listed here.
+- `end_at` with both `in` and `out` used to change the clip's speed to fit. It now trims (or
+  holds the last frame); add `fit: "speed"` for the old behaviour.
+- Transitions ease by default; add `ease: "linear"` for the old constant rate.

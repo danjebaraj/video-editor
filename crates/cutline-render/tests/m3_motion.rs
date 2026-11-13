@@ -329,3 +329,44 @@ fn alpha_overlays_composite_correctly() {
         }
     }
 }
+
+/// A slow zoom must advance on every frame by about the same amount. A zoom that can only
+/// move in whole pixels stands still for several frames and then jumps (visible ticking).
+#[test]
+fn slow_zoom_glides_without_ticking() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    // detailed still: soft diagonal texture so any sub-pixel move changes pixel values
+    let mut c = tc.ffmpeg_cmd();
+    c.args(["-f", "lavfi", "-i", "testsrc2=s=640x360:d=1,gblur=sigma=1.2", "-frames:v", "1"]).arg(d.path().join("s.png"));
+    gen::run(c).unwrap();
+    let pp = d.path().join("p.json5");
+    std::fs::write(
+        &pp,
+        "{version: 1, name: 'kb', target: 'custom', width: 640, height: 360, fps: 30, assets: {s: {path: 's.png'}},
+          main: [{id: 'a', clip: 's', duration: 3,
+                  effects: [{type: 'ken_burns', from_scale: 1, to_scale: 1.04, ease: 'linear'}]}],
+          audio: {voice_chain: 'raw'}}",
+    )
+    .unwrap();
+    let (out, _) = render(&pp);
+    let frames = read_all_frames(tc, &out, Some((160, 90, 320, 180))).unwrap();
+    assert_eq!(frames.len(), 90);
+    // mean absolute change between consecutive frames
+    let diffs: Vec<f64> = frames
+        .windows(2)
+        .map(|w| {
+            let n = w[0].as_raw().len() as f64;
+            w[0].as_raw().iter().zip(w[1].as_raw()).map(|(a, b)| (*a as f64 - *b as f64).abs()).sum::<f64>() / n
+        })
+        .collect();
+    let mut sorted = diffs.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = sorted[sorted.len() / 2];
+    assert!(median > 0.05, "the zoom moves the picture (median change {median:.3})");
+    // thresholds leave room for encoder noise and the odd keyframe; a whole-pixel zoom stalls
+    // on most frames of a move this slow (0.14 px per frame)
+    let still = diffs.iter().filter(|x| **x < 0.2 * median).count();
+    let jumps = diffs.iter().filter(|x| **x > 4.0 * median).count();
+    assert!(still <= 3 && jumps <= 3, "uneven zoom: {still} stalled and {jumps} jumping steps of {}: {diffs:.2?}", diffs.len());
+}

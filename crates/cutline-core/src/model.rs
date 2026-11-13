@@ -271,6 +271,11 @@ pub struct Transition {
     /// Flash/fill color for flash_cut and similar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Progress curve. Default: `in_out_cubic` for moving transitions (slides, covers, whips,
+    /// zooms), `in_out_quad` for the rest (fades, wipes); `linear` for a constant rate.
+    /// `back` and `spring` are not allowed (progress must not run backwards).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease: Option<Ease>,
     /// Set by `auto` expansion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_by: Option<String>,
@@ -300,10 +305,16 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<TimeValue>,
     /// Timeline time of the cut to the next clip (the middle of the outgoing transition), e.g.
-    /// `"cue:calendar"`. The clip is fitted to end there: with `in` and `out` both set its
-    /// speed is computed; otherwise `out` is (at `speed`, default 1); stills get the duration.
+    /// `"cue:calendar"`, `"bar:12"`. The clip is fitted to end there at its `speed` (default
+    /// 1): footage past the cut is trimmed (an `out` is then only a limit), and footage that
+    /// runs out early holds its last frame (`W_FIT_HOLD`). Stills get the duration. Set
+    /// `fit: "speed"` to change the speed instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_at: Option<TimeValue>,
+    /// With `end_at`, `in` and `out`: `trim` (default) keeps the speed and trims or holds;
+    /// `speed` plays exactly `in`..`out` at whatever speed fills the slot (frame-blended).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<EndFit>,
     /// Constant speed factor 0.25–4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,
@@ -332,6 +343,13 @@ pub struct Clip {
     /// Set by `auto` expansion (e.g. `jump_cuts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EndFit {
+    Trim,
+    Speed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -1109,9 +1127,16 @@ pub struct SnapToBeats {
     /// Largest move of a cut, in seconds (default 0.15). Cuts farther from a beat stay put.
     #[serde(default = "snap_shift")]
     pub max_shift: f64,
+    /// A cut within this many seconds of the first beat of a bar goes there rather than to a
+    /// nearer weak beat (default 0.35; 0 treats all beats alike). Used when the bars are clear.
+    #[serde(default = "snap_downbeat")]
+    pub downbeat_reach: f64,
 }
 fn snap_shift() -> f64 {
     0.15
+}
+fn snap_downbeat() -> f64 {
+    0.35
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]

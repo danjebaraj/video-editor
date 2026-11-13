@@ -173,22 +173,55 @@ pub fn build(
 
     // ---------------- video
     let mut v = vec![];
-    let mut pre = vec!["setpts=PTS-STARTPTS".to_string()];
+    // Timestamps arrive relative to the seek point, so they are kept as they are: `fps` with
+    // `start_time=0` holds the first frame over any gap before it (variable-rate screen
+    // recordings only store a frame when the screen changes) instead of sliding the whole
+    // clip earlier.
+    let cfr = format!("fps={}:start_time=0", fps.ff());
+    let mut pre: Vec<String> = vec![];
     if c.clip.reverse {
+        pre.push("setpts=PTS-STARTPTS".into());
         pre.push("reverse".into());
         pre.push("setpts=PTS-STARTPTS".into());
     }
-    if !c.clip.speed_ramp.is_empty() {
-        pre.push(effects::speed_ramp_setpts(&c.clip.speed_ramp));
-    } else if (c.speed - 1.0).abs() > 1e-9 {
-        pre.push(format!("setpts=PTS/{}", f(c.speed)));
+    let retimed = !c.clip.speed_ramp.is_empty() || (c.speed - 1.0).abs() > 1e-9;
+    if retimed && !is_still && extras.source_override.is_none() {
+        // A changed speed never lands source frames on output frames evenly; picking the
+        // nearest one repeats or skips frames in an irregular pattern (judder). Blend the two
+        // neighbours instead so motion advances by the same amount every frame.
+        let vfr = m.info.as_ref().and_then(|i| i.video.as_ref()).map(|v| v.vfr).unwrap_or(false);
+        if vfr {
+            // make held frames explicit first, or a long hold would dissolve into the next frame
+            pre.push(cfr.clone());
+        }
+        if !c.clip.speed_ramp.is_empty() {
+            pre.push(effects::speed_ramp_setpts(&c.clip.speed_ramp));
+        } else {
+            pre.push(format!("setpts=PTS/{}", f(c.speed)));
+        }
+        pre.push(format!("framerate=fps={}", fps.ff()));
+    } else {
+        if !c.clip.speed_ramp.is_empty() {
+            pre.push(effects::speed_ramp_setpts(&c.clip.speed_ramp));
+        } else if (c.speed - 1.0).abs() > 1e-9 {
+            pre.push(format!("setpts=PTS/{}", f(c.speed)));
+        }
+        pre.push(cfr);
     }
-    pre.push(format!("fps={}", fps.ff()));
     v.push(format!("[0:v]{}[vn]", pre.join(",")));
     let (sw, sh) = (m.facts.width, m.facts.height);
+    // Zooming clips whose source out-resolves the target work at 2× and scale down after
+    // the zoom, so a punch-in shows source detail rather than an enlarged downscale.
+    let zoom_max = effects::max_zoom(c, dur_secs);
+    let supersample = extras.geometry_override.is_none()
+        && extras.source_override.is_none()
+        && zoom_max >= 1.15
+        && (sw as f64 / g.width as f64).min(sh as f64 / g.height as f64) >= 1.4
+        && g.width.max(g.height) <= 2560;
+    let zg = if supersample { Geometry { width: g.width * 2, height: g.height * 2, fps: g.fps } } else { g.clone() };
     match &extras.geometry_override {
         Some(go) => v.push(go.replace("{in}", "vn").replace("{out}", "vg").replace("{cin}", &color_in(m))),
-        None => v.push(geometry_chain(mode, sw, sh, g, "vn", "vg", &extras.pad_color, &color_in(m))),
+        None => v.push(geometry_chain(mode, sw, sh, &zg, "vn", "vg", &extras.pad_color, &color_in(m))),
     }
     let mut vlab = "vg".to_string();
     if let Some(cg) = &c.clip.color {
@@ -197,7 +230,7 @@ pub fn build(
             vlab = "vc".into();
         }
     }
-    let post = effects::video_chain(c, g, extras);
+    let post = effects::video_chain(c, g, &zg, extras);
     let freeze = effects::freeze_chain(c, g);
     let mut tail = vec![];
     tail.extend(post);

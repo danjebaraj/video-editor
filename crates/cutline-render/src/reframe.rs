@@ -1,4 +1,4 @@
-//! Per-clip reframe: track_face / manual / split → geometry overrides (sendcmd crop paths).
+//! Per-clip reframe: track_face / manual / split → geometry overrides (sub-pixel crop paths).
 
 use crate::pipeline::Loaded;
 use crate::segment::ClipExtras;
@@ -45,17 +45,6 @@ pub fn analysis(l: &Loaded, c: &TClip) -> Result<Option<Analysis>> {
     )?;
     cc.put_json(&key, &a)?;
     Ok(Some(a))
-}
-
-fn write_cmd(l: &Loaded, path: &CropPath) -> Result<std::path::PathBuf> {
-    let text = path.sendcmd();
-    let key = cutline_media::hash_key(&[text.as_bytes(), b"sendcmd-v1"]);
-    let p = cache(l).root.join(format!("{key}.cmd"));
-    if !p.exists() {
-        std::fs::create_dir_all(p.parent().unwrap())?;
-        std::fs::write(&p, text)?;
-    }
-    Ok(p)
 }
 
 /// Fill `x` for clips whose reframe needs analysis or keyframes.
@@ -136,8 +125,6 @@ pub fn apply(
         }
         _ => return Ok(None),
     };
-    let cmd = write_cmd(l, &path)?;
-    x.geometry_override = Some(path.geometry(&crate::escape::filter_path(&cmd), g.width, g.height));
-    x.deps.push(cmd);
+    x.geometry_override = Some(path.geometry(g.width, g.height));
     Ok(Some(path))
 }

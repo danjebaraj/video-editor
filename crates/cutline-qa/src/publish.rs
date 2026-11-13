@@ -105,7 +105,8 @@ pub fn thumbnail(l: &Loaded, pr: &Prepared, t: f64, text: Option<&str>, template
     // face-aware crop when a crop path exists
     let crop = pr.extras.crop_paths.get(&c.id).map(|p| {
         let i = ((local * p.fps) as usize).min(p.len().saturating_sub(1));
-        format!("crop={}:{}:{}:{},", p.cw[i], p.ch[i], p.x[i], p.y[i])
+        let (cw, ch, x, y) = p.rect_px(i);
+        format!("crop={cw}:{ch}:{x}:{y},")
     });
     let work = std::env::temp_dir().join(format!("cutline-thumb-{}", std::process::id()));
     std::fs::create_dir_all(&work)?;

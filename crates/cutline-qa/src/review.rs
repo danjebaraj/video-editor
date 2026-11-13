@@ -363,10 +363,10 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
             let s = f.width() as f64 / path.src_w as f64;
             stroke_rect(
                 &mut f,
-                (path.x[i] as f64 * s) as i32,
-                (path.y[i] as f64 * s) as i32,
-                (path.cw[i] as f64 * s) as i32,
-                (path.ch[i] as f64 * s) as i32,
+                (path.x[i] * s) as i32,
+                (path.y[i] * s) as i32,
+                (path.cw[i] * s) as i32,
+                (path.ch[i] * s) as i32,
                 4,
                 [0, 255, 0],
             );

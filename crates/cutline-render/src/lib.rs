@@ -3,6 +3,7 @@
 pub mod assemble;
 pub mod audio_plan;
 pub mod auto;
+pub mod beatrefs;
 pub mod cues;
 pub mod custom_transitions;
 pub mod effects;
@@ -275,7 +276,13 @@ pub fn final_chroma444(tl: &Timeline, opts: &RenderOptions) -> bool {
 
 /// Encoder args for the final deliverable.
 pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Toolchain) -> Vec<String> {
-    let gop = ((g.fps.as_f64() / 2.0).round() as i64).max(1).to_string();
+    // Keyframe interval. Every keyframe re-encodes the picture from scratch, so on a still
+    // image it lands on slightly different pixel values than the frames before it: a short
+    // interval shows as a faint pulse on static shots (most visible on text and flat UI). Keep
+    // keyframes rare (10 s for screen recordings, 2 s otherwise) and let the encoder add one
+    // at each real scene change, where a pulse cannot be seen and seeking wants one anyway.
+    let gop_secs = if tl.target.screencast { 10.0 } else { 2.0 };
+    let gop = ((g.fps.as_f64() * gop_secs).round() as i64).max(1).to_string();
     let mut v: Vec<String> = vec![];
     let hw = if opts.draft || opts.hw { draft_hw_encoder(tc) } else { None };
     let uses_hw = hw.is_some();
@@ -322,7 +329,7 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
                 ]
                 .map(String::from),
             );
-            v.extend(["-x264-params", "keyint_min=1:scenecut=0"].map(String::from));
+            v.extend(["-x264-params", "scenecut=40"].map(String::from));
         }
     }
     let pix = if !uses_hw && final_chroma444(tl, opts) { "yuv444p" } else { "yuv420p" };

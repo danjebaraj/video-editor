@@ -92,3 +92,15 @@ pub const COLOR_PRESETS: &[&str] = &["natural", "punchy", "warm_film", "cool_cle
 pub const BUNDLED_LUTS: &[&str] = &["warm_film", "cool_clean", "punchy", "bw_contrast", "teal_orange"];
 
 pub const SFX_ALIASES: &[&str] = &["whoosh", "pop", "ding", "riser"];
+
+/// Default progress curve of a transition: moving pictures accelerate and settle
+/// (`in_out_cubic`), blends ease gently (`in_out_quad`).
+pub fn default_transition_ease(kind: &str) -> crate::model::Ease {
+    use crate::model::Ease;
+    let moving = ["slide", "cover", "reveal", "smooth", "whip_", "zoom", "squeeze"];
+    if moving.iter().any(|m| kind.starts_with(m)) {
+        Ease::InOutCubic
+    } else {
+        Ease::InOutQuad
+    }
+}

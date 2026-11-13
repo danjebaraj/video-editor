@@ -114,9 +114,15 @@ fn tracks_panned_face_with_mock_detector() {
     cutline_reframe::set_detector_factory(None);
     let path = pr.extras.crop_paths.get("c").expect("crop path").clone();
     check_path(&path, 0.5);
-    // renders, and the segment uses the sendcmd crop
+    // the pan moves in fractions of a source pixel: during the steady part of the move the
+    // window advances by nearly the same amount every frame (whole-pixel crops alternate steps)
+    let steps: Vec<f64> = (100..200).map(|i| path.x[i + 1] - path.x[i]).collect();
+    let mean = steps.iter().sum::<f64>() / steps.len() as f64;
+    assert!(mean > 1.0, "the window pans ({mean:.2} px/frame)");
+    assert!(steps.iter().all(|s| (s - mean).abs() < 0.25), "uneven pan steps: {steps:.2?}");
+    // renders, and the segment resamples the moving window sub-pixel
     let (plan, _) = pipeline::render(&l, &pr, &RenderOptions::default()).unwrap();
-    assert!(plan.segments[0].spec.filter.contains("crop@rf"), "{}", plan.segments[0].spec.filter);
+    assert!(plan.segments[0].spec.filter.contains("perspective="), "{}", plan.segments[0].spec.filter);
     assert!(plan.output.exists());
 }
 
@@ -210,4 +216,81 @@ fn tracks_face_on_still_image() {
     assert!(frames_seen.load(std::sync::atomic::Ordering::SeqCst) >= 6, "analysis decoded no frames");
     assert!(!pr.diags.iter().any(|x| x.code == "W_REFRAME_NO_FACES"), "{:?}", pr.diags);
     assert!(pr.extras.crop_paths.contains_key("c"), "no crop path for the still");
+}
+
+/// Centroid and pixel count of the red marker in a frame.
+fn red_marker(f: &image::RgbImage) -> Option<(f64, f64, f64)> {
+    let (mut sx, mut sy, mut n) = (0.0, 0.0, 0.0);
+    for (x, y, p) in f.enumerate_pixels() {
+        if p[0] > 160 && p[1] < 90 && p[2] < 90 {
+            sx += x as f64;
+            sy += y as f64;
+            n += 1.0;
+        }
+    }
+    (n > 0.0).then(|| (sx / n, sy / n, n))
+}
+
+/// Manual keys frame the crop on their (x, y) center, not the frame center (the post-crop
+/// zoom used to be centered whatever the keys said). Same-aspect source, so the zoom does all
+/// the framing. A red marker sits at source (0.3, 0.3):
+/// - key 1 centers on it at zoom 2 → the marker is at the output center, 2× its size;
+/// - key 2 asks for (0.1, 0.1) at zoom 2 → the view clamps to the top-left half [0, 0.5], so
+///   the marker lands at 0.6 of the output on both axes;
+/// - in between the marker moves monotonically (eased interpolation, no jumps).
+#[test]
+fn manual_keys_frame_on_key_center() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let (w, h) = (1280u32, 720u32);
+    let (mx, my) = (384u32, 216u32);
+    let g = format!(
+        "color=c=0x808080:s={w}x{h}:r=30:d=2,drawbox=x={}:y={}:w=24:h=24:color=0xff0000:t=fill,format=yuv420p",
+        mx - 12,
+        my - 12
+    );
+    let mut c = tc.ffmpeg_cmd();
+    c.args(["-f", "lavfi", "-i", &g, "-c:v", "libx264", "-crf", "8", "-preset", "veryfast"])
+        .arg(d.path().join("m.mp4"));
+    gen::run(c).unwrap();
+    let pp = d.path().join("p.json5");
+    std::fs::write(
+        &pp,
+        format!(
+            "{{version: 1, name: 'mk', target: 'custom', width: {w}, height: {h}, fps: 30, assets: {{m: {{path: 'm.mp4'}}}}, main: [{{id: 'c', clip: 'm', in: 0, out: 1.8, reframe: {{mode: 'manual', keys: [{{t: 0, x: 0.3, y: 0.3, zoom: 2}}, {{t: 0.4, x: 0.3, y: 0.3, zoom: 2}}, {{t: 1.2, x: 0.1, y: 0.1, zoom: 2}}]}}}}], audio: {{voice_chain: 'raw'}}}}"
+        ),
+    )
+    .unwrap();
+    let l = pipeline::load(&pp).unwrap();
+    assert!(!cutline_core::diag::has_errors(&l.diags), "{:?}", l.diags);
+    let (name, e) = pipeline::exports(&l.project).remove(0);
+    let pr = pipeline::prepare(&l, name, &e, false).unwrap();
+    let (plan, _) = pipeline::render(&l, &pr, &RenderOptions::default()).unwrap();
+    let frames = cutline_testkit::analyze::read_all_frames(tc, &plan.output, None).unwrap();
+    let a_src = 24.0 * 24.0;
+    let mut prev = (0.0f64, 0.0f64);
+    for (n, f) in frames.iter().enumerate() {
+        let t = n as f64 / 30.0;
+        let (cx, cy, a) = red_marker(f).unwrap_or_else(|| panic!("marker left the frame at {n}"));
+        let want = if t <= 0.4 {
+            Some((640.0, 360.0))
+        } else if t >= 1.2 {
+            Some((0.6 * w as f64, 0.6 * h as f64))
+        } else {
+            None
+        };
+        if let Some((wx, wy)) = want {
+            assert!(
+                (cx - wx).abs() < 3.0 && (cy - wy).abs() < 3.0,
+                "frame {n} (t={t:.2}): marker at ({cx:.1}, {cy:.1}), want ({wx}, {wy})"
+            );
+            let grown = (a / a_src).sqrt();
+            assert!((grown - 2.0).abs() < 0.15, "frame {n}: marker grew {grown:.2}×, want 2×");
+        }
+        if n > 0 {
+            assert!(cx >= prev.0 - 1.0 && cy >= prev.1 - 1.0, "frame {n}: marker moved backwards");
+        }
+        prev = (cx, cy);
+    }
 }

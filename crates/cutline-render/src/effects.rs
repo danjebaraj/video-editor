@@ -210,24 +210,40 @@ pub fn zoom_terms(
     (terms, focus, shakes, kb)
 }
 
-/// Zoom/pan/shake chain: per-frame exact-size scale followed by a fixed-size crop.
-/// The crop offset is integer-exact for centered zooms (even size deltas), so there is no
-/// sub-pixel center jitter; size changes are monotone for monotone scale curves.
+/// Largest combined zoom scale over the clip (sampled).
+pub fn max_zoom(c: &TClip, dur: f64) -> f64 {
+    let (terms, ..) = zoom_terms(c, dur);
+    if terms.is_empty() {
+        return 1.0;
+    }
+    (0..=200)
+        .map(|i| {
+            let t = dur * i as f64 / 200.0;
+            terms.iter().map(|x| x.eval(t)).product::<f64>()
+        })
+        .fold(1.0, f64::max)
+}
+
+/// Zoom/pan/shake chain with sub-pixel motion.
+///
+/// The frame is resampled by `perspective` (cubic), whose source rectangle is evaluated per
+/// frame in fractional pixels: the picture glides instead of advancing in whole-pixel steps
+/// (a `scale`+`crop` zoom can only grow by 2 px and pan by 1 px at a time, which shows as
+/// ticking on slow moves and as text shimmer on screen recordings).
+///
+/// `perspective` works on 8-bit planes and has no `t`; time is `(in-1)/fps` (`in` counts
+/// from 1). `g` may be a supersampled geometry (see `segment::build`).
 pub fn zoom_chain(c: &TClip, g: &Geometry, dur: f64) -> Option<String> {
     let (terms, focus, shakes, kb) = zoom_terms(c, dur);
     if terms.is_empty() {
         return None;
     }
     let (w, h) = (g.width, g.height);
-    let s = terms.iter().map(|t| t.expr("t")).collect::<Vec<_>>().join("*");
-    // even growth on each axis keeps the centered crop offset integral
-    let ex = format!("2*round({w}*(({s})-1)/2)");
-    let ey = format!("2*round({h}*(({s})-1)/2)");
-    let sw = format!("{w}+{ex}");
-    let sh = format!("{h}+{ey}");
+    let t = format!("((in-1)/({}))", g.fps.ff());
+    let s = format!("({})", terms.iter().map(|x| x.expr(&t)).collect::<Vec<_>>().join("*"));
     let (fx, fy) = match kb {
         Some(((x0, y0), (x1, y1), ez)) => {
-            let u = ease_expr(ez, &u_expr("t", 0.0, dur));
+            let u = ease_expr(ez, &u_expr(&t, 0.0, dur));
             (format!("({}+{}*{u})", f(x0), f(x1 - x0)), format!("({}+{}*{u})", f(y0), f(y1 - y0)))
         }
         None => (f(focus.0), f(focus.1)),
@@ -235,15 +251,19 @@ pub fn zoom_chain(c: &TClip, g: &Geometry, dur: f64) -> Option<String> {
     let mut sx = String::new();
     let mut sy = String::new();
     for sk in &shakes {
-        let env = format!("between(t,{},{})*(1-{})", f(sk.a), f(sk.a + sk.d), u_expr("t", sk.a, sk.d));
-        sx.push_str(&format!("+{}*{w}*sin(2*PI*23*t)*{env}", f(sk.amp_x)));
-        sy.push_str(&format!("+{}*{h}*cos(2*PI*17*t)*{env}", f(sk.amp_y)));
+        let env = format!("between({t},{},{})*(1-{})", f(sk.a), f(sk.a + sk.d), u_expr(&t, sk.a, sk.d));
+        sx.push_str(&format!("+{}*{w}*sin(2*PI*23*{t})*{env}", f(sk.amp_x)));
+        sy.push_str(&format!("+{}*{h}*cos(2*PI*17*{t})*{env}", f(sk.amp_y)));
     }
-    // The crop offset reuses the scale's per-frame growth instead of `iw`/`ih`: crop keeps
-    // the input size it was configured with, so with a size that changes every frame
-    // `iw-w` stays 0 and every animated zoom would anchor at the top-left corner.
+    // Source window (pixels): size (w/s, h/s), placed so the focus point keeps its relative
+    // position; shake offsets are in zoomed pixels, hence `/s`. The `0.5/s-0.5` term makes
+    // the mapping exact at pixel centers.
+    let left = format!("(clip(({w}*({s}-1)*{fx}{sx})/{s},0,{w}-{w}/{s})+0.5/{s}-0.5)");
+    let top = format!("(clip(({h}*({s}-1)*{fy}{sy})/{s},0,{h}-{h}/{s})+0.5/{s}-0.5)");
+    let right = format!("({left}+{w}/{s})");
+    let bottom = format!("({top}+{h}/{s})");
     Some(format!(
-        "scale=w='{sw}':h='{sh}':eval=frame:flags=bicubic,crop={w}:{h}:x='clip(round(({ex})*{fx}{sx}),0,{ex})':y='clip(round(({ey})*{fy}{sy}),0,{ey})'"
+        "format=yuv444p,perspective=x0='{left}':y0='{top}':x1='{right}':y1='{top}':x2='{left}':y2='{bottom}':x3='{right}':y3='{bottom}':interpolation=cubic:sense=source:eval=frame"
     ))
 }
 
@@ -403,11 +423,18 @@ fn blur_in(c: &TClip, g: &Geometry) -> Option<String> {
 
 /// Color + effects chain applied after geometry. Returns comma-chain elements; a color graph
 /// with LUT blending is emitted separately by `video_graph`.
-pub fn video_chain(c: &TClip, g: &Geometry, _x: &ClipExtras) -> Vec<String> {
+///
+/// `zg` is the geometry the zoom works in: the target, or a supersampled one when the source
+/// has more pixels than the target (the zoom then reveals real detail instead of enlarging
+/// an already downscaled frame); the chain scales back to `g` after the zoom.
+pub fn video_chain(c: &TClip, g: &Geometry, zg: &Geometry, _x: &ClipExtras) -> Vec<String> {
     let dur = g.fps.frames_to_secs(c.frames);
     let mut v = vec![];
-    if let Some(z) = zoom_chain(c, g, dur) {
+    if let Some(z) = zoom_chain(c, zg, dur) {
         v.push(z);
+        if zg.width != g.width || zg.height != g.height {
+            v.push(format!("scale={}:{}:flags=lanczos", g.width, g.height));
+        }
     }
     if let Some(b) = blur_in(c, g) {
         v.push(b);

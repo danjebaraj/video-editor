@@ -621,10 +621,21 @@
           }
         },
         "end_at": {
-          "description": "Timeline time of the cut to the next clip (the middle of the outgoing transition), e.g.\n`\"cue:calendar\"`. The clip is fitted to end there: with `in` and `out` both set its\nspeed is computed; otherwise `out` is (at `speed`, default 1); stills get the duration.",
+          "description": "Timeline time of the cut to the next clip (the middle of the outgoing transition), e.g.\n`\"cue:calendar\"`, `\"bar:12\"`. The clip is fitted to end there at its `speed` (default\n1): footage past the cut is trimmed (an `out` is then only a limit), and footage that\nruns out early holds its last frame (`W_FIT_HOLD`). Stills get the duration. Set\n`fit: \"speed\"` to change the speed instead.",
           "anyOf": [
             {
               "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fit": {
+          "description": "With `end_at`, `in` and `out`: `trim` (default) keeps the speed and trims or holds;\n`speed` plays exactly `in`..`out` at whatever speed fills the slot (frame-blended).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndFit"
             },
             {
               "type": "null"
@@ -1290,6 +1301,13 @@
             "duration"
           ]
         }
+      ]
+    },
+    "EndFit": {
+      "type": "string",
+      "enum": [
+        "trim",
+        "speed"
       ]
     },
     "Export": {
@@ -3111,6 +3129,12 @@
             "null"
           ]
         },
+        "downbeat_reach": {
+          "description": "A cut within this many seconds of the first beat of a bar goes there rather than to a\nnearer weak beat (default 0.35; 0 treats all beats alike). Used when the bars are clear.",
+          "type": "number",
+          "format": "double",
+          "default": 0.35
+        },
         "enabled": {
           "type": "boolean",
           "default": true
@@ -3209,6 +3233,17 @@
           "description": "Seconds.",
           "type": "number",
           "format": "double"
+        },
+        "ease": {
+          "description": "Progress curve. Default: `in_out_cubic` for moving transitions (slides, covers, whips,\nzooms), `in_out_quad` for the rest (fades, wipes); `linear` for a constant rate.\n`back` and `spring` are not allowed (progress must not run backwards).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ease"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "generated_by": {
           "description": "Set by `auto` expansion.",

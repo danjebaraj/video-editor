@@ -16,7 +16,7 @@ use std::path::Path;
 const TIMELINE_FIELDS: &[(&str, &str)] =
     &[("main", "end_at"), ("layers", "start"), ("layers", "end"), ("layers", "at"), ("markers", "at")];
 /// Every time-valued field name (cue references anywhere else are an error).
-const TIME_FIELDS: &[&str] = &["in", "out", "duration", "start", "end", "at", "end_at", "src_in", "src_out"];
+pub(crate) const TIME_FIELDS: &[&str] = &["in", "out", "duration", "start", "end", "at", "end_at", "src_in", "src_out"];
 
 /// A resolved cue (reported by `cutline cues`).
 #[derive(Debug, Clone, serde::Serialize)]
@@ -113,7 +113,7 @@ pub fn resolve_with(
     (d, resolved.into_values().flatten().collect(), ctx.used_anchors)
 }
 
-fn is_timeline_field(ptr: &str) -> bool {
+pub(crate) fn is_timeline_field(ptr: &str) -> bool {
     let parts: Vec<&str> = ptr.trim_start_matches('/').split('/').collect();
     parts.len() == 3
         && parts[1].parse::<usize>().is_ok()
@@ -159,7 +159,7 @@ fn split_ref(r: &str, cues: &BTreeMap<String, Cue>) -> Option<(String, f64)> {
 }
 
 /// Seconds of a plain time value in the raw project (no fps needed for seconds/timecodes).
-fn plain_secs(v: Option<&Value>) -> Result<f64, String> {
+pub(crate) fn plain_secs(v: Option<&Value>) -> Result<f64, String> {
     match v {
         None => Ok(0.0),
         Some(Value::Number(n)) => n.as_f64().ok_or_else(|| "invalid number".into()),

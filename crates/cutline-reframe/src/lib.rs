@@ -200,19 +200,17 @@ pub fn scene_cuts(tc: &Toolchain, path: &Path, src_in: f64, src_out: f64) -> Res
     Ok(v)
 }
 
-/// Per-output-frame crop rectangles in source pixels.
+/// Per-output-frame crop rectangles in source pixels (fractional: the view glides between
+/// pixels instead of stepping from one to the next).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CropPath {
     pub src_w: u32,
     pub src_h: u32,
-    pub cw: Vec<u32>,
-    pub ch: Vec<u32>,
-    pub x: Vec<u32>,
-    pub y: Vec<u32>,
+    pub cw: Vec<f64>,
+    pub ch: Vec<f64>,
+    pub x: Vec<f64>,
+    pub y: Vec<f64>,
     pub fps: f64,
-    /// Manual zoom keys (t, zoom ≥ 1), eased in-out cubic; applied after the fixed-size crop.
-    #[serde(default)]
-    pub zoom_keys: Vec<(f64, f64)>,
 }
 
 impl CropPath {
@@ -224,61 +222,80 @@ impl CropPath {
     }
     /// Center x (normalized) at frame i.
     pub fn center_x(&self, i: usize) -> f64 {
-        (self.x[i] as f64 + self.cw[i] as f64 / 2.0) / self.src_w as f64
+        (self.x[i] + self.cw[i] / 2.0) / self.src_w as f64
     }
-    /// `sendcmd` script driving `crop@rf` (only emits changes).
-    pub fn sendcmd(&self) -> String {
-        let mut s = String::new();
-        let mut prev: Option<(u32, u32, u32, u32)> = None;
-        for i in 0..self.len() {
-            let cur = (self.cw[i], self.ch[i], self.x[i], self.y[i]);
-            if prev != Some(cur) {
-                let t = i as f64 / self.fps;
-                let mut cmds = vec![];
-                if prev.map(|p| p.0 != cur.0).unwrap_or(true) {
-                    cmds.push(format!("crop@rf w {}", cur.0));
-                }
-                if prev.map(|p| p.1 != cur.1).unwrap_or(true) {
-                    cmds.push(format!("crop@rf h {}", cur.1));
-                }
-                if prev.map(|p| p.2 != cur.2).unwrap_or(true) {
-                    cmds.push(format!("crop@rf x {}", cur.2));
-                }
-                if prev.map(|p| p.3 != cur.3).unwrap_or(true) {
-                    cmds.push(format!("crop@rf y {}", cur.3));
-                }
-                s.push_str(&format!("{t:.6} {};\n", cmds.join(", ")));
-                prev = Some(cur);
-            }
-        }
-        s
+    /// Whole-pixel crop (w, h, x, y) at frame i, for stills and overlays.
+    pub fn rect_px(&self, i: usize) -> (u32, u32, u32, u32) {
+        let w = (self.cw[i].round() as u32).clamp(2, self.src_w);
+        let h = (self.ch[i].round() as u32).clamp(2, self.src_h);
+        ((w), (h), (self.x[i].round() as u32).min(self.src_w - w), (self.y[i].round() as u32).min(self.src_h - h))
     }
     /// Geometry filter chain template (`{in}`, `{out}`, `{cin}` placeholders) for the segment.
-    pub fn geometry(&self, sendcmd_path: &str, w: u32, h: u32) -> String {
-        let zoom = self.zoom_expr().map(|z| format!(",scale=w='{w}+2*round({w}*(({z})-1)/2)':h='{h}+2*round({h}*(({z})-1)/2)':eval=frame:flags=bicubic,crop={w}:{h}:x='(iw-{w})/2':y='(ih-{h})/2'")).unwrap_or_default();
+    ///
+    /// `perspective` resamples the moving window (cubic, fractional source coordinates) to the
+    /// full source frame, which is then scaled to the target. A `crop` can only sit on whole
+    /// pixels, so a slow pan across a source that is enlarged for the target moved in visible
+    /// steps. `perspective` has no `t` and takes no runtime commands: each window edge is an
+    /// expression of the frame number (`in` counts from 1), piecewise linear through the path.
+    pub fn geometry(&self, w: u32, h: u32) -> String {
+        let (sw, sh) = (self.src_w as f64, self.src_h as f64);
+        // sample position of destination pixel i is x + (i + 0.5)·cw/sw − 0.5 (pixel centers)
+        let left: Vec<f64> = (0..self.len()).map(|i| self.x[i] + 0.5 * self.cw[i] / sw - 0.5).collect();
+        let top: Vec<f64> = (0..self.len()).map(|i| self.y[i] + 0.5 * self.ch[i] / sh - 0.5).collect();
+        let right: Vec<f64> = (0..self.len()).map(|i| left[i] + self.cw[i]).collect();
+        let bottom: Vec<f64> = (0..self.len()).map(|i| top[i] + self.ch[i]).collect();
+        let (l, t, r, b) = (frame_expr(&left), frame_expr(&top), frame_expr(&right), frame_expr(&bottom));
         format!(
-            "[{{in}}]sendcmd=f={sendcmd_path},crop@rf=w={}:h={}:x={}:y={}:exact=1,scale={w}:{h}:flags=lanczos:{{cin}}:out_color_matrix=bt709:out_range=tv{zoom},setsar=1[{{out}}]",
-            self.cw[0], self.ch[0], self.x[0], self.y[0]
+            "[{{in}}]scale=iw:ih:{{cin}}:out_color_matrix=bt709:out_range=tv,format=yuv444p,perspective=x0='{l}':y0='{t}':x1='{r}':y1='{t}':x2='{l}':y2='{b}':x3='{r}':y3='{b}':interpolation=cubic:sense=source:eval=frame,scale={w}:{h}:flags=lanczos,setsar=1[{{out}}]"
         )
     }
+}
 
-    /// Piecewise in-out-cubic zoom expression of `t` (None when there is no zoom).
-    pub fn zoom_expr(&self) -> Option<String> {
-        if self.zoom_keys.iter().all(|(_, z)| (z - 1.0).abs() < 1e-6) {
-            return None;
-        }
-        let k = &self.zoom_keys;
-        let f = |v: f64| format!("{v:.6}");
-        let mut e = f(k.last()?.1);
-        for i in (0..k.len().saturating_sub(1)).rev() {
-            let (t0, z0) = k[i];
-            let (t1, z1) = k[i + 1];
-            let u = format!("clip((t-{})/{},0,1)", f(t0), f((t1 - t0).max(1e-6)));
-            let ease = format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)");
-            e = format!("if(lt(t,{}),{}+{}*{ease},{e})", f(t1), f(z0), f(z1 - z0));
-        }
-        Some(format!("if(lt(t,{}),{},{e})", f(k[0].0), f(k[0].1)))
+/// Expression of `in` (1-based frame number) reproducing `v[frame]` within 0.02 px: linear
+/// pieces chosen greedily, selected through a balanced tree of `if`s (shallow to evaluate).
+fn frame_expr(v: &[f64]) -> String {
+    const TOL: f64 = 0.02;
+    if v.is_empty() {
+        return "0".into();
     }
+    // knots: frame indices where linear pieces join
+    let mut knots = vec![0usize];
+    let mut a = 0usize;
+    while a + 1 < v.len() {
+        let mut b = a + 1;
+        while b + 1 < v.len() {
+            let c = b + 1;
+            let ok = (a + 1..c).all(|i| {
+                let u = (i - a) as f64 / (c - a) as f64;
+                (v[a] + (v[c] - v[a]) * u - v[i]).abs() <= TOL
+            });
+            if !ok {
+                break;
+            }
+            b = c;
+        }
+        knots.push(b);
+        a = b;
+    }
+    fn piece(v: &[f64], a: usize, b: usize) -> String {
+        if (v[b] - v[a]).abs() < 1e-9 || a == b {
+            return format!("{:.4}", v[a]);
+        }
+        format!("({:.4}+{:.6}*(in-{}))", v[a], (v[b] - v[a]) / (b - a) as f64, a + 1)
+    }
+    fn tree(v: &[f64], k: &[usize]) -> String {
+        // k: consecutive knots; pieces are k[i]..k[i+1]
+        match k.len() {
+            0 | 1 => format!("{:.4}", v[k.first().copied().unwrap_or(0)]),
+            2 => piece(v, k[0], k[1]),
+            n => {
+                let m = n / 2;
+                format!("if(lt(in,{}),{},{})", k[m] + 1, tree(v, &k[..=m]), tree(v, &k[m..]))
+            }
+        }
+    }
+    // hold the last value past the path's end (a clip may be padded by a frame)
+    format!("if(gte(in,{}),{:.4},{})", v.len(), v[v.len() - 1], tree(v, &knots))
 }
 
 fn even(v: f64) -> u32 {
@@ -335,20 +352,18 @@ pub fn track_path(
         &SmoothParams { max_speed: o.smooth.max_speed * src_w as f64 / src_h as f64, ..o.smooth },
         &cut_frames,
     );
-    let px = |c: f64, cn: f64, full: u32, size: u32| -> u32 {
+    let px = |c: f64, cn: f64, full: u32, size: u32| -> f64 {
         let c = track::clamp_center(c, cn);
-        let v = (c - cn / 2.0) * full as f64;
-        (even(v).min(full - size)).min(full.saturating_sub(size))
+        ((c - cn / 2.0) * full as f64).clamp(0.0, (full - size) as f64)
     };
     Some(CropPath {
         src_w,
         src_h,
-        cw: vec![cw; n_frames],
-        ch: vec![ch; n_frames],
-        x: xs.iter().map(|x| if cw >= src_w { 0 } else { px(*x, cwn, src_w, cw) }).collect(),
-        y: ys.iter().map(|y| if ch >= src_h { 0 } else { px(*y, chn, src_h, ch) }).collect(),
+        cw: vec![cw as f64; n_frames],
+        ch: vec![ch as f64; n_frames],
+        x: xs.iter().map(|x| if cw >= src_w { 0.0 } else { px(*x, cwn, src_w, cw) }).collect(),
+        y: ys.iter().map(|y| if ch >= src_h { 0.0 } else { px(*y, chn, src_h, ch) }).collect(),
         fps,
-        zoom_keys: vec![],
     })
 }
 
@@ -386,27 +401,16 @@ pub fn manual_path(
         let l = ks.last().unwrap();
         (l.1, l.2, l.3)
     };
-    // fixed crop window (zoom 1) positioned by the key centers; zoom is applied after the crop
-    // (changing crop size at runtime stalls ffmpeg's filter graph)
-    let mut p = CropPath {
-        src_w,
-        src_h,
-        cw: vec![],
-        ch: vec![],
-        x: vec![],
-        y: vec![],
-        fps,
-        zoom_keys: ks.iter().map(|k| (k.0, k.3.max(1.0))).collect(),
-    };
+    // the window shrinks by the zoom around the key center, kept inside the source
+    let mut p = CropPath { src_w, src_h, cw: vec![], ch: vec![], x: vec![], y: vec![], fps };
     for i in 0..n_frames {
-        let (cx, cy, _z) = at(i as f64 / fps);
-        let (cw, ch) = (cw0, ch0);
-        let x = even((cx * src_w as f64 - cw as f64 / 2.0).clamp(0.0, (src_w - cw) as f64));
-        let y = even((cy * src_h as f64 - ch as f64 / 2.0).clamp(0.0, (src_h - ch) as f64));
+        let (cx, cy, z) = at(i as f64 / fps);
+        let z = z.max(1.0);
+        let (cw, ch) = (cw0 as f64 / z, ch0 as f64 / z);
         p.cw.push(cw);
         p.ch.push(ch);
-        p.x.push(x.min(src_w - cw));
-        p.y.push(y.min(src_h - ch));
+        p.x.push((cx.clamp(0.0, 1.0) * src_w as f64 - cw / 2.0).clamp(0.0, src_w as f64 - cw));
+        p.y.push((cy.clamp(0.0, 1.0) * src_h as f64 - ch / 2.0).clamp(0.0, src_h as f64 - ch));
     }
     p
 }
