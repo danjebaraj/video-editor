@@ -16,6 +16,14 @@ pub enum HomeSource {
     Platform,
 }
 
+/// Folder of the running binary with symlinks resolved, so a link such as
+/// `~/.local/bin/cutline → <repo>/bin/cutline` finds the assets and `.cutline-home` of its target.
+pub fn exe_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let real = std::fs::canonicalize(&exe).unwrap_or(exe);
+    real.parent().map(Path::to_path_buf)
+}
+
 /// Nearest `.cutline-home` containing `tools/`, searching each start directory and its
 /// ancestors in order.
 pub fn find_home_from(starts: &[&Path]) -> Option<PathBuf> {
@@ -33,8 +41,7 @@ pub fn home() -> (PathBuf, HomeSource) {
     if let Some(h) = std::env::current_dir().ok().and_then(|d| find_home_from(&[&d])) {
         return (h, HomeSource::WorkingDir);
     }
-    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
-    if let Some(h) = exe_dir.and_then(|d| find_home_from(&[&d])) {
+    if let Some(h) = exe_dir().and_then(|d| find_home_from(&[&d])) {
         return (h, HomeSource::Binary);
     }
     let platform = directories::ProjectDirs::from("", "", "cutline")
@@ -89,12 +96,10 @@ pub fn assets_dir() -> PathBuf {
     if let Some(p) = std::env::var_os("CUTLINE_ASSETS") {
         return PathBuf::from(p);
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            for c in [d.join("assets"), d.join("../share/cutline/assets")] {
-                if c.join("fonts").is_dir() {
-                    return c;
-                }
+    if let Some(d) = exe_dir() {
+        for c in [d.join("assets"), d.join("../share/cutline/assets")] {
+            if c.join("fonts").is_dir() {
+                return c;
             }
         }
     }
