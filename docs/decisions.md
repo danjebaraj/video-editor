@@ -171,6 +171,7 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-13 — Manual reframe zoom after a fixed crop
 - **Decision:** manual reframe keys move a fixed-size crop window (zoom 1) via sendcmd x/y only. Zoom is applied afterwards as a per-frame `scale` plus a centered `crop`, from an eased in-out-cubic expression built from the keys.
 - **Reason:** changing `crop` w/h through sendcmd at runtime stalled ffmpeg's filter graph indefinitely; the paths-with-unicode test caught it.
+- **Amended (2026-11-13):** the post-zoom crop is framed on the key center, not the frame center: its offset is `clip(u·(w+e) − w/2, 0, e)`, where `e` is the scale's even per-axis growth and `u = (cx − x0) / cw` is the eased key center mapped into the fixed crop window, as expressions of `t`. It uses the growth expression rather than `iw`, because `crop` keeps the input size it was configured with (the same reason the `zoom` effect chain avoids `iw`). The view is therefore clamped to the source.
 
 ## 2026-11-13 — Chapters and thumbnails
 - **Decision:** chapters come from `markers`, else clip `chapter` fields, else clip ids (jump-cut pieces merged, ≥ 10 s apart). The first chapter is forced to 00:00; there are warnings for fewer than 3 chapters or any chapter under 10 s. Thumbnails take the frame at timeline time t, use the face crop when a crop path exists, cover-crop to 1280×720 (1080×1920 Shorts), add a small saturation/contrast pop, and render the template text statically (entrance animations stripped) at 1.5× title size.

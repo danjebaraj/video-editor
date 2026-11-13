@@ -99,7 +99,9 @@ WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
 ### Reframe
 
 `mode`: `cover` (default) · `center` · `fit_blur` · `fit_pad` · `track_face` · `manual` · `split`.
-`keys` (manual): `[{t, x, y, zoom}]` (clip-relative `t`, normalized center, zoom ≥ 1).
+`keys` (manual): `[{t, x, y, zoom}]` (clip-relative `t`; `x, y` = crop center in 0..1 of the
+source, clamped so the view stays inside the frame; zoom ≥ 1; eased in-out-cubic between keys;
+`max_pan_speed` does not apply).
 `bias` `{x, y}` (default 0.5, 0.38): where the face sits in the crop. `subject`: `most_persistent`
 (default), `largest`, `left`, `right`, `index` + `subject_index`. `max_pan_speed` (frame widths
 per second, default 0.6). `fallback` (default `fit_blur`) when no faces. `regions` (split): two

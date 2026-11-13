@@ -213,6 +213,10 @@ pub struct CropPath {
     /// Manual zoom keys (t, zoom ≥ 1), eased in-out cubic; applied after the fixed-size crop.
     #[serde(default)]
     pub zoom_keys: Vec<(f64, f64)>,
+    /// Manual crop-center keys (t, x, y in 0..1 of the source), eased like `zoom_keys`; the
+    /// post-crop zoom is framed on this point (clamped so the view stays inside the source).
+    #[serde(default)]
+    pub center_keys: Vec<(f64, f64, f64)>,
 }
 
 impl CropPath {
@@ -255,11 +259,45 @@ impl CropPath {
     }
     /// Geometry filter chain template (`{in}`, `{out}`, `{cin}` placeholders) for the segment.
     pub fn geometry(&self, sendcmd_path: &str, w: u32, h: u32) -> String {
-        let zoom = self.zoom_expr().map(|z| format!(",scale=w='{w}+2*round({w}*(({z})-1)/2)':h='{h}+2*round({h}*(({z})-1)/2)':eval=frame:flags=bicubic,crop={w}:{h}:x='(iw-{w})/2':y='(ih-{h})/2'")).unwrap_or_default();
+        let zoom = self.zoom_expr().map(|z| self.zoom_chain(&z, w, h)).unwrap_or_default();
         format!(
             "[{{in}}]sendcmd=f={sendcmd_path},crop@rf=w={}:h={}:x={}:y={}:exact=1,scale={w}:{h}:flags=lanczos:{{cin}}:out_color_matrix=bt709:out_range=tv{zoom},setsar=1[{{out}}]",
             self.cw[0], self.ch[0], self.x[0], self.y[0]
         )
+    }
+
+    /// Post-crop zoom: per-frame exact-size scale, then a fixed-size crop framed on the
+    /// manual key center. The offset is computed from the scale's own growth expression, not
+    /// `iw`/`ih`: crop keeps the input size it was configured with, so `iw` does not follow a
+    /// size that changes per frame (same reason as the `zoom` effect chain).
+    fn zoom_chain(&self, z: &str, w: u32, h: u32) -> String {
+        let ex = format!("2*round({w}*(({z})-1)/2)");
+        let ey = format!("2*round({h}*(({z})-1)/2)");
+        let (ux, uy) = match self.center_exprs() {
+            Some(c) => c,
+            None => ("0.5".to_string(), "0.5".to_string()),
+        };
+        // the crop window of size (w, h) centered at u·(w+e), kept inside [0, e]
+        format!(
+            ",scale=w='{w}+{ex}':h='{h}+{ey}':eval=frame:flags=bicubic,crop={w}:{h}:x='clip(round(({ux})*({w}+{ex})-{hw}),0,{ex})':y='clip(round(({uy})*({h}+{ey})-{hh}),0,{ey})'",
+            hw = f6(w as f64 / 2.0),
+            hh = f6(h as f64 / 2.0),
+        )
+    }
+
+    /// Key centers mapped into the fixed crop window: `(cx_px − x0) / cw` per axis, where
+    /// `x0` is the window's (clamped) left edge, as expressions of `t`.
+    fn center_exprs(&self) -> Option<(String, String)> {
+        if self.center_keys.is_empty() || self.is_empty() {
+            return None;
+        }
+        let axis = |pick: fn(&(f64, f64, f64)) -> f64, src: u32, c: u32| {
+            let keys: Vec<(f64, f64)> = self.center_keys.iter().map(|k| (k.0, pick(k) * src as f64)).collect();
+            let p = eased_expr(&keys)?;
+            let (c, max0) = (c as f64, src.saturating_sub(c) as f64);
+            Some(format!("((({p})-clip(({p})-{},0,{}))/{})", f6(c / 2.0), f6(max0), f6(c)))
+        };
+        Some((axis(|k| k.1, self.src_w, self.cw[0])?, axis(|k| k.2, self.src_h, self.ch[0])?))
     }
 
     /// Piecewise in-out-cubic zoom expression of `t` (None when there is no zoom).
@@ -267,18 +305,27 @@ impl CropPath {
         if self.zoom_keys.iter().all(|(_, z)| (z - 1.0).abs() < 1e-6) {
             return None;
         }
-        let k = &self.zoom_keys;
-        let f = |v: f64| format!("{v:.6}");
-        let mut e = f(k.last()?.1);
-        for i in (0..k.len().saturating_sub(1)).rev() {
-            let (t0, z0) = k[i];
-            let (t1, z1) = k[i + 1];
-            let u = format!("clip((t-{})/{},0,1)", f(t0), f((t1 - t0).max(1e-6)));
-            let ease = format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)");
-            e = format!("if(lt(t,{}),{}+{}*{ease},{e})", f(t1), f(z0), f(z1 - z0));
-        }
-        Some(format!("if(lt(t,{}),{},{e})", f(k[0].0), f(k[0].1)))
+        eased_expr(&self.zoom_keys)
     }
+}
+
+fn f6(v: f64) -> String {
+    format!("{v:.6}")
+}
+
+/// Piecewise in-out-cubic expression of `t` through sorted `(t, value)` keys, held before the
+/// first key and after the last.
+fn eased_expr(k: &[(f64, f64)]) -> Option<String> {
+    let f = f6;
+    let mut e = f(k.last()?.1);
+    for i in (0..k.len().saturating_sub(1)).rev() {
+        let (t0, z0) = k[i];
+        let (t1, z1) = k[i + 1];
+        let u = format!("clip((t-{})/{},0,1)", f(t0), f((t1 - t0).max(1e-6)));
+        let ease = format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)");
+        e = format!("if(lt(t,{}),{}+{}*{ease},{e})", f(t1), f(z0), f(z1 - z0));
+    }
+    Some(format!("if(lt(t,{}),{},{e})", f(k[0].0), f(k[0].1)))
 }
 
 fn even(v: f64) -> u32 {
@@ -349,6 +396,7 @@ pub fn track_path(
         y: ys.iter().map(|y| if ch >= src_h { 0 } else { px(*y, chn, src_h, ch) }).collect(),
         fps,
         zoom_keys: vec![],
+        center_keys: vec![],
     })
 }
 
@@ -397,6 +445,7 @@ pub fn manual_path(
         y: vec![],
         fps,
         zoom_keys: ks.iter().map(|k| (k.0, k.3.max(1.0))).collect(),
+        center_keys: ks.iter().map(|k| (k.0, k.1.clamp(0.0, 1.0), k.2.clamp(0.0, 1.0))).collect(),
     };
     for i in 0..n_frames {
         let (cx, cy, _z) = at(i as f64 / fps);
