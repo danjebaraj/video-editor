@@ -78,24 +78,122 @@ pub fn parse_file_with_cues(
     Ok((p, notes, cues))
 }
 
+/// Rounds allowed for anchored voice layers to settle (each round: substitute cues, resolve).
+const CUE_ROUNDS: usize = 6;
+
 /// Load + probe + resolve with the project's own target.
+///
+/// When cues are measured from a voice layer pinned to a clip (`anchor`), the layer's start
+/// depends on the timeline, which may depend on the cues. The cues are then resolved with a
+/// provisional start, the timeline is built, and the anchor clip's real start is fed back until
+/// it stops moving (normally the second round). If it never settles, the anchor clip's own
+/// position depends on those cues (`E_CUE_CYCLE`).
 pub fn load(path: &Path) -> Result<Loaded, LoadError> {
     let path = std::fs::canonicalize(path)
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot open {}: {e}", path.display())))?;
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let (mut project, notes, cues) = parse_file_with_cues(&path)?;
-    // terminal recordings (`.tape` assets) become cached videos before probing
-    let tape_errs =
-        crate::terminal::record_tapes(&mut project, &dir, &crate::cutline_dir(&dir).join("cache").join("terminal"));
-    if !tape_errs.is_empty() {
-        return Err(LoadError::Invalid(tape_errs));
-    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
+    let v0 = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let tc = cutline_deps::toolchain().map_err(LoadError::Tool)?;
-    let cache = Cache::new(crate::cutline_dir(&dir).join("cache").join("probe"));
-    let media = probe_project(tc, &project, &dir, &cache).map_err(LoadError::Tool)?;
-    let (timeline, mut diags) = resolve(&project, &media, &context(&dir));
-    diags.extend(notes);
-    Ok(Loaded { path, dir, project, media, diags, timeline, cues })
+    let mut starts: std::collections::BTreeMap<usize, f64> = Default::default();
+    let mut tapes: Option<std::collections::BTreeMap<String, String>> = None;
+    let mut media: Option<ProjectMedia> = None;
+    let mut last_anchor = None;
+    for _ in 0..CUE_ROUNDS {
+        let mut v = v0.clone();
+        let (notes, cues, anchored) = crate::cues::resolve_with(&mut v, &dir, &starts);
+        if has_errors(&notes) {
+            return Err(LoadError::Invalid(notes));
+        }
+        let mut project = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+        // terminal recordings (`.tape` assets) become cached videos before probing (once)
+        match &tapes {
+            Some(map) => {
+                for (id, p) in map {
+                    if let Some(a) = project.assets.get_mut(id) {
+                        a.path = p.clone();
+                    }
+                }
+            }
+            None => {
+                let before: Vec<(String, String)> =
+                    project.assets.iter().map(|(k, a)| (k.clone(), a.path.clone())).collect();
+                let errs = crate::terminal::record_tapes(
+                    &mut project,
+                    &dir,
+                    &crate::cutline_dir(&dir).join("cache").join("terminal"),
+                );
+                if !errs.is_empty() {
+                    return Err(LoadError::Invalid(errs));
+                }
+                tapes = Some(
+                    before
+                        .into_iter()
+                        .filter_map(|(k, p)| {
+                            project.assets.get(&k).filter(|a| a.path != p).map(|a| (k, a.path.clone()))
+                        })
+                        .collect(),
+                );
+            }
+        }
+        if media.is_none() {
+            let cache = Cache::new(crate::cutline_dir(&dir).join("cache").join("probe"));
+            media = Some(probe_project(tc, &project, &dir, &cache).map_err(LoadError::Tool)?);
+        }
+        let m = media.as_ref().unwrap();
+        let (timeline, mut diags) = resolve(&project, m, &context(&dir));
+        let next = anchor_starts(&project, m, &dir, &anchored);
+        let settled = next.len() < anchored.len()
+            || next.iter().all(|(k, v)| starts.get(k).is_some_and(|s| (s - v).abs() < 1e-6));
+        if anchored.is_empty() || settled {
+            diags.extend(notes);
+            return Ok(Loaded { path, dir, project, media: media.unwrap(), diags, timeline, cues });
+        }
+        last_anchor = anchored.first().map(|a| a.layer);
+        starts = next;
+    }
+    let layer = last_anchor.unwrap_or(0);
+    Err(LoadError::Invalid(vec![Diagnostic::error(
+        "E_CUE_CYCLE",
+        format!("/layers/{layer}/anchor"),
+        "the voice layer is anchored to a clip whose position depends on cues from this voice layer, so it never settles",
+    )
+    .hint("anchor the voice layer to an earlier clip (one not fitted to its cues), or give it a numeric `start`")]))
+}
+
+/// Timeline start (seconds) of each anchored voice layer: its anchor clip's start (+ offset),
+/// from the project cut off after that clip, so problems later in the edit (or cues that only
+/// fit once the start is right) do not hide it. Layers whose anchor does not resolve are left
+/// out (validation reports them).
+fn anchor_starts(
+    p: &Project,
+    media: &ProjectMedia,
+    dir: &Path,
+    anchored: &[crate::cues::AnchoredVoice],
+) -> std::collections::BTreeMap<usize, f64> {
+    use cutline_core::model::MainItem;
+    let mut out = std::collections::BTreeMap::new();
+    for a in anchored {
+        let Some(idx) = p.main.iter().position(|m| matches!(m, MainItem::Clip(c) if c.id == a.anchor)) else {
+            continue;
+        };
+        let mut q = p.clone();
+        q.main.truncate(idx + 1);
+        // its own end does not move its start (and may still use a provisional cue)
+        if let Some(MainItem::Clip(c)) = q.main.last_mut() {
+            c.end_at = None;
+        }
+        q.layers.clear();
+        q.markers.clear();
+        q.captions = None;
+        if let (Some(tl), _) = resolve(&q, media, &context(dir)) {
+            if let Some(c) = tl.clip_by_id(&a.anchor) {
+                out.insert(a.layer, tl.secs(c.start + tl.fps.secs_to_frames(a.offset)));
+            }
+        }
+    }
+    out
 }
 
 /// Project variant for one export (target/fps/size override).

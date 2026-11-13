@@ -225,10 +225,13 @@ layers: [
 | `occurrence` | 1 | which occurrence of the phrase |
 | `edge` | `start` | `start` (first word begins) or `end` (last word ends) |
 
-The asset must be played by exactly one `audio` layer with a numeric `start` (default 0); a cue
-is that start + the word time − the layer's `src_in`. Errors: `E_UNKNOWN_CUE`,
+The asset must be played by exactly one `audio` layer, with a numeric `start` (default 0) or
+pinned to a clip with `anchor` + `offset`; a cue is the layer's timeline start + the word time −
+the layer's `src_in`. With an anchored voice the cues are resolved, the timeline is built, and the
+anchor clip's real start is fed back until it settles; anchoring the voice to a clip whose own
+position depends on those cues is `E_CUE_CYCLE`. Errors: `E_UNKNOWN_CUE`,
 `E_CUE_NOT_FOUND` (the hint lists the closest phrases), `E_CUE_NOT_ALLOWED` (a cue in a source
-time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`; for `end_at`:
+time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`, `E_CUE_CYCLE`; for `end_at`:
 `E_END_AT_BEFORE_START`, `E_FIT_SPEED`, `E_FIELD_CONFLICT`.
 
 ## Export

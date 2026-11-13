@@ -249,3 +249,7 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-13 — Correction: text template boxes are accurate
 - **Finding:** the earlier note that layout boxes under-measure rendered text was wrong. Measured against libass, `Measure::width` is within 1 % for every bundled font (Inter regular/bold, Poppins regular/bold, Anton, Bebas Neue), and a `lower_third` box matches its ink within a few pixels at 1080p and at the 540p draft. The apparent overflow in the Glance demo came from a hand-drawn debug outline crossing the last glyph.
 - **Change:** `text_boxes.rs` now pins box-versus-ink at both sizes. The review check keeps its frame-difference design for its other reason (motion and neighbouring content), and the comments no longer cite under-measured boxes.
+
+## 2026-11-13 — Cues from a voice layer anchored to a clip
+- **Decision:** `pipeline::load` resolves cues with the anchored voice layer's start provisionally 0, finds the anchor clip's start from the project truncated after that clip (with its own `end_at` cleared), and repeats with that start until it stops moving (at most 6 rounds; usually 2). No convergence means the anchor clip's position depends on the layer's own cues: `E_CUE_CYCLE`. Tapes are recorded and media probed once.
+- **Reason:** "the narration starts half a second into the first screen clip" is a natural way to place a voice-over, and it should not require hand-computing the clip's start. The truncated resolve keeps the start measurable even while later clips are fitted to provisional cues.

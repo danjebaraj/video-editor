@@ -122,7 +122,7 @@ fn cue_errors_point_at_the_problem() {
         ),
         (
             "cues: {clocks: 'World clocks'}, main: [{id: 'c', clip: 'bg', end_at: 'cue:clocks'}],
-             layers: [{type: 'audio', asset: 'vo', anchor: 'c'}]",
+             layers: [{type: 'audio', asset: 'vo', start: 'f:12'}]",
             "E_CUE_LAYER_TIME",
             "/layers/0",
         ),
@@ -148,4 +148,55 @@ fn cue_errors_point_at_the_problem() {
     let Err(LoadError::Invalid(ds)) = pipeline::load(&p) else { panic!("expected an error") };
     let hint = ds[0].hint.clone().unwrap_or_default();
     assert!(hint.contains("calendar"), "hint: {hint}");
+}
+
+#[test]
+fn cues_from_a_voice_layer_anchored_to_a_clip() {
+    let Some(_) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    setup(d.path());
+    // the voice starts 0.5 s into `intro`, which starts after a 2 s title and a 0.4 s fade
+    let p = project(
+        d.path(),
+        "cues: {clocks: 'World clocks', cal: 'calendar jumps'},
+         main: [{id: 'title', clip: 'bg', duration: 2},
+                {transition: {type: 'fade', duration: 0.4}},
+                {id: 'intro', clip: 'bg', end_at: 'cue:clocks'},
+                {id: 'time', clip: 'bg', end_at: 'cue:cal'},
+                {id: 'end', clip: 'bg', duration: 1}],
+         layers: [{type: 'audio', asset: 'vo', anchor: 'intro', offset: 0.5},
+                  {type: 'text', template: 'callout', text: 'x', start: 'cue:clocks', duration: 1}]",
+    );
+    let l = pipeline::load(&p).unwrap_or_else(|e| panic!("{e}"));
+    assert!(!cutline_core::diag::has_errors(&l.diags), "{:?}", l.diags);
+    let tl = l.timeline.as_ref().unwrap();
+    let start = 2.0 - 0.4 + 0.5; // intro start + offset
+    let clocks = l.cues.iter().find(|c| c.name == "clocks").unwrap();
+    assert!((clocks.at - (start + 4.6)).abs() < 1.0 / 30.0, "cue at {}", clocks.at);
+    assert!((tl.secs(tl.clips[1].end()) - clocks.at).abs() < 1.0 / 30.0, "intro cut on the cue");
+    let voice = tl.layers.iter().find(|x| x.layer.kind() == "audio").unwrap();
+    assert!((tl.secs(voice.start) - start).abs() < 1.0 / 30.0);
+    let text = tl.layers.iter().find(|x| x.layer.kind() == "text").unwrap();
+    assert!((tl.secs(text.start) - clocks.at).abs() < 1.0 / 30.0);
+}
+
+#[test]
+fn anchoring_the_voice_after_its_own_cues_is_a_cycle() {
+    let Some(_) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    setup(d.path());
+    // `b` starts where `a` ends, and `a` ends on a cue measured from a voice starting at `b`
+    let p = project(
+        d.path(),
+        "cues: {clocks: 'World clocks'},
+         main: [{id: 'a', clip: 'bg', end_at: 'cue:clocks'}, {id: 'b', clip: 'bg', duration: 3}],
+         layers: [{type: 'audio', asset: 'vo', anchor: 'b'}]",
+    );
+    match pipeline::load(&p) {
+        Err(LoadError::Invalid(ds)) => {
+            assert!(ds.iter().any(|x| x.code == "E_CUE_CYCLE" && x.path == "/layers/0/anchor"), "{ds:?}")
+        }
+        Err(e) => panic!("{e}"),
+        Ok(l) => panic!("expected a cycle error, got {:?}", l.diags),
+    }
 }

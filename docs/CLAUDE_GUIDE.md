@@ -82,7 +82,8 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ## Narrated videos: time the edit to the voice-over
 
-- Put the VO on an `audio` layer with a numeric `start`, and give its asset a `transcript` (or
+- Put the VO on an `audio` layer with a numeric `start` (or `anchor` it to a clip, e.g. the one after
+  the title), and give its asset a `transcript` (or
   run `cutline transcribe` once so it is cached).
 - Name the beats under `cues` (`{clocks: "World clocks"}`) and use `"cue:clocks"` in timeline
   times: clip `end_at` (the cut lands on the cue), layer `start`/`end`, sfx `at`, marker `at`.
