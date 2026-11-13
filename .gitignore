@@ -4,3 +4,4 @@
 *.actual.png
 /review/
 /out/
+.DS_Store
