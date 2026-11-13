@@ -28,7 +28,9 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
      the source), `audio.png` (per-role waveforms, final mix, duck envelope, momentary LUFS vs
      target), `timeline.txt`, `qa.json`, `summary.md` (QA + suggested improvements),
      `preview_540p.mp4`.
-   - Read `summary.md` first, then look at the images. Iterate until there are **no QA errors** and
+   - Read `summary.md` first, then look at the images. It flags text templates that sit over
+     detailed content (measured from frames with and without the text, so it also catches text
+     wider than its layout box). Iterate until there are **no QA errors** and
      the suggestions are addressed. Use `cutline preview project.json5 --at 3.2 7.5 --safe-zones`
      for quick stills while iterating (drafts capture HTML graphics at half density and 15 fps;
      stills skip frame capture for graphics not on screen at the requested times).

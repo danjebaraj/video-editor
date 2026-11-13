@@ -410,7 +410,8 @@ pub fn html_layers(
                 w: sw,
                 h: sh * 0.3,
                 text: text.clone().unwrap_or_default(),
-                kind: "text".into(),
+                // the box is a rough guess (the template lays itself out in Chrome)
+                kind: "text_html".into(),
             });
         }
     }
