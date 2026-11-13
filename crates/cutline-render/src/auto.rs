@@ -489,7 +489,126 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
             }
         }
     }
+    if let Some(sb) = auto.snap_to_beats.clone().filter(|s| s.enabled) {
+        snap_to_beats(l, &mut q, &sb, &mut notes)?;
+    }
     Ok((q, notes))
+}
+
+/// Tempo and beats of an asset (source seconds), cached by fingerprint.
+pub fn beats_for(l: &Loaded, asset: &str) -> Result<Option<cutline_audio::beats::Beats>> {
+    let m = l.media.get(asset).ok_or_else(|| anyhow::anyhow!("no media for {asset}"))?;
+    if !m.facts.has_audio {
+        return Ok(None);
+    }
+    let cache = Cache::global("beats");
+    let key = cutline_media::hash_key(&[m.fingerprint.as_bytes(), b"beats-v1"]);
+    if let Some(b) = cache.get_json::<Option<cutline_audio::beats::Beats>>(&key) {
+        return Ok(b);
+    }
+    let tc = cutline_deps::toolchain()?;
+    let samples = cutline_audio::wav::decode_mono(tc, &m.path, cutline_audio::beats::RATE)?;
+    let b = cutline_audio::beats::detect(&samples);
+    cache.put_json(&key, &b)?;
+    Ok(b)
+}
+
+/// `auto.snap_to_beats`: move each cut (in order, so later cuts see earlier moves) to the
+/// nearest beat of the music within `max_shift`, by fitting the outgoing clip with `end_at`.
+fn snap_to_beats(
+    l: &Loaded,
+    q: &mut Project,
+    sb: &cutline_core::model::SnapToBeats,
+    notes: &mut Vec<Diagnostic>,
+) -> Result<()> {
+    use cutline_core::time::{round6, TimeValue};
+    let ctx = context(&l.dir);
+    let (Some(tl), _) = resolve(q, &l.media, &ctx) else {
+        return Ok(()); // validation reports why
+    };
+    // the music layer: the named asset, else the only music-role audio layer
+    let music: Vec<&cutline_core::timeline::TLayer> = tl
+        .layers
+        .iter()
+        .filter(|t| match &t.layer {
+            Layer::Audio { asset, role, .. } => match &sb.asset {
+                Some(a) => a == asset,
+                None => role.or(q.assets.get(asset).and_then(|a| a.role)).unwrap_or(Role::Music) == Role::Music,
+            },
+            _ => false,
+        })
+        .collect();
+    let [ml] = music.as_slice() else {
+        notes.push(Diagnostic::warning(
+            "W_SNAP_NO_MUSIC",
+            "/auto/snap_to_beats",
+            if music.is_empty() {
+                "no music audio layer to take beats from; cuts left as they are".to_string()
+            } else {
+                "several music layers; set snap_to_beats.asset to choose one".to_string()
+            },
+        ));
+        return Ok(());
+    };
+    let Layer::Audio { asset, .. } = &ml.layer else { unreachable!() };
+    let src_in = match &ml.layer {
+        Layer::Audio { src_in, .. } => src_in.map(|t| t.seconds(tl.fps, 0.0)).unwrap_or(0.0),
+        _ => 0.0,
+    };
+    let Some(beats) = beats_for(l, asset)? else {
+        notes.push(Diagnostic::warning(
+            "W_SNAP_NO_BEATS",
+            "/auto/snap_to_beats",
+            format!("no steady beat found in `{asset}`; cuts left as they are"),
+        ));
+        return Ok(());
+    };
+    let (ls, le) = (tl.secs(ml.start), tl.secs(ml.end));
+    let grid: Vec<f64> =
+        beats.times.iter().map(|b| ls + b - src_in).filter(|t| *t >= ls - 1e-9 && *t <= le + 1e-9).collect();
+    let half_frame = 0.5 / tl.fps.as_f64();
+    let n = tl.clips.len();
+    let (mut moved, mut kept) = (0, 0);
+    for i in 0..n.saturating_sub(1) {
+        let (Some(cur), _) = resolve(q, &l.media, &ctx) else { break };
+        let c = &cur.clips[i];
+        let cut = match cur.transitions.iter().find(|t| t.after == i) {
+            Some(t) if t.frames > 0 => cur.secs(t.start) + cur.secs(t.frames) / 2.0,
+            _ => cur.secs(c.end()),
+        };
+        let Some(&beat) = grid.iter().min_by(|a, b| (*a - cut).abs().partial_cmp(&(*b - cut).abs()).unwrap()) else {
+            break;
+        };
+        let shift = beat - cut;
+        if shift.abs() <= half_frame || shift.abs() > sb.max_shift || !c.clip.speed_ramp.is_empty() {
+            kept += 1;
+            continue;
+        }
+        let mi = c.main_index;
+        let before = q.main[mi].clone();
+        if let MainItem::Clip(cl) = &mut q.main[mi] {
+            cl.duration = None;
+            cl.end_at = Some(TimeValue::Seconds(round6(beat)));
+        }
+        let (ok_tl, d) = resolve(q, &l.media, &ctx);
+        if ok_tl.is_none() || cutline_core::diag::has_errors(&d) {
+            q.main[mi] = before; // the clip cannot stretch that far (e.g. not enough footage)
+            kept += 1;
+            continue;
+        }
+        moved += 1;
+        notes.push(Diagnostic::warning(
+            "I_BEAT_SNAP",
+            format!("/main/{mi}"),
+            format!("cut after `{}` moved {shift:+.3}s onto the beat at {beat:.3}s", c.id),
+        ));
+    }
+    notes.push(Diagnostic::warning(
+        "I_BEAT_SNAP",
+        "/auto/snap_to_beats",
+        format!("{:.1} BPM in `{asset}`: {moved} cut(s) moved onto beats, {kept} left", beats.bpm),
+    ));
+    Ok(())
 }
 
 fn effect_at(e: &Effect) -> Option<f64> {

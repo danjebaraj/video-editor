@@ -99,6 +99,8 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ## Audio
 
+- Cut on the beat: `auto: {snap_to_beats: {}}` nudges cuts (by at most `max_shift`, 0.15 s) onto
+  the music's beats; `cutline beats project.json5` shows the tempo.
 - Music under narration: set `audio.music_level: 18` instead of guessing `gain_db`, and put
   `align: "end"` (with a `fade_in`) on the music layer so the track's real ending closes the
   video rather than a fade-out mid-phrase.

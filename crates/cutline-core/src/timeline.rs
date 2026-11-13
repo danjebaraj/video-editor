@@ -841,6 +841,24 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             }
         }
     }
+    if let Some(sb) = p.auto.as_ref().and_then(|a| a.snap_to_beats.as_ref()) {
+        if !(0.01..=1.0).contains(&sb.max_shift) {
+            d.push(Diagnostic::error(
+                "E_BAD_VALUE",
+                "/auto/snap_to_beats/max_shift",
+                "max_shift must be within 0.01–1 s",
+            ));
+        }
+        if let Some(a) = &sb.asset {
+            if !p.assets.contains_key(a) {
+                d.push(Diagnostic::error(
+                    "E_UNKNOWN_ASSET",
+                    "/auto/snap_to_beats/asset",
+                    format!("unknown asset `{a}`"),
+                ));
+            }
+        }
+    }
     if let Some(s) = p.auto.as_ref().and_then(|a| a.sfx_on_transitions.as_ref()) {
         check_sfx(s, p, ctx, "/auto/sfx_on_transitions", &mut d);
     }

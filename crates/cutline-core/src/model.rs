@@ -1093,6 +1093,25 @@ pub struct AutoDirectives {
     /// SFX asset/alias auto-placed on every transition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sfx_on_transitions: Option<String>,
+    /// Move cuts onto the music's beats (fitting each clip with `end_at`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snap_to_beats: Option<SnapToBeats>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SnapToBeats {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Asset whose beats are used (default: the only music-role audio layer's asset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+    /// Largest move of a cut, in seconds (default 0.15). Cuts farther from a beat stay put.
+    #[serde(default = "snap_shift")]
+    pub max_shift: f64,
+}
+fn snap_shift() -> f64 {
+    0.15
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
