@@ -554,6 +554,13 @@ pub fn cues(path: &Path) -> CmdResult {
     ))
 }
 
+pub fn record(path: &Path, asset: Option<&str>) -> CmdResult {
+    let done = cutline_render::terminal::rerecord(path, asset).map_err(CliError::tool)?;
+    let h: Vec<String> = done.iter().map(|(id, p)| format!("✔ {id}: recorded {}", p.display())).collect();
+    let j: Vec<_> = done.iter().map(|(id, p)| json!({"asset": id, "recording": p})).collect();
+    Ok(Output::ok(json!({"recorded": j}), h.join("\n")))
+}
+
 pub fn chapters(path: &Path) -> CmdResult {
     let l = load_or_return!(path);
     if has_errors(&l.diags) {

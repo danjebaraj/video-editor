@@ -42,6 +42,13 @@ fn tapes_record_once_and_report_failures() {
     assert_eq!(m2.path, m.path);
     assert_eq!(std::fs::metadata(&m2.path).unwrap().modified().unwrap(), modified);
 
+    // `cutline record` re-records on demand (fresh live data), replacing the cached file
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let again = cutline_render::terminal::rerecord(&pp, Some("term")).unwrap();
+    assert_eq!(again, vec![("term".to_string(), m.path.clone())]);
+    assert!(std::fs::metadata(&m.path).unwrap().modified().unwrap() > modified, "recorded again");
+    assert!(cutline_render::terminal::rerecord(&pp, Some("nope")).is_err());
+
     // a broken tape is reported on the asset
     std::fs::write(d.path().join("demo.tape"), "Set Shell bash\nFrobnicate 3\n").unwrap();
     let ds = diags(pipeline::load(&pp));

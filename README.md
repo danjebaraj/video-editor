@@ -15,6 +15,7 @@ cutline init my-short --target shorts --assets footage/
 cutline validate my-short/project.json5
 cutline expand   my-short/project.json5     # explicit timeline (auto jump cuts, fillers, punch-ins)
 cutline cues     my-short/project.json5     # where each voice-over cue landed
+cutline record   my-short/project.json5     # record VHS .tape assets again (fresh live data)
 cutline review   my-short/project.json5     # review/ pack for vision
 cutline render   my-short/project.json5     # final render + QA + .srt + credits
 cutline guide                               # the workflow Claude should follow

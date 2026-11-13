@@ -65,7 +65,8 @@ Segments are cached: changing captions, text or music does not re-render clips.
 ## Screen recordings
 
 - Record terminal footage from VHS tapes: use the `.tape` file itself as the asset path and cutline
-  records it (and re-records only when the tape changes). End each tape by quitting the program
+  records it (and re-records only when the tape changes; run `cutline record project.json5` when
+  the screen shows live data you want fresh). End each tape by quitting the program
   it started (e.g. `Hide`, `Type "q"`): VHS kills the terminal, and some programs then linger.
 - Set `profile: "screencast"` (sharper text encoding; no QA warnings for paused screens). Add
   `chroma: "444"` for downloads/docs where colored text must not fringe.
