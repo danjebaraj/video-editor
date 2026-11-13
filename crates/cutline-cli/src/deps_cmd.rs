@@ -157,3 +157,58 @@ pub fn rollback() -> CmdResult {
 pub fn describe(r: &Release) -> String {
     format!("{} ({})", r.version, r.source)
 }
+
+/// Chrome for Testing headless shell (Stable) → `<tools>/chrome/<version>/`, `current` file.
+pub fn install_chrome() -> CmdResult {
+    use cutline_deps::download::{download, extract, get_text, make_executable};
+    let url = std::env::var("CUTLINE_CHROME_MANIFEST_URL").unwrap_or_else(|_| {
+        "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json".into()
+    });
+    let j: serde_json::Value = serde_json::from_str(&get_text(&url).tool_err()?).map_err(CliError::tool)?;
+    let stable = &j["channels"]["Stable"];
+    let version = stable["version"].as_str().unwrap_or("unknown").to_string();
+    let plat = match platform_id().as_str() {
+        "macos-arm64" => "mac-arm64",
+        "macos-x86_64" => "mac-x64",
+        "linux-x86_64" => "linux64",
+        "linux-arm64" => "linux-arm64",
+        "windows-x86_64" => "win64",
+        other => return Err(CliError::tool(anyhow::anyhow!("no Chrome for Testing build for {other}"))),
+    };
+    let dl = stable["downloads"]["chrome-headless-shell"]
+        .as_array()
+        .and_then(|a| a.iter().find(|d| d["platform"] == plat))
+        .and_then(|d| d["url"].as_str())
+        .ok_or_else(|| CliError::tool(anyhow::anyhow!("no headless shell download for {plat}")))?
+        .to_string();
+    let lock_path = default_lockfile_path();
+    let mut lock = Lockfile::load(&lock_path).tool_err()?;
+    let pinned =
+        lock.get("chrome-headless-shell", &platform_id()).filter(|e| e.version == version).map(|e| e.sha256.clone());
+    let base = tools_dir().join("chrome");
+    let zip = base.join(".download").join(format!("chrome-headless-shell-{plat}.zip"));
+    let sha = download(&dl, &zip, pinned.as_deref()).tool_err()?;
+    let dir = base.join(install::sanitize(&version));
+    let _ = std::fs::remove_dir_all(&dir);
+    extract(&zip, &dir).tool_err()?;
+    let _ = std::fs::remove_file(&zip);
+    let exe = cutline_deps::paths::find_named(&dir, &exe_name("chrome-headless-shell"), 4)
+        .ok_or_else(|| CliError::tool(anyhow::anyhow!("chrome-headless-shell not found in archive")))?;
+    make_executable(&exe).tool_err()?;
+    std::fs::write(base.join("current"), install::sanitize(&version)).map_err(CliError::internal)?;
+    lock.upsert(cutline_deps::lockfile::LockEntry {
+        name: "chrome-headless-shell".into(),
+        version: version.clone(),
+        platform: platform_id(),
+        url: dl,
+        sha256: sha.clone(),
+        installed_at: None,
+        selftest: None,
+        license: Some("BSD-3-Clause and others (Chromium)".into()),
+    });
+    lock.save(&lock_path).tool_err()?;
+    Ok(Output::ok(
+        json!({"ok": true, "tool": "chrome-headless-shell", "version": version, "path": exe, "sha256": sha}),
+        format!("installed chrome-headless-shell {version} → {}", exe.display()),
+    ))
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css">
+<style>
+  :root { --accent: #FFC400; --text: #FFFFFF; --safe-top: 10vh; }
+  .wrap { position: absolute; left: 6vw; right: 16vw; top: calc(var(--safe-top) + 12vh); display: flex; justify-content: center; }
+  h1 { font-family: "Anton", sans-serif; font-weight: 400; text-transform: uppercase; color: var(--text); text-align: center;
+       font-size: 9vmin; line-height: 1.05; margin: 0; padding: 0.2em 0.4em;
+       -webkit-text-stroke: 0.06em #000; paint-order: stroke fill; text-shadow: 0 0.06em 0.12em rgba(0,0,0,.6);
+       animation: pop 0.32s cubic-bezier(.2,1.6,.4,1) both, out 0.25s ease-in calc(var(--dur, 2.5s) - 0.25s) forwards; }
+  h1 em { font-style: normal; color: var(--accent); }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes out { to { opacity: 0; transform: translateY(-0.4em); } }
+</style></head>
+<body><div class="wrap"><h1 id="t"></h1></div>
+<script>
+  const p = window.__cutline_params || {};
+  const root = document.documentElement.style;
+  if (p.accent) root.setProperty('--accent', p.accent);
+  if (p.color) root.setProperty('--text', p.color);
+  if (p.duration) root.setProperty('--dur', p.duration + 's');
+  if (p.vertical === false) root.setProperty('--safe-top', '5vh');
+  const emph = (p.emphasis || []).map(w => w.toLowerCase());
+  const el = document.getElementById('t');
+  for (const w of String(p.text || '').split(/\s+/)) {
+    const bare = w.toLowerCase().replace(/[^a-z0-9']/g, '');
+    const s = emph.includes(bare) ? document.createElement('em') : document.createElement('span');
+    s.textContent = w + ' ';
+    el.appendChild(s);
+  }
+</script></body></html>

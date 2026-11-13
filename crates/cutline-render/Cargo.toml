@@ -11,6 +11,7 @@ anyhow = "1.0.104"
 cutline-audio = { version = "0.1.0", path = "../cutline-audio" }
 cutline-core = { version = "0.1.0", path = "../cutline-core" }
 cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+cutline-html = { version = "0.1.0", path = "../cutline-html" }
 cutline-media = { version = "0.1.0", path = "../cutline-media" }
 cutline-reframe = { version = "0.1.0", path = "../cutline-reframe" }
 cutline-text = { version = "0.1.0", path = "../cutline-text" }
@@ -29,6 +30,7 @@ workspace = true
 
 [dev-dependencies]
 cutline-deps = { path = "../cutline-deps" }
+cutline-html = { path = "../cutline-html" }
 cutline-testkit = { path = "../cutline-testkit" }
 image = "0.25.6"
 insta = "1.49.0"

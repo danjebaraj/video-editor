@@ -12,6 +12,7 @@ anyhow = "1.0.104"
 cutline-audio = { version = "0.1.0", path = "../cutline-audio" }
 cutline-core = { version = "0.1.0", path = "../cutline-core" }
 cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+cutline-html = { version = "0.1.0", path = "../cutline-html" }
 cutline-media = { version = "0.1.0", path = "../cutline-media" }
 cutline-reframe = { version = "0.1.0", path = "../cutline-reframe" }
 cutline-render = { version = "0.1.0", path = "../cutline-render" }

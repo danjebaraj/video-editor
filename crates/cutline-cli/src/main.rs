@@ -215,6 +215,7 @@ fn dispatch(cli: Cli) -> CmdResult {
                         deps_cmd::install_model("whisper", &format!("whisper-{n}"), &s.url, s.file)
                     }
                     "face-model" => deps_cmd::install_face_model(),
+                    "chrome" => deps_cmd::install_chrome(),
                     "all" => {
                         let mut res = vec![];
                         let mut code = EXIT_OK;
@@ -226,6 +227,7 @@ fn dispatch(cli: Cli) -> CmdResult {
                                 Box::new(move || deps_cmd::install_model("whisper", "whisper-base.en", &s.url, s.file)),
                             ),
                             ("face-model", Box::new(deps_cmd::install_face_model)),
+                            ("chrome", Box::new(deps_cmd::install_chrome)),
                         ];
                         let mut human = vec![];
                         for (n, f) in steps {

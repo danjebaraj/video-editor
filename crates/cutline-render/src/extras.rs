@@ -35,6 +35,7 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<Pl
         ..Default::default()
     };
     text_layers(p, tl, &brand, &mut extras)?;
+    html_layers(l, p, tl, &brand, &mut extras)?;
     captions(l, p, tl, &brand, &mut extras)?;
     for c in &tl.clips {
         let mut x = ClipExtras {
@@ -56,6 +57,14 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<Pl
         if let Some(name) = lut {
             x.lut_path = lut_path(&name, l);
         }
+        if matches!(
+            c.kind,
+            cutline_core::model::AssetKind::Html
+                | cutline_core::model::AssetKind::Svg
+                | cutline_core::model::AssetKind::Lottie
+        ) {
+            x.source_override = Some(html_clip(l, p, tl, c)?);
+        }
         let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
         let g = if draft { full.draft() } else { full };
         if let Some(path) = crate::reframe::apply(l, p, tl, &g, c, &mut x, &mut extras.warnings)? {
@@ -74,7 +83,11 @@ pub fn frame_of(tl: &Timeline) -> cutline_text::templates::Frame {
 pub fn text_layers(_p: &Project, tl: &Timeline, brand: &Brand, extras: &mut PlanExtras) -> Result<()> {
     use cutline_core::model::Layer;
     use cutline_text::templates::{render, Input};
-    let texts: Vec<_> = tl.layers.iter().filter(|l| matches!(l.layer, Layer::Text { .. })).collect();
+    let texts: Vec<_> = tl
+        .layers
+        .iter()
+        .filter(|l| matches!(&l.layer, Layer::Text { template, .. } if !template.ends_with("_html")))
+        .collect();
     if texts.is_empty() {
         return Ok(());
     }
@@ -237,4 +250,112 @@ pub fn load_caption_file(f: &std::path::Path) -> Result<Vec<cutline_text::captio
         }
     }
     Ok(out)
+}
+
+fn html_kind(k: cutline_core::model::AssetKind) -> cutline_html::Kind {
+    match k {
+        cutline_core::model::AssetKind::Svg => cutline_html::Kind::Svg,
+        cutline_core::model::AssetKind::Lottie => cutline_html::Kind::Lottie,
+        _ => cutline_html::Kind::Html,
+    }
+}
+
+fn html_cache(l: &Loaded) -> std::path::PathBuf {
+    crate::cutline_dir(&l.dir).join("cache").join("html")
+}
+
+/// Render an HTML/SVG/Lottie main clip to an opaque mezzanine.
+fn html_clip(l: &Loaded, p: &Project, tl: &Timeline, c: &cutline_core::timeline::TClip) -> Result<std::path::PathBuf> {
+    let a = &p.assets[&c.asset];
+    let m = l.media.get(&c.asset).ok_or_else(|| anyhow::anyhow!("no media for {}", c.asset))?;
+    let spec = cutline_html::RenderSpec {
+        kind: html_kind(m.facts.kind),
+        source: m.path.clone(),
+        width: a.width.unwrap_or(tl.target.width),
+        height: a.height.unwrap_or(tl.target.height),
+        fps: tl.fps.as_f64(),
+        duration: tl.secs(c.frames),
+        alpha: false,
+        params: a.params.clone().unwrap_or(serde_json::json!({})),
+        allow_dirs: vec![l.dir.clone()],
+        device_scale: 1.0,
+    };
+    cutline_html::render_cached(cutline_deps::toolchain()?, &spec, &html_cache(l))
+}
+
+/// Render HTML/SVG/Lottie layers and HTML text templates to alpha mezzanines.
+pub fn html_layers(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, extras: &mut PlanExtras) -> Result<()> {
+    use cutline_core::model::Layer;
+    let tc = cutline_deps::toolchain()?;
+    for tlay in &tl.layers {
+        let dur = tl.secs(tlay.end - tlay.start);
+        let spec = match &tlay.layer {
+            Layer::Html { asset, .. } => {
+                let a = &p.assets[asset];
+                let m = l.media.get(asset).ok_or_else(|| anyhow::anyhow!("no media for {asset}"))?;
+                let mut params = a.params.clone().unwrap_or(serde_json::json!({}));
+                if let Some(o) = params.as_object_mut() {
+                    o.entry("duration").or_insert(serde_json::json!(dur));
+                }
+                cutline_html::RenderSpec {
+                    kind: html_kind(m.facts.kind),
+                    source: m.path.clone(),
+                    width: a.width.unwrap_or(tl.target.width),
+                    height: a.height.unwrap_or(tl.target.height),
+                    fps: tl.fps.as_f64(),
+                    duration: dur,
+                    alpha: a.alpha.unwrap_or(true),
+                    params,
+                    allow_dirs: vec![l.dir.clone()],
+                    device_scale: 1.0,
+                }
+            }
+            Layer::Text { template, text, subtitle, params, .. } if template.ends_with("_html") => {
+                let src = cutline_deps::paths::assets_dir().join("templates").join(format!("{template}.html"));
+                let mut pm = serde_json::Map::new();
+                pm.insert("text".into(), serde_json::json!(text));
+                pm.insert("subtitle".into(), serde_json::json!(subtitle));
+                pm.insert("accent".into(), serde_json::json!(brand.colors.accent));
+                pm.insert("color".into(), serde_json::json!(brand.colors.text));
+                pm.insert("duration".into(), serde_json::json!(dur));
+                pm.insert("vertical".into(), serde_json::json!(tl.target.is_vertical()));
+                if let Some(extra) = params {
+                    for (k, v) in extra {
+                        pm.insert(k.clone(), v.clone());
+                    }
+                }
+                cutline_html::RenderSpec {
+                    kind: cutline_html::Kind::Html,
+                    source: src,
+                    width: tl.target.width,
+                    height: tl.target.height,
+                    fps: tl.fps.as_f64(),
+                    duration: dur,
+                    alpha: true,
+                    params: serde_json::Value::Object(pm),
+                    allow_dirs: vec![],
+                    device_scale: 1.0,
+                }
+            }
+            _ => continue,
+        };
+        let mov = cutline_html::render_cached(tc, &spec, &html_cache(l))
+            .map_err(|e| anyhow::anyhow!("layer {}: {e:#}", tlay.index))?;
+        extras.html_renders.insert(tlay.index, mov);
+        if let Layer::Text { text, .. } = &tlay.layer {
+            // QA: count as on-screen text from its start (hook check)
+            let (sx, sy, sw, sh) = tl.target.safe_rect();
+            extras.text_boxes.push(crate::TextBox {
+                start: tl.secs(tlay.start),
+                end: tl.secs(tlay.end),
+                x: sx,
+                y: sy,
+                w: sw,
+                h: sh * 0.3,
+                text: text.clone().unwrap_or_default(),
+                kind: "text".into(),
+            });
+        }
+    }
+    Ok(())
 }

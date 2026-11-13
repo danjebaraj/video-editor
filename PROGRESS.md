@@ -12,7 +12,7 @@ Platform for this implementation run: Linux x86_64 container (no macOS host). ma
 | M5 Transcription/captions/edit assist | ✅ done (whisper WER test skips here; runs on macOS CI) |
 | M6 Auto-reframe | ✅ done |
 | M7 QA/review/selftest | ✅ done |
-| M8 HTML/SVG/Lottie | ⏳ |
+| M8 HTML/SVG/Lottie | ✅ done |
 | M9 Windows/packaging/docs | ⏳ |
 
 ## M0 — Foundation
@@ -131,6 +131,20 @@ Acceptance:
 - Review-pack size limits and image budget (same file).
 - `selftest --full`: here 12 pass, 1 skipped (whisper WER: no whisper-cli/TTS), with the onnx feature + model (reframe passes). Without `--features onnx`, reframe is skipped too. **macOS run: not done here**; CI runs `selftest --quick`.
 - Performance here (4-core x86 container, ffmpeg 6.1): the 5.75 s Shorts selftest project renders in ~28 s cold and ~12 s warm (caption-only change). Far from the Apple Silicon target; recorded in the report rather than tuned.
+
+## M8 — HTML / SVG / Lottie
+Built:
+- `cutline-html`: headless Chrome renderer (deterministic seek, fonts/images ready, params injection, transparent background, Fetch-based sandbox with blocked-request log, 30 s per-frame timeout), ProRes 4444 / 422 HQ mezzanine encode, content-addressed cache.
+- Render integration: `html` layers (HTML/SVG/Lottie assets, alpha overlays with position/scale/anim), HTML/SVG/Lottie assets as main clips, and HTML templates `hook_title_html`, `lower_third_html`, `end_card_html` (`assets/templates/`, bundled web fonts, brand colors, params).
+- `cutline deps install chrome` (Chrome for Testing headless shell, Stable; verified here: 157.0.8103.78).
+- `selftest --full` gains `full/html_position`.
+
+Acceptance (`crates/cutline-html/tests/m8_html.rs`, `crates/cutline-render/tests/m8_layers.rs`):
+- Position accuracy ±2 px at every sampled frame for CSS animation, SVG SMIL and Lottie (with system Chrome and with the downloaded headless shell).
+- Alpha preserved (PNG frames and ProRes 4444 mezzanine).
+- Two renders produce byte-identical PNG frames.
+- Requests to https:// (img + fetch) and to file:// outside allowed dirs are blocked and logged; the page sees the failure.
+- HTML layer with params, HTML main clip and an HTML lower third composite correctly in a real render.
 
 ## Blockers
 - Building whisper.cpp from source was not permitted in this container, so real-speech transcription is untested here (see decisions); macOS CI covers it.

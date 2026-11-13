@@ -18,6 +18,7 @@ pub fn run_all(r: &mut Runner) {
     r.run("full/text_templates", check_templates);
     r.run("full/whisper_wer", check_whisper);
     r.run("full/reframe_tracking", check_reframe);
+    r.run("full/html_position", check_html);
     r.run("full/alpha_correctness", check_alpha);
     r.run("full/loudness_accuracy", check_loudness);
     r.run("full/av_sync", check_av_sync);
@@ -430,4 +431,51 @@ fn check_performance(d: &Path) -> Result<Outcome> {
         message: None,
     };
     Ok(o)
+}
+
+fn check_html(d: &Path) -> Result<Outcome> {
+    use cutline_html::{render_frames, Kind, RenderSpec};
+    if cutline_html::chrome().is_none() {
+        return Ok(Outcome::skip("no Chrome (cutline deps install chrome)"));
+    }
+    let css = "<!doctype html><html><head><style>html,body{margin:0;background:transparent}#b{position:absolute;left:0;top:160px;width:40px;height:40px;background:#ff0000;animation:mv 2s linear forwards}@keyframes mv{from{transform:translateX(20px)}to{transform:translateX(420px)}}</style></head><body><div id=b></div></body></html>";
+    let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360' viewBox='0 0 640 360'><rect y='160' width='40' height='40' fill='#ff0000'><animate attributeName='x' from='20' to='420' dur='2s' fill='freeze'/></rect></svg>";
+    let lottie = r#"{"v":"5.7.0","fr":30,"ip":0,"op":60,"w":640,"h":360,"layers":[{"ty":4,"ind":1,"ip":0,"op":60,"st":0,"ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"a":{"a":0,"k":[0,0,0]},"s":{"a":0,"k":[100,100,100]},"p":{"a":1,"k":[{"t":0,"s":[40,180,0],"i":{"x":[1],"y":[1]},"o":{"x":[0],"y":[0]}},{"t":60,"s":[440,180,0]}]}},"shapes":[{"ty":"gr","it":[{"ty":"rc","d":1,"p":{"a":0,"k":[0,0]},"s":{"a":0,"k":[40,40]},"r":{"a":0,"k":0}},{"ty":"fl","c":{"a":0,"k":[1,0,0,1]},"o":{"a":0,"k":100},"r":1},{"ty":"tr","p":{"a":0,"k":[0,0]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100}}]}]}]}"#;
+    let mut worst = json!({});
+    let mut ok = true;
+    for (name, kind, file, content) in [
+        ("css", Kind::Html, "a.html", css),
+        ("svg", Kind::Svg, "a.svg", svg),
+        ("lottie", Kind::Lottie, "a.json", lottie),
+    ] {
+        let src = d.join(file);
+        std::fs::write(&src, content)?;
+        let spec = RenderSpec {
+            kind,
+            source: src,
+            width: 640,
+            height: 360,
+            fps: 10.0,
+            duration: 2.0,
+            alpha: true,
+            params: json!({}),
+            allow_dirs: vec![],
+            device_scale: 1.0,
+        };
+        let r = render_frames(&spec, &d.join(format!("w_{name}")))?;
+        let mut err = 0.0f64;
+        for (i, f) in r.frames.iter().enumerate() {
+            let img = image::open(f)?.to_rgba8();
+            let left = (0..img.width()).find(|&x| {
+                let p = img.get_pixel(x, 180);
+                p[3] > 128 && p[0] > 200
+            });
+            let want = 20.0 + 200.0 * i as f64 / 10.0;
+            err = err.max(left.map(|l| (l as f64 - want).abs()).unwrap_or(999.0));
+        }
+        let corner_alpha = image::open(&r.frames[0])?.to_rgba8().get_pixel(2, 2)[3];
+        ok &= err <= 2.0 && corner_alpha == 0;
+        worst[name] = json!({"max_error_px": err, "corner_alpha": corner_alpha});
+    }
+    Ok(Outcome::check(ok, worst, json!({"max_error_px": 2, "corner_alpha": 0})))
 }

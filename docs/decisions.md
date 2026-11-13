@@ -159,3 +159,11 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 
 ## 2026-11-12 — Selftest goldens
 - **Decision:** `selftest --full` compares against the golden sets in the source tree (dev builds) or `CUTLINE_GOLDEN_DIR`. When neither exists it checks durations, safe zones and rendering only, and says so in the report.
+
+## 2026-11-13 — HTML renderer
+- **Decision:** `chromiumoxide` 0.9 (tokio) drives Chrome. For each frame: pause and seek all Web Animations, seek SVG SMIL, `goToAndStop(frame, true)` for Lottie, await an optional `window.__cutline_seek(t)`, wait two rAFs, then capture a PNG screenshot. A warm-up seek to 0.05 s runs before frame 0 (otherwise the first capture can show the compositor's running animation). Params are injected via `Page.addScriptToEvaluateOnNewDocument`. Transparency uses `Emulation.setDefaultBackgroundColorOverride` with alpha 0.
+- **Sandbox:** `Fetch` interception of every request. Only `data:`, `blob:` and `file://` paths under the source dir, the project dir, the bundled assets and the work dir load; everything else fails with `BlockedByClient` and is recorded.
+- **Determinism flags:** `--font-render-hinting=none`, `--disable-lcd-text`, `--disable-font-subpixel-positioning`, `--force-color-profile=srgb`, `--run-all-compositor-stages-before-draw`, `--disable-threaded-animation`. Two renders produced byte-identical PNGs (tested).
+- **Chrome:** `CUTLINE_CHROME` → `deps install chrome` (Chrome for Testing headless shell, sha recorded) → system Chrome/Chromium/Edge.
+- **Caching:** the mezzanine is keyed by source content + sibling file fingerprints + params + size/fps/duration/alpha + Chrome path. HTML text templates (`*_html`) render full-frame with brand colors and the layer's params.
+- **Lottie:** `lottie-web` 5.13.0 is vendored in `assets/html/` (MIT); the tarball sha256 is recorded in `assets/html/SOURCES.md`.

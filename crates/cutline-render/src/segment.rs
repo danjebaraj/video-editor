@@ -37,6 +37,8 @@ pub struct ClipExtras {
     pub geometry_override: Option<String>,
     /// Geometry mode replacing the clip's (e.g. fit_blur fallback when no faces are found).
     pub mode_override: Option<ReframeMode>,
+    /// Pre-rendered source replacing the asset (HTML/SVG/Lottie main clips).
+    pub source_override: Option<PathBuf>,
     pub deps: Vec<PathBuf>,
     /// Resolved LUT file path, if any.
     pub lut_path: Option<PathBuf>,
@@ -138,7 +140,9 @@ pub fn build(
     let is_still = matches!(c.kind, AssetKind::Image);
     let dur_secs = fps.frames_to_secs(frames);
     let path = m.path.to_string_lossy().to_string();
-    if is_still {
+    if let Some(so) = &extras.source_override {
+        input.extend(["-i".to_string(), so.to_string_lossy().to_string()]);
+    } else if is_still {
         input.extend(["-loop", "1", "-framerate", &fps.ff(), "-t", &f(dur_secs + 0.5), "-i", &path].map(String::from));
     } else if c.kind == AssetKind::ImageSequence {
         let sf = src_fps.as_f64();
@@ -159,7 +163,8 @@ pub fn build(
         }
         input.extend(["-ss", &f(seek), "-t", &f(len), "-i", &path].map(String::from));
     }
-    let has_audio = m.facts.has_audio && !is_still && c.kind != AssetKind::ImageSequence;
+    let has_audio =
+        m.facts.has_audio && !is_still && c.kind != AssetKind::ImageSequence && extras.source_override.is_none();
     let mode = extras.mode_override.unwrap_or_else(|| c.clip.reframe.as_ref().map(|r| r.mode).unwrap_or(default_mode));
 
     // ---------------- video

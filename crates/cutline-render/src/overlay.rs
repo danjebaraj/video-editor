@@ -360,10 +360,12 @@ pub fn apply(
                 let (dx, dy) = slide_offsets(look, s, e);
                 push_overlay(lines, cur, &format!("{lab}o"), &format!("{x0}{dx}"), &format!("{y0}{dy}"), s, e);
             }
-            Layer::Html { look, .. } => {
+            Layer::Html { look, .. } | Layer::Text { look, .. } => {
                 let Some(mz) = extras.html_renders.get(&tlay.index) else {
-                    tracing::warn!("html layer {} has no render; skipped", tlay.index);
-                    continue;
+                    if matches!(layer, Layer::Html { .. }) {
+                        tracing::warn!("html layer {} has no render; skipped", tlay.index);
+                    }
+                    continue; // ASS text templates are burned in below
                 };
                 let idx = *next_input;
                 *next_input += 1;

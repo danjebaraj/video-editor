@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css">
+<style>
+  :root { --accent: #FFC400; --text: #FFFFFF; }
+  h1 { position: absolute; top: 9vh; left: 0; right: 0; text-align: center; margin: 0; font-family: "Anton", sans-serif; font-weight: 400;
+       text-transform: uppercase; color: var(--text); font-size: 8vmin; -webkit-text-stroke: .05em #000; paint-order: stroke fill;
+       animation: in .5s cubic-bezier(.2,.9,.3,1) both; }
+  .slots { position: absolute; top: 28vh; left: 6vw; right: 6vw; display: flex; justify-content: space-between; }
+  .slot { width: 36vw; aspect-ratio: 16/9; border: .5vmin solid var(--accent); border-radius: 2vmin; animation: in .5s cubic-bezier(.2,.9,.3,1) both; }
+  .slot:nth-child(2) { animation-delay: .15s; }
+  .sub { position: absolute; top: 24vh; left: 0; right: 0; text-align: center; font-family: "Poppins", sans-serif; font-weight: 800; color: var(--accent); font-size: 4.5vmin; animation: in .5s .2s both; }
+  @keyframes in { from { opacity: 0; transform: translateY(2vh) scale(.96); } to { opacity: 1; transform: none; } }
+</style></head>
+<body><h1 id="t"></h1><div class="sub" id="s"></div><div class="slots" id="slots"><div class="slot"></div><div class="slot"></div></div>
+<script>
+  const p = window.__cutline_params || {};
+  const root = document.documentElement.style;
+  if (p.accent) root.setProperty('--accent', p.accent);
+  if (p.color) root.setProperty('--text', p.color);
+  document.getElementById('t').textContent = p.text || 'Thanks for watching!';
+  document.getElementById('s').textContent = p.subtitle || '';
+  if (p.vertical !== false || p.placeholders === false) document.getElementById('slots').remove();
+  if (p.vertical === false) document.getElementById('s').remove();
+</script></body></html>
