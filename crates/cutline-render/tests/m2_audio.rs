@@ -70,6 +70,36 @@ fn loudness_within_half_lu() {
     }
 }
 
+/// The true-peak limit holds in the rendered file, after the AAC encode, not just in the
+/// normalized WAV. Sharp clicks make AAC overshoot by well over 1 dB (a WAV limited to
+/// −1 dBTP used to come out at +0.8 dBTP).
+#[test]
+fn true_peak_holds_after_aac_encode() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    tone_video(tc, &d.path().join("a.mp4"), 440.0, 6.0, 0.0);
+    let mut c = tc.ffmpeg_cmd();
+    c.args(["-f", "lavfi", "-i", "aevalsrc='0.8*sgn(sin(2*PI*3*t))*exp(-30*mod(t,0.33))*random(0)':s=48000:d=6"]);
+    c.args(["-ac", "2"]).arg(d.path().join("clicks.wav"));
+    gen::run(c).unwrap();
+    let tp = -1.0;
+    let pp = d.path().join("p.json5");
+    std::fs::write(
+        &pp,
+        format!(
+            r#"{{version: 1, name: "clicks", target: "long_1080p",
+              assets: {{a: {{path: "a.mp4"}}, m: {{path: "clicks.wav", role: "music"}}}},
+              main: [{{id: "c", clip: "a", in: 0, out: 6, audio: "mute"}}],
+              layers: [{{type: "audio", asset: "m"}}],
+              audio: {{loudness: {{integrated: -14, true_peak: {tp}}}, voice_chain: "raw"}} }}"#
+        ),
+    )
+    .unwrap();
+    let (out, _) = render(&pp);
+    let l = cutline_media::probe::measure_loudness(tc, &out).unwrap();
+    assert!(l.true_peak_dbtp <= tp + 0.05, "encoded true peak {} > {tp}", l.true_peak_dbtp);
+}
+
 #[test]
 fn ducking_depth_and_timing() {
     let Some(tc) = test_toolchain() else { return };

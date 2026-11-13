@@ -310,7 +310,7 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
         ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
             .map(String::from),
     );
-    v.extend(["-c:a", "aac", "-b:a", "320k", "-ar", "48000", "-ac", "2"].map(String::from));
+    v.extend(audio_plan::AUDIO_ENCODE_ARGS.map(String::from));
     v.extend(["-movflags", "+faststart", "-map_metadata", "-1"].map(String::from));
     v
 }

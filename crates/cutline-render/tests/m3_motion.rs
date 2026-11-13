@@ -165,6 +165,77 @@ fn punch_in_is_smooth_and_monotone() {
     }
 }
 
+/// Centroid and pixel count of the red marker in a frame.
+fn red_marker(f: &image::RgbImage) -> Option<(f64, f64, f64)> {
+    let (mut sx, mut sy, mut n) = (0.0, 0.0, 0.0);
+    for (x, y, p) in f.enumerate_pixels() {
+        if p[0] > 160 && p[1] < 90 && p[2] < 90 {
+            sx += x as f64;
+            sy += y as f64;
+            n += 1.0;
+        }
+    }
+    (n > 0.0).then(|| (sx / n, sy / n, n))
+}
+
+/// The focus point of an animated zoom stays fixed on screen while the zoom runs (it used to
+/// anchor every animated zoom at the top-left corner, ignoring `focus`). A red marker sits at
+/// the focus point on a flat gray clip: its centroid must not move, and its area must grow by
+/// the zoom factor squared.
+#[test]
+fn animated_zoom_keeps_focus_point_fixed() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let (w, h) = (1280u32, 720u32);
+    // (effect, marker center in pixels, scale on the last frame)
+    let cases = [
+        (
+            "{type: 'zoom', from: 1, to: 2, start: 0.3, end: 1.3, ease: 'in_out_cubic', focus: {x: 0.75, y: 0.25}}",
+            (960u32, 180u32),
+            2.0,
+        ),
+        ("{type: 'punch_in', at: 0.3, scale: 1.5, duration: 0.5, ease: 'out_cubic'}", (640, 360), 1.5),
+        (
+            "{type: 'ken_burns', from_scale: 1, to_scale: 1.6, from: {x: 0.2, y: 0.8}, to: {x: 0.2, y: 0.8}, ease: 'linear'}",
+            (256, 576),
+            1.0 + 0.6 * (53.0 / 54.0),
+        ),
+    ];
+    for (i, (effect, (mx, my), scale)) in cases.iter().enumerate() {
+        let src = d.path().join(format!("m{i}.mp4"));
+        let g = format!(
+            "color=c=0x808080:s={w}x{h}:r=30:d=2,drawbox=x={}:y={}:w=24:h=24:color=0xff0000:t=fill,format=yuv420p",
+            mx - 12,
+            my - 12
+        );
+        let mut c = tc.ffmpeg_cmd();
+        c.args(["-f", "lavfi", "-i", &g, "-c:v", "libx264", "-crf", "8", "-preset", "veryfast"]).arg(&src);
+        gen::run(c).unwrap();
+        let pp = d.path().join(format!("p{i}.json5"));
+        std::fs::write(
+            &pp,
+            format!(
+                "{{version: 1, name: 'z{i}', target: 'custom', width: {w}, height: {h}, fps: 30, assets: {{m: {{path: 'm{i}.mp4'}}}}, main: [{{id: 'c', clip: 'm', in: 0, out: 1.8, effects: [{effect}]}}], audio: {{voice_chain: 'raw'}}}}"
+            ),
+        )
+        .unwrap();
+        let (out, _) = render(&pp);
+        let frames = read_all_frames(tc, &out, None).unwrap();
+        let (_, _, a0) = red_marker(&frames[0]).expect("marker visible in the first frame");
+        let mut a_last = a0;
+        for (n, f) in frames.iter().enumerate() {
+            let (cx, cy, a) = red_marker(f).unwrap_or_else(|| panic!("case {i}: marker left the frame at {n}"));
+            assert!(
+                (cx - *mx as f64).abs() < 2.5 && (cy - *my as f64).abs() < 2.5,
+                "case {i} ({effect}): frame {n}: focus point moved to ({cx:.1}, {cy:.1}), want ({mx}, {my})"
+            );
+            a_last = a;
+        }
+        let grown = (a_last / a0).sqrt();
+        assert!((grown - scale).abs() / scale < 0.06, "case {i}: marker grew {grown:.3}×, want {scale:.3}×");
+    }
+}
+
 #[test]
 fn alpha_overlays_composite_correctly() {
     let Some(tc) = test_toolchain() else { return };
