@@ -42,7 +42,7 @@ enum Cmd {
     /// Word-level transcript JSON (cached). Uses whisper.cpp, or imports an ElevenLabs Scribe JSON.
     Transcribe {
         file: PathBuf,
-        /// whisper model name (default large-v3-turbo-q5_0).
+        /// whisper model name (default large-v3-turbo-q5_0, or base.en when only that is installed).
         #[arg(long)]
         model: Option<String>,
         /// Use the fast base.en model.

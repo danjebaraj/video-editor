@@ -128,3 +128,35 @@ fn multi_export_chapters_thumbnail() {
     cutline_qa::publish::thumbnail(&l, &pr, 15.0, Some("Sharpen like a pro"), "hook_title", &out).unwrap();
     assert_eq!(image::image_dimensions(&out).unwrap(), (1280, 720));
 }
+
+/// Frame grabs from a still image ignore the time (any `-ss` on an image input yields nothing).
+#[test]
+fn grab_from_still_image_at_any_time() {
+    let Some(tc) = cutline_testkit::test_toolchain() else { return };
+    let face = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/face_armstrong.jpg");
+    for t in [0.0, 0.5, 2.7] {
+        let f = cutline_qa::review::grab(tc, &face, t).unwrap();
+        assert_eq!((f.width(), f.height()), (480, 600));
+    }
+}
+
+/// A thumbnail taken inside a still-image clip (previously: "Nothing was written").
+#[test]
+fn thumbnail_from_still_clip() {
+    let Some(_tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let face = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/face_armstrong.jpg");
+    std::fs::copy(&face, d.path().join("face.jpg")).unwrap();
+    let pp = d.path().join("p.json5");
+    std::fs::write(
+        &pp,
+        "{version: 1, name: 'st', target: 'shorts', assets: {img: {path: 'face.jpg'}}, main: [{id: 'c', clip: 'img', duration: 3}]}",
+    )
+    .unwrap();
+    let l = pipeline::load(&pp).unwrap();
+    let (name, e) = pipeline::exports(&l.project).remove(0);
+    let pr = pipeline::prepare(&l, name, &e, false).unwrap();
+    let out = d.path().join("t.jpg");
+    cutline_qa::publish::thumbnail(&l, &pr, 1.5, Some("Still"), "hook_title", &out).unwrap();
+    assert_eq!(image::image_dimensions(&out).unwrap(), (1080, 1920));
+}

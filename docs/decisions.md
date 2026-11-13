@@ -177,3 +177,19 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 
 ## 2026-11-13 — Release packaging
 - **Decision:** `scripts/release.sh` builds with `--features onnx` and packs the binary with the `assets/` directory beside it (found via `<exe_dir>/assets`): a universal macOS binary via `lipo`, and a zip on Windows. `.github/workflows/release.yml` runs it on `v*` tags.
+
+## 2026-11-12 — macOS: ONNX Runtime link fixes
+- **Decision:** with `onnx` on macOS, `cutline-reframe/build.rs` links clang's `libclang_rt.osx.a` (found via `cc --print-resource-dir`), and `.cargo/config.toml` sets `MACOSX_DEPLOYMENT_TARGET=13.4` unless the environment overrides it.
+- **Reason:** the prebuilt ONNX Runtime (CoreML provider) calls `__isPlatformVersionAtLeast`. Rust's std defines it, but the release profile's thin LTO internalizes it, so every `--release --features onnx` link on macOS failed (debug builds and tests linked fine, which is why CI never saw it). The runtime is built for macOS 13.4; without the deployment target the binary claimed 11.0 and would crash on older systems.
+
+## 2026-11-12 — Chrome fallback when a browser produces no frames
+- **Decision:** the HTML renderer tries `chrome_candidates()` in order (installed headless shell, then system Chrome/Chromium/Edge; `CUTLINE_CHROME` alone when set). After launch it runs a content-independent health check (one `requestAnimationFrame` on `about:blank`, 15 s). A failed launch or health check moves on to the next browser; any other error is final.
+- **Reason:** on macOS the freshly downloaded `chrome-headless-shell` never fired `requestAnimationFrame` for its first few minutes after `deps install chrome`, so every HTML layer failed with "warm-up seek timeout", while system Chrome worked. Most likely macOS first-launch checks of the new binary. It worked on its own afterwards and could not be reproduced on demand (the result is cached per binary).
+
+## 2026-11-12 — Still images in face analysis, review grabs and thumbnails
+- **Decision:** face analysis loops a still image (`-loop 1 -framerate <rate> -t <dur>`). Review frame grabs and thumbnails pass no `-ss` for still sources. The analysis cache key moved to `faces-v2`.
+- **Reason:** with ffmpeg 9 any `-ss` (even 0) on an image input yields no frames, so `track_face` on a photo silently fell back to `fit_blur`, and `thumbnail` / `review` failed on photo clips.
+
+## 2026-11-12 — Whisper model resolution and caption warnings
+- **Decision:** `whisper::resolve_model()` is used by both `transcribe` and render: `CUTLINE_WHISPER_MODEL`, else `large-v3-turbo-q5_0` if installed, else `base.en` if installed. Render emits `W_CAPTIONS_NO_TRANSCRIPT` when captions are `auto`, speech assets exist and no words were found. Plan diagnostics now appear in render's human output and in `--json` (`exports[].diagnostics`), not only in `render_report.json`.
+- **Reason:** `deps install --all` installs `base.en`, but transcribe and render asked for `large-v3-turbo-q5_0`. After the documented setup, `transcribe` failed and renders silently produced an empty `.srt` with no warning.

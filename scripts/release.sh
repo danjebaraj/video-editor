@@ -19,7 +19,13 @@ stage() { # $1 = binary path, $2 = archive name
 }
 case "$(uname -s)" in
   Darwin)
-    rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    if command -v rustup >/dev/null; then
+      rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    elif [ ! -d "$(rustc --print sysroot)/lib/rustlib/x86_64-apple-darwin" ]; then
+      echo "error: the universal build needs the x86_64-apple-darwin std; install Rust via rustup" >&2
+      echo "       (Homebrew's rust only ships the host target)" >&2
+      exit 1
+    fi
     cargo build --release -p cutline-cli --features "$FEATURES" --target aarch64-apple-darwin
     cargo build --release -p cutline-cli --features "$FEATURES" --target x86_64-apple-darwin
     mkdir -p target/universal

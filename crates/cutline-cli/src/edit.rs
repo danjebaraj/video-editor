@@ -330,6 +330,10 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
             r.exec.cache_hits,
             r.exec.cache_misses
         ));
+        for d in &r.diagnostics {
+            let hint = d.hint.as_deref().map(|h| format!(" (hint: {h})")).unwrap_or_default();
+            human.push(format!("⚠ {} {}: {}{hint}", d.code, d.path, d.message));
+        }
         human.push(cutline_qa::qa::summary(&r.qa));
         human.push(format!(
             "  qa: {}\n  report: {}\n  srt: {}\n  credits: {}",

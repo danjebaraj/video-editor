@@ -18,7 +18,7 @@ pub fn transcript_cache(_l: &Loaded) -> Cache {
 }
 
 pub fn whisper_model() -> String {
-    std::env::var("CUTLINE_WHISPER_MODEL").unwrap_or_else(|_| cutline_transcribe::whisper::DEFAULT_MODEL.to_string())
+    cutline_transcribe::whisper::resolve_model()
 }
 
 /// Transcript (source time) for an asset, with corrections applied. `None` when no transcript

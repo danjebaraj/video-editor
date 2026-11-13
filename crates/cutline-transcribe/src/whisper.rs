@@ -15,6 +15,16 @@ use std::process::Command;
 pub const DEFAULT_MODEL: &str = "large-v3-turbo-q5_0";
 pub const FAST_MODEL: &str = "base.en";
 
+/// Model used when none is given: `CUTLINE_WHISPER_MODEL`, else [`DEFAULT_MODEL`] if installed,
+/// else [`FAST_MODEL`] if installed (what `deps install --all` provides), else [`DEFAULT_MODEL`]
+/// (so the "not installed" error names the recommended model).
+pub fn resolve_model() -> String {
+    if let Ok(m) = std::env::var("CUTLINE_WHISPER_MODEL") {
+        return m;
+    }
+    [DEFAULT_MODEL, FAST_MODEL].into_iter().find(|m| model_path(m).exists()).unwrap_or(DEFAULT_MODEL).to_string()
+}
+
 /// Locate the whisper.cpp CLI: `CUTLINE_WHISPER_CLI`, `<tools>/whisper/whisper-cli`, PATH.
 pub fn find_cli() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("CUTLINE_WHISPER_CLI") {

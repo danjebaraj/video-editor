@@ -53,6 +53,7 @@ pub struct RenderResult {
 }
 
 pub const FRAME_TIMEOUT: Duration = Duration::from_secs(30);
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Chrome executable: `CUTLINE_CHROME`, installed headless shell, system Chrome/Edge.
 pub fn chrome() -> Option<PathBuf> {
@@ -151,12 +152,38 @@ pub fn render_frames(spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
     rt.block_on(render_async(spec, work))
 }
 
+/// Marker for "Chrome launched but never got a page ready / produced a frame" (as opposed to a
+/// broken page), which is worth retrying with the next browser.
+const STALL: &str = "Chrome produced no frames";
+
 async fn render_async(spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
-    let exe =
-        chrome().context("no Chrome/Chromium/Edge found (run `cutline deps install chrome` or set CUTLINE_CHROME)")?;
+    let cands = cutline_deps::paths::chrome_candidates();
+    if cands.is_empty() {
+        bail!("no Chrome/Chromium/Edge found (run `cutline deps install chrome` or set CUTLINE_CHROME)");
+    }
+    let mut last = None;
+    for (i, exe) in cands.iter().enumerate() {
+        match render_with(exe, spec, work).await {
+            Ok(r) => return Ok(r),
+            Err(e) if format!("{e:#}").contains(STALL) => {
+                if let Some(next) = cands.get(i + 1) {
+                    tracing::warn!("{}: {e:#}; retrying with {}", exe.display(), next.display());
+                }
+                last = Some(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap()).context(
+        "no Chrome rendered frames. On macOS a freshly downloaded Chrome can stall for a few minutes while the \
+         system checks it on first launch: retry shortly, or set CUTLINE_CHROME to an installed Chrome",
+    )
+}
+
+async fn render_with(exe: &Path, spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
     let profile = work.join("chrome-profile");
     let mut cfg = BrowserConfig::builder()
-        .chrome_executable(&exe)
+        .chrome_executable(exe)
         .user_data_dir(&profile)
         .window_size(spec.width, spec.height)
         .viewport(None)
@@ -181,7 +208,8 @@ async fn render_async(spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
         cfg = cfg.no_sandbox();
     }
     let cfg = cfg.build().map_err(|e| anyhow::anyhow!("chrome config: {e}"))?;
-    let (mut browser, mut handler) = Browser::launch(cfg).await.context("launching Chrome")?;
+    let (mut browser, mut handler) =
+        Browser::launch(cfg).await.with_context(|| format!("{STALL}: launching {} failed", exe.display()))?;
     let h = tokio::spawn(async move { while let Some(_ev) = handler.next().await {} });
     let res = drive(&browser, spec, work).await;
     let _ = browser.close().await;
@@ -193,6 +221,14 @@ async fn render_async(spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
 
 async fn drive(browser: &Browser, spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
     let page = browser.new_page("about:blank").await?;
+    // Health check independent of the page content: does this browser produce frames at all?
+    let alive =
+        tokio::time::timeout(HEALTH_TIMEOUT, page.evaluate("new Promise(r => requestAnimationFrame(() => r(1)))"));
+    match alive.await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => bail!("{STALL}: {e}"),
+        Err(_) => bail!("{STALL} within {}s", HEALTH_TIMEOUT.as_secs()),
+    }
     page.execute(SetDeviceMetricsOverrideParams::new(spec.width as i64, spec.height as i64, spec.device_scale, false))
         .await?;
     if spec.alpha {

@@ -156,10 +156,11 @@ pub fn thumbnail(l: &Loaded, pr: &Prepared, t: f64, text: Option<&str>, template
         std::env::set_var("FONTCONFIG_FILE", &conf);
     }
     let mut cmd = tc.ffmpeg_cmd();
-    cmd.args(["-ss", &format!("{src_t:.6}"), "-i"])
-        .arg(&m.path)
-        .args(["-frames:v", "1", "-vf", &vf, "-q:v", "2"])
-        .arg(out);
+    // a still has one frame and any `-ss` (even 0) makes ffmpeg output nothing
+    if c.kind != cutline_core::model::AssetKind::Image {
+        cmd.args(["-ss", &format!("{src_t:.6}")]);
+    }
+    cmd.arg("-i").arg(&m.path).args(["-frames:v", "1", "-vf", &vf, "-q:v", "2"]).arg(out);
     let o = cmd.output()?;
     std::env::remove_var("FONTCONFIG_FILE");
     let _ = std::fs::remove_dir_all(&work);
