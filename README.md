@@ -29,6 +29,8 @@ cutline guide                               # the workflow Claude should follow
   blur-in, glitch, vignette, motion blur; every xfade transition plus whips, zoom punch, flash
   cut and glitch; overlays (alpha video, images, PNG sequences, B-roll/PiP with rounded corners,
   border, shadow) with enter/exit animations; progress bar; LUTs and color presets.
+- **Masks:** blur, pixelate or fill a region (with optional replacement text) to hide private
+  details in screen recordings.
 - **Text:** libass-rendered templates (hook title, lower third, callout, step counter, big
   number, quote, CTA, end card, emoji pop) with bundled fonts, safe zones and auto-fit; HTML
   variants via headless Chrome.

@@ -207,3 +207,8 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 - **Decision:** an asset `script` is aligned to its transcript with a banded Needleman–Wunsch over normalised tokens (exact 3, close 2, substitution −1, gap −2). Paired script words take the transcript word's times; unpaired ones are interpolated between neighbours (or share the previous word's span when there is no gap); transcript words absent from the script are dropped. `[bracketed]` audio tags and dash-only tokens are not words. Alignment happens wherever transcripts are loaded (captions, ducking, cues, jump cuts), after the transcript cache, so caches stay script-independent.
 - **Alternatives:** forced alignment on the audio (needs an acoustic model); replacing caption text per segment.
 - **Reason:** the TTS script is known exactly, and the recogniser's word timings are good; only its spelling is unreliable ("pains" for "panes"). Word-level pairing keeps per-word timing for karaoke and bold_pop styles.
+
+## 2026-11-13 — Mask layers in the overlay pass
+- **Decision:** `mask` is a layer type composited in z order with the other overlays (so a mask can cover a PiP or an image), before the ASS pass (so text and captions stay readable on top). Blur and pixelate crop the region from the current composite and overlay it back with `enable`; fill is a `drawbox`. Default blur sigma is half the region's short side, which removes text that fills the region.
+- **Alternatives:** a per-clip effect (would not cover overlays or span clips); pre-processing the footage.
+- **Reason:** redaction targets what the viewer sees, wherever it comes from, and must follow the same timing rules (anchor/offset, start/end, cues) as everything else.

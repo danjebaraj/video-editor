@@ -60,6 +60,14 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - B-roll every 20–40 s (`broll` layers, PiP with `radius`/`border`/`shadow` or full-frame).
 - Leave the last 20 s free for the YouTube end screen (`end_card` template draws placeholders).
 
+## Screen recordings: hide private details
+
+- Look for usernames, home paths, emails, tokens and hostnames in every frame (`review`'s
+  contact sheet) and cover them with `mask` layers: `{type: "mask", rect: {x, y, w, h},
+  anchor: "clip", duration: 2}`; `rect` is in fractions of the frame.
+- `blur` (default) suits incidental text; use `mode: "fill"` with the background `color` for
+  secrets, optionally with replacement `text` (e.g. `~/Library/…`) so the UI still reads well.
+
 ## Narrated videos: time the edit to the voice-over
 
 - Put the VO on an `audio` layer with a numeric `start`, and give its asset a `transcript` (or

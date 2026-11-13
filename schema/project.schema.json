@@ -2429,6 +2429,118 @@
           ]
         },
         {
+          "description": "Hide part of the frame: usernames, paths, emails, keys. Drawn over the footage and other\noverlays (below text and captions).",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "color": {
+              "description": "Fill color (default `#000000`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "description": "blur (default) | pixelate | fill. Use `fill` for secrets: blurred or pixelated text\ncan sometimes be recovered.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/MaskMode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "description": "Region as fractions of the frame: `{x, y, w, h}` (top-left corner, size).",
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "strength": {
+              "description": "Blur/pixelation strength multiplier (default 1).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "text": {
+              "description": "Replacement text drawn in the region (left-aligned, vertically centered).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text_color": {
+              "description": "Text color (default `#9AA0A6`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text_size": {
+              "description": "Text size in output px at full resolution (default 60 % of the region height).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "mask"
+            }
+          },
+          "required": [
+            "type",
+            "rect"
+          ]
+        },
+        {
           "description": "One-shot sound effect at `at` (or anchored).",
           "type": "object",
           "properties": {
@@ -2538,6 +2650,14 @@
       "required": [
         "at",
         "title"
+      ]
+    },
+    "MaskMode": {
+      "type": "string",
+      "enum": [
+        "blur",
+        "pixelate",
+        "fill"
       ]
     },
     "Point": {

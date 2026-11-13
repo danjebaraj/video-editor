@@ -757,6 +757,33 @@ pub enum Layer {
         #[serde(flatten)]
         at: Placement,
     },
+    /// Hide part of the frame: usernames, paths, emails, keys. Drawn over the footage and other
+    /// overlays (below text and captions).
+    Mask {
+        /// Region as fractions of the frame: `{x, y, w, h}` (top-left corner, size).
+        rect: Rect,
+        /// blur (default) | pixelate | fill. Use `fill` for secrets: blurred or pixelated text
+        /// can sometimes be recovered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<MaskMode>,
+        /// Fill color (default `#000000`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        /// Blur/pixelation strength multiplier (default 1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strength: Option<f64>,
+        /// Replacement text drawn in the region (left-aligned, vertically centered).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        /// Text color (default `#9AA0A6`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text_color: Option<String>,
+        /// Text size in output px at full resolution (default 60 % of the region height).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text_size: Option<f64>,
+        #[serde(flatten)]
+        at: Placement,
+    },
     /// One-shot sound effect at `at` (or anchored).
     Sfx {
         /// Asset id, brand SFX alias, or a list to pick from deterministically.
@@ -786,6 +813,7 @@ impl Layer {
             Layer::Html { .. } => "html",
             Layer::ProgressBar { .. } => "progress_bar",
             Layer::Audio { .. } => "audio",
+            Layer::Mask { .. } => "mask",
             Layer::Sfx { .. } => "sfx",
         }
     }
@@ -797,6 +825,7 @@ impl Layer {
             | Layer::Image { at, .. }
             | Layer::Html { at, .. }
             | Layer::ProgressBar { at, .. }
+            | Layer::Mask { at, .. }
             | Layer::Audio { at, .. } => Some(at),
             Layer::Sfx { .. } => None,
         }
@@ -822,6 +851,15 @@ impl Layer {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MaskMode {
+    #[default]
+    Blur,
+    Pixelate,
+    Fill,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]

@@ -147,6 +147,7 @@ others until the end. Visual layers take: `position` (preset `center`, `top`, `b
 | `progress_bar` | `style` (`brand` or color), `edge` (top/bottom), `height` |
 | `audio` | `asset`, `src_in`, `gain_db`, `fade_in`, `fade_out`, `loop`, `role` |
 | `sfx` | `asset` (or brand alias), `at` or `anchor`+`offset`, `gain_db`, `pick_from` |
+| `mask` | `rect` `{x, y, w, h}` (fractions of the frame), `mode` (`blur` default, `pixelate`, `fill`), `color` (fill, default `#000000`), `strength` (default 1), `text` (replacement text, Inter), `text_color` (`#9AA0A6`), `text_size` (px at full size; default 60 % of the rect height). Hides part of the frame over the footage and overlays, under text and captions; until the end by default. Use `fill` for secrets: blurred or pixelated text can sometimes be recovered |
 
 Text templates: `hook_title`, `lower_third`, `callout`, `step_counter`, `big_number`, `quote`,
 `cta_subscribe`, `end_card`, `emoji_pop`, and HTML variants `hook_title_html`,

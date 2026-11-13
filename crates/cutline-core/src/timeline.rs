@@ -621,6 +621,28 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 );
             }
         }
+        if let Layer::Mask { rect, strength, text_size, .. } = l {
+            let inside = |v: f64| (0.0..=1.0).contains(&v);
+            if !(inside(rect.x) && inside(rect.y) && rect.w > 0.0 && rect.h > 0.0)
+                || rect.x + rect.w > 1.0 + 1e-9
+                || rect.y + rect.h > 1.0 + 1e-9
+            {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/rect"),
+                        "mask rect must lie inside the frame: x, y, w, h are fractions (0–1) with x+w ≤ 1 and y+h ≤ 1",
+                    )
+                    .hint("e.g. {x: 0.2, y: 0.44, w: 0.75, h: 0.03}; divide pixel values by the frame width/height"),
+                );
+            }
+            if strength.is_some_and(|s| !(0.0..=10.0).contains(&s) || s == 0.0) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/strength"), "strength must be within (0, 10]"));
+            }
+            if text_size.is_some_and(|s| s.is_nan() || s <= 0.0) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/text_size"), "text_size must be positive"));
+            }
+        }
         if let Some(v) = l.visual() {
             if let Some(o) = v.opacity {
                 if !(0.0..=1.0).contains(&o) {
