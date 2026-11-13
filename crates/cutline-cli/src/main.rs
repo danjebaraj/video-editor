@@ -76,6 +76,8 @@ enum Cmd {
     },
     /// Explicit timeline after auto directives + EDL table.
     Expand { project: PathBuf },
+    /// Where each cue landed: phrase, matched transcript words and timeline time.
+    Cues { project: PathBuf },
     /// Final render, then QA.
     Render {
         project: PathBuf,
@@ -296,6 +298,7 @@ fn dispatch(cli: Cli) -> CmdResult {
         Cmd::Schema => edit::schema(),
         Cmd::Init { dir, target, assets, name } => edit::init(&dir, &target, assets.as_deref(), name.as_deref()),
         Cmd::Expand { project } => edit::expand(&project),
+        Cmd::Cues { project } => edit::cues(&project),
         Cmd::Render { project, export, draft, dry_run, no_cache, allow_qa_errors, hw, jobs, out } => edit::render(
             &project,
             edit::RenderArgs { export, draft, dry_run, no_cache, allow_qa_errors, hw, jobs, out },

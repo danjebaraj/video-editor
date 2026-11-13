@@ -10,6 +10,10 @@ Anywhere a time is accepted: seconds (`12.4`), timecode (`"01:02.500"`, `"00:01:
 frames (`"f:372"`, at the source fps for source times, the timeline fps otherwise), or `"end"`.
 Cuts snap to the nearest output frame.
 
+Timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can also be **cue
+references**: `"cue:clocks"`, `"cue:clocks+0.4"`, `"cue:clocks-0.2"` (seconds after/before the
+cue). See [Cues](#cues).
+
 ## Top level
 
 | Field | Type | Default | Notes |
@@ -30,6 +34,7 @@ Cuts snap to the nearest output frame.
 | `safe_zone` | `{top, bottom, left, right}` fractions | per target | |
 | `markers` | [`{at, title}`] | `[]` | chapters |
 | `exports` | [Export] | one export of `target` | multi-target from one edit |
+| `cues` | map name → Cue | `{}` | phrases in the voice-over; see [Cues](#cues) |
 
 ### Targets
 
@@ -66,6 +71,7 @@ WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
 | `clip` | required | asset id |
 | `in`, `out` | 0, end of asset | source times |
 | `duration` | — | stills; or `in` + duration·speed |
+| `end_at` | — | timeline time of the cut to the next clip (the middle of the outgoing transition), usually `"cue:…"`. The clip is fitted: with `in` and `out` its speed is computed (0.25–4); without `out` the out point is (at `speed`); stills get the duration. Not with `duration` or `speed_ramp`. Jump cuts and filler removal skip fitted clips |
 | `speed` | 1 | 0.25–4; audio pitch preserved (`atempo`) |
 | `speed_ramp` | — | `[{t, speed}]`, source-relative `t` |
 | `reverse` | false | ≤ 10 s clips |
@@ -180,6 +186,42 @@ amount_db: -12, attack: 0.12, release: 0.45, mode: "envelope"|"sidechain"}`, `mi
 
 Generated items carry `generated_by`; `cutline expand` shows them. Jump-cut pieces keep the first
 piece's id (`talk`, `talk~2`, …).
+
+## Cues
+
+A cue names a phrase in a voice track; cutline finds it in the track's transcript when it loads
+the project and replaces every `"cue:name"` reference with timeline seconds (so `validate`,
+`expand` and `render` see plain numbers). `cutline cues project.json5` lists where each landed.
+
+```json5
+cues: {
+  clocks: "World clocks",                                   // short form: the phrase
+  cal: {phrase: "calendar jumps", edge: "end"},              // when the last word ends
+  again: {phrase: "world clocks", occurrence: 2, asset: "vo"},
+},
+main: [
+  {id: "intro", clip: "title", end_at: "cue:clocks"},       // cut to the next clip on "World"
+  {transition: {type: "fade", duration: 0.4}},
+  {id: "time", clip: "screen", in: 3, out: 18, end_at: "cue:cal"},  // speed computed to fit
+],
+layers: [
+  {type: "audio", asset: "vo", start: 1.2},
+  {type: "text", template: "lower_third", text: "World clocks", start: "cue:clocks+0.3", end: "cue:cal-0.5"},
+],
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `phrase` | required | case and punctuation are ignored; close transcription slips match ("pains" for "panes") with a `W_CUE_FUZZY` warning |
+| `asset` | the only voice-role audio layer's asset | its transcript: the asset `transcript` file, the transcript cache (`cutline transcribe`), or whisper |
+| `occurrence` | 1 | which occurrence of the phrase |
+| `edge` | `start` | `start` (first word begins) or `end` (last word ends) |
+
+The asset must be played by exactly one `audio` layer with a numeric `start` (default 0); a cue
+is that start + the word time − the layer's `src_in`. Errors: `E_UNKNOWN_CUE`,
+`E_CUE_NOT_FOUND` (the hint lists the closest phrases), `E_CUE_NOT_ALLOWED` (a cue in a source
+time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`; for `end_at`:
+`E_END_AT_BEFORE_START`, `E_FIT_SPEED`, `E_FIELD_CONFLICT`.
 
 ## Export
 

@@ -14,6 +14,7 @@ cutline deps install --all           # ffmpeg (pinned static build), whisper mod
 cutline init my-short --target shorts --assets footage/
 cutline validate my-short/project.json5
 cutline expand   my-short/project.json5     # explicit timeline (auto jump cuts, fillers, punch-ins)
+cutline cues     my-short/project.json5     # where each voice-over cue landed
 cutline review   my-short/project.json5     # review/ pack for vision
 cutline render   my-short/project.json5     # final render + QA + .srt + credits
 cutline guide                               # the workflow Claude should follow
@@ -33,6 +34,8 @@ cutline guide                               # the workflow Claude should follow
   variants via headless Chrome.
 - **Captions:** whisper.cpp or ElevenLabs Scribe import, words mapped through the edit;
   `bold_pop`, `karaoke`, `word_by_word`, `clean_sentence`, `boxed`; emphasis and emoji; SRT.
+- **Script timing:** name phrases in the voice-over (`cues`) and cut, place text and SFX on
+  them (`"cue:clocks"`); clips fit themselves to the cut with `end_at`.
 - **Edit assist:** automatic jump cuts, filler removal, punch-in cadence, SFX on transitions,
   all expanded to inspectable timeline items.
 - **Audio:** role stems, voice chains, transcript/VAD-driven ducking, two-pass loudness

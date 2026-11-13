@@ -18,6 +18,8 @@ pub struct Loaded {
     pub media: ProjectMedia,
     pub diags: Vec<Diagnostic>,
     pub timeline: Option<Timeline>,
+    /// Cue references resolved while loading (see `cues`).
+    pub cues: Vec<crate::cues::ResolvedCue>,
 }
 
 #[derive(Debug)]
@@ -56,9 +58,24 @@ pub fn context(dir: &Path) -> Context {
 }
 
 pub fn parse_file(path: &Path) -> Result<Project, LoadError> {
+    parse_file_with_cues(path).map(|(p, _, _)| p)
+}
+
+/// Parse a project file, resolving cue references against the voice-over transcripts.
+/// Returns the project, warnings from cue resolution, and the resolved cues.
+pub fn parse_file_with_cues(
+    path: &Path,
+) -> Result<(Project, Vec<Diagnostic>, Vec<crate::cues::ResolvedCue>), LoadError> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
-    cutline_core::parse::parse_project(&text).map_err(LoadError::Invalid)
+    let mut v = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let (notes, cues) = crate::cues::resolve(&mut v, dir);
+    if has_errors(&notes) {
+        return Err(LoadError::Invalid(notes));
+    }
+    let p = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+    Ok((p, notes, cues))
 }
 
 /// Load + probe + resolve with the project's own target.
@@ -66,12 +83,13 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
     let path = std::fs::canonicalize(path)
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot open {}: {e}", path.display())))?;
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let project = parse_file(&path)?;
+    let (project, notes, cues) = parse_file_with_cues(&path)?;
     let tc = cutline_deps::toolchain().map_err(LoadError::Tool)?;
     let cache = Cache::new(crate::cutline_dir(&dir).join("cache").join("probe"));
     let media = probe_project(tc, &project, &dir, &cache).map_err(LoadError::Tool)?;
-    let (timeline, diags) = resolve(&project, &media, &context(&dir));
-    Ok(Loaded { path, dir, project, media, diags, timeline })
+    let (timeline, mut diags) = resolve(&project, &media, &context(&dir));
+    diags.extend(notes);
+    Ok(Loaded { path, dir, project, media, diags, timeline, cues })
 }
 
 /// Project variant for one export (target/fps/size override).

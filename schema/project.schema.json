@@ -47,6 +47,13 @@
         }
       ]
     },
+    "cues": {
+      "description": "Named points in the voice-over, found in its transcript: `{clocks: \"World clocks\"}`.\nTimeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can refer to\nthem as `\"cue:clocks\"`, `\"cue:clocks+0.4\"` or `\"cue:clocks-0.2\"`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Cue"
+      }
+    },
     "default_reframe": {
       "description": "Default geometry for clips whose aspect differs from the target (default `cover`).",
       "anyOf": [
@@ -548,6 +555,17 @@
             "$ref": "#/$defs/Effect"
           }
         },
+        "end_at": {
+          "description": "Timeline time of the cut to the next clip (the middle of the outgoing transition), e.g.\n`\"cue:calendar\"`. The clip is fitted to end there: with `in` and `out` both set its\nspeed is computed; otherwise `out` is (at `speed`, default 1); stills get the duration.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "gain_db": {
           "type": [
             "number",
@@ -707,6 +725,64 @@
         }
       },
       "additionalProperties": false
+    },
+    "Cue": {
+      "description": "A cue: a phrase in a voice track. The short form is just the phrase.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/CueSpec"
+        }
+      ]
+    },
+    "CueEdge": {
+      "type": "string",
+      "enum": [
+        "start",
+        "end"
+      ]
+    },
+    "CueSpec": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "Asset whose transcript is searched. Default: the only voice-role audio layer's asset.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "edge": {
+          "description": "`start` (default): when the first word begins; `end`: when the last word ends.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CueEdge"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurrence": {
+          "description": "Which occurrence of the phrase (1-based, default 1).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "phrase": {
+          "description": "Words to find (case and punctuation are ignored; close transcription slips match).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "phrase"
+      ]
     },
     "Duck": {
       "type": "object",
@@ -2804,7 +2880,7 @@
       ]
     },
     "TimeValue": {
-      "description": "Seconds (number), timecode string \"mm:ss.mmm\" / \"hh:mm:ss.mmm\", frames \"f:N\", or \"end\".",
+      "description": "Seconds (number), timecode string \"mm:ss.mmm\" / \"hh:mm:ss.mmm\", frames \"f:N\", \"end\", or (timeline times only) a cue reference \"cue:name\" / \"cue:name+0.5\".",
       "oneOf": [
         {
           "type": "number",
@@ -2812,7 +2888,7 @@
         },
         {
           "type": "string",
-          "pattern": "^(end|f:\\d+|(\\d+:){0,2}\\d+(\\.\\d+)?)$"
+          "pattern": "^(end|f:\\d+|(\\d+:){0,2}\\d+(\\.\\d+)?|cue:[A-Za-z0-9_.-]+([+-]\\d+(\\.\\d+)?)?)$"
         }
       ]
     },

@@ -57,6 +57,70 @@ pub struct Project {
     pub markers: Vec<Marker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exports: Vec<Export>,
+    /// Named points in the voice-over, found in its transcript: `{clocks: "World clocks"}`.
+    /// Timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`) can refer to
+    /// them as `"cue:clocks"`, `"cue:clocks+0.4"` or `"cue:clocks-0.2"`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cues: BTreeMap<String, Cue>,
+}
+
+/// A cue: a phrase in a voice track. The short form is just the phrase.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum Cue {
+    Phrase(String),
+    Spec(CueSpec),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CueSpec {
+    /// Words to find (case and punctuation are ignored; close transcription slips match).
+    pub phrase: String,
+    /// Asset whose transcript is searched. Default: the only voice-role audio layer's asset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<String>,
+    /// Which occurrence of the phrase (1-based, default 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<usize>,
+    /// `start` (default): when the first word begins; `end`: when the last word ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge: Option<CueEdge>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CueEdge {
+    #[default]
+    Start,
+    End,
+}
+
+impl Cue {
+    pub fn phrase(&self) -> &str {
+        match self {
+            Cue::Phrase(p) => p,
+            Cue::Spec(s) => &s.phrase,
+        }
+    }
+    pub fn asset(&self) -> Option<&str> {
+        match self {
+            Cue::Phrase(_) => None,
+            Cue::Spec(s) => s.asset.as_deref(),
+        }
+    }
+    pub fn occurrence(&self) -> usize {
+        match self {
+            Cue::Phrase(_) => 1,
+            Cue::Spec(s) => s.occurrence.unwrap_or(1),
+        }
+    }
+    pub fn edge(&self) -> CueEdge {
+        match self {
+            Cue::Phrase(_) => CueEdge::Start,
+            Cue::Spec(s) => s.edge.unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
@@ -206,6 +270,11 @@ pub struct Clip {
     /// Timeline duration for stills / generated assets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<TimeValue>,
+    /// Timeline time of the cut to the next clip (the middle of the outgoing transition), e.g.
+    /// `"cue:calendar"`. The clip is fitted to end there: with `in` and `out` both set its
+    /// speed is computed; otherwise `out` is (at `speed`, default 1); stills get the duration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_at: Option<TimeValue>,
     /// Constant speed factor 0.25–4.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,

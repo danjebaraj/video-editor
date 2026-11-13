@@ -60,6 +60,18 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - B-roll every 20–40 s (`broll` layers, PiP with `radius`/`border`/`shadow` or full-frame).
 - Leave the last 20 s free for the YouTube end screen (`end_card` template draws placeholders).
 
+## Narrated videos: time the edit to the voice-over
+
+- Put the VO on an `audio` layer with a numeric `start`, and give its asset a `transcript` (or
+  run `cutline transcribe` once so it is cached).
+- Name the beats under `cues` (`{clocks: "World clocks"}`) and use `"cue:clocks"` in timeline
+  times: clip `end_at` (the cut lands on the cue), layer `start`/`end`, sfx `at`, marker `at`.
+  Offsets: `"cue:clocks+0.3"`.
+- `end_at` fits each clip: give `in`+`out` to let cutline pick the speed, or only `in` to trim.
+  No hand arithmetic for clip lengths, speeds or transition overlaps.
+- `cutline cues project.json5` shows what each cue matched and where it landed; fix
+  `W_CUE_FUZZY` / `E_CUE_NOT_FOUND` from the hint.
+
 ## Audio
 
 - Roles: `dialogue` (clip audio), `voice` (VO assets), `music`, `sfx`. Voice/dialogue chain

@@ -193,3 +193,12 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-12 — Whisper model resolution and caption warnings
 - **Decision:** `whisper::resolve_model()` is used by both `transcribe` and render: `CUTLINE_WHISPER_MODEL`, else `large-v3-turbo-q5_0` if installed, else `base.en` if installed. Render emits `W_CAPTIONS_NO_TRANSCRIPT` when captions are `auto`, speech assets exist and no words were found. Plan diagnostics now appear in render's human output and in `--json` (`exports[].diagnostics`), not only in `render_report.json`.
 - **Reason:** `deps install --all` installs `base.en`, but transcribe and render asked for `large-v3-turbo-q5_0`. After the documented setup, `transcribe` failed and renders silently produced an empty `.srt` with no warning.
+
+## 2026-11-13 — Cues resolve to seconds before the project is typed
+- **Decision:** `"cue:name[±s]"` references are replaced by timeline seconds on the raw JSON in `pipeline::parse_file_with_cues`, using the voice track's transcript (asset `transcript` file, the transcript cache, or whisper). Allowed only in timeline times (layer `start`/`end`, sfx `at`, clip `end_at`, marker `at`). The voice asset must be played by exactly one audio layer with a numeric `start`.
+- **Alternatives:** a `TimeValue::Cue` variant resolved inside `timeline::resolve`.
+- **Reason:** `TimeValue` is `Copy` and used everywhere, and core has no transcript access. Resolving first means validation, `expand`, QA and rendering only ever see explicit numbers, and errors still carry JSON pointers to the reference or the cue.
+
+## 2026-11-13 — `end_at` is the cut point, not the clip end
+- **Decision:** `end_at` is where the cut to the next clip lands: the midpoint of the outgoing transition (or the clip end without one). With `in` and `out` the speed is computed; otherwise `out` is. Jump cuts and filler removal leave fitted clips whole.
+- **Reason:** a viewer perceives the cut at the transition midpoint, so that is what should sit on the spoken cue. Splitting a fitted clip would change its length and break the fit.

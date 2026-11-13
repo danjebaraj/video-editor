@@ -58,6 +58,39 @@ pub fn transcript_for(
     Ok(Some(t))
 }
 
+/// Transcript (source time) for an asset before the project is probed (used to resolve cues):
+/// the asset's `transcript` file, else the shared cache (keyed like `transcript_for`), else
+/// whisper when `allow_whisper`. `None` when nothing is available.
+pub fn load_transcript(
+    dir: &std::path::Path,
+    asset_id: &str,
+    asset: Option<&cutline_core::model::Asset>,
+    lang: Option<&str>,
+    allow_whisper: bool,
+) -> Result<Option<Transcript>> {
+    let Some(a) = asset else { anyhow::bail!("unknown asset `{asset_id}`") };
+    let tfile = a.transcript.as_ref().map(|t| dir.join(t));
+    let media = dir.join(&a.path);
+    let fingerprint = if tfile.is_some() {
+        String::new()
+    } else {
+        cutline_media::fingerprint_any(&media).map_err(|e| anyhow::anyhow!("cannot read {}: {e}", media.display()))?
+    };
+    let tc = cutline_deps::toolchain()?;
+    let got = cutline_transcribe::get(
+        tc,
+        asset_id,
+        &media,
+        &fingerprint,
+        tfile.as_deref(),
+        &whisper_model(),
+        lang,
+        &Cache::global("transcripts"),
+        allow_whisper,
+    )?;
+    Ok(got.map(|(t, _)| t))
+}
+
 /// Assets whose speech feeds captions/ducking: explicit `captions.assets`, else every clip
 /// asset with audio, every voice-role audio layer and every clip audio replacement.
 pub fn speech_assets(p: &Project, l: &Loaded) -> Vec<String> {
@@ -246,6 +279,11 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
             };
             let tc = &tl0.clips[ci];
             ci += 1;
+            if c.end_at.is_some() {
+                // a fitted clip's length is set by its cue; splitting it would break the fit
+                new_main.push(item.clone());
+                continue;
+            }
             let mut remove: Vec<(f64, f64)> = vec![];
             let transcript = transcript_for(l, p, brand, &c.clip, false)?;
             let mut generated = "";

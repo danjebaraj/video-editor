@@ -517,6 +517,33 @@ pub fn review(path: &Path, out: &Path) -> CmdResult {
     Ok(Output::ok(json!(r), h))
 }
 
+pub fn cues(path: &Path) -> CmdResult {
+    let l = load_or_return!(path);
+    let mut h = vec![];
+    if l.cues.is_empty() {
+        h.push("no cue references (define `cues` and use \"cue:name\" in timeline times)".to_string());
+    }
+    for c in &l.cues {
+        h.push(format!(
+            "{:<16} {}  \"{}\"{}  ({} {:.2}–{:.2}s)",
+            c.name,
+            format_tc(c.at),
+            c.matched,
+            if c.exact { "" } else { " ~fuzzy" },
+            c.asset,
+            c.source_start,
+            c.source_end
+        ));
+    }
+    for x in l.diags.iter().filter(|x| x.code.contains("CUE")) {
+        h.push(format!("⚠ {} {}: {}", x.code, x.path, x.message));
+    }
+    Ok(Output::ok(
+        json!({"cues": l.cues, "warnings": l.diags.iter().filter(|x| x.code.contains("CUE")).collect::<Vec<_>>()}),
+        h.join("\n"),
+    ))
+}
+
 pub fn chapters(path: &Path) -> CmdResult {
     let l = load_or_return!(path);
     if has_errors(&l.diags) {

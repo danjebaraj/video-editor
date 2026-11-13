@@ -72,14 +72,15 @@ fn layer_allowed_keys(kind: &str) -> Option<Vec<String>> {
 
 /// Parse project text (JSON5 or JSON). Returns all structural errors found.
 pub fn parse_project(text: &str) -> Result<Project, Vec<Diagnostic>> {
-    let v: Value = match json5::from_str(text) {
-        Ok(v) => v,
-        Err(e) => {
-            return Err(vec![Diagnostic::error("E_PARSE", "", format!("JSON5 syntax error: {e}"))
-                .hint("check for missing commas, unbalanced braces or unquoted special characters")])
-        }
-    };
-    parse_value(&v)
+    parse_value(&parse_json5(text)?)
+}
+
+/// JSON5 text → JSON value (syntax errors as diagnostics).
+pub fn parse_json5(text: &str) -> Result<Value, Vec<Diagnostic>> {
+    json5::from_str(text).map_err(|e| {
+        vec![Diagnostic::error("E_PARSE", "", format!("JSON5 syntax error: {e}"))
+            .hint("check for missing commas, unbalanced braces or unquoted special characters")]
+    })
 }
 
 pub fn parse_value(v: &Value) -> Result<Project, Vec<Diagnostic>> {
