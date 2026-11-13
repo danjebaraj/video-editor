@@ -117,29 +117,28 @@ pub struct Analysis {
 }
 
 /// Decode `[src_in, src_out)` at `rate` fps / `width` px and run the detector on every frame;
-/// detect scene cuts with `scdet`.
+/// detect scene cuts with `scdet`. `still`: the source is a single image, looped for the clip's
+/// duration (an image input otherwise yields no frames once `-ss`/`-t` apply).
 pub fn analyze(
     tc: &Toolchain,
     path: &Path,
     src_in: f64,
     src_out: f64,
+    still: bool,
     det: &mut dyn Detector,
     rate: f64,
     width: u32,
 ) -> Result<Analysis> {
-    let dur = src_out - src_in;
-    let mut child = Command::new(&tc.ffmpeg)
-        .args([
-            "-hide_banner",
-            "-nostdin",
-            "-loglevel",
-            "error",
-            "-ss",
-            &format!("{src_in:.6}"),
-            "-t",
-            &format!("{dur:.6}"),
-            "-i",
-        ])
+    let dur = (src_out - src_in).max(1.0 / rate);
+    let mut cmd = Command::new(&tc.ffmpeg);
+    cmd.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
+    if still {
+        cmd.args(["-loop", "1", "-framerate", &format!("{rate}")]);
+    } else {
+        cmd.args(["-ss", &format!("{src_in:.6}")]);
+    }
+    let mut child = cmd
+        .args(["-t", &format!("{dur:.6}"), "-i"])
         .arg(path)
         .args(["-vf", &format!("fps={rate},scale={width}:-2,format=rgb24"), "-f", "rawvideo", "-"])
         .stdout(Stdio::piped())

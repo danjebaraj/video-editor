@@ -40,6 +40,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features
       - run: cargo run -q -p cutline-cli --features onnx -- selftest --quick
+      - name: Release build (LTO; catches link errors debug builds miss)
+        if: runner.os == 'macOS'
+        run: cargo build --release -p cutline-cli --features onnx
 
   deny:
     runs-on: ubuntu-latest

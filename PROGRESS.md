@@ -1,6 +1,6 @@
 # PROGRESS
 
-Platform for this implementation run: Linux x86_64 container (no macOS host). macOS-only acceptance items are marked **not run here** and are covered by the macOS CI job.
+Platform for this implementation run: Linux x86_64 container (no macOS host). macOS-only acceptance items are marked **not run here** and are covered by the macOS CI job. A later macOS run (Apple Silicon) is recorded under "macOS verification" below.
 
 | Milestone | Status |
 |---|---|
@@ -160,8 +160,31 @@ Acceptance:
 - Multi-export, chapters, thumbnail tests.
 - **Not run here:** the full suite and `selftest --quick` on windows-latest (CI job configured; allowed to fail per spec until verified). The Windows Chrome/BtbN download paths could not be exercised (github.com release downloads are blocked from this container).
 
+## macOS verification (2026-11-12, Apple Silicon arm64, 14 cores, Homebrew Rust 1.99)
+Setup as in CI: `deps install ffmpeg` (Martin Riedl 9.0.2 macos-arm64, sha verified), `deps install face-model`, `deps install whisper-model base.en`, `brew install whisper-cpp`, then `deps install --all` (adds chrome-headless-shell 157 mac-arm64). `doctor` all green (VideoToolbox present, Chrome found).
+
+Passed:
+- `cargo fmt --check`, `cargo clippy --workspace --all-targets [--all-features] -D warnings`.
+- `cargo test --workspace --all-features`: 137 passed, 0 failed (1 ignored debug helper). The whisper WER test, YuNet tests and Chrome HTML tests really ran on macOS; none skipped.
+- `selftest --full`: 15/15 pass, 0 skipped (incl. `whisper_wer`, `reframe_tracking`, `html_position`). Performance: 0.52× realtime cold, 0.21× warm (targets ≤ 1.5× / ≤ 0.33×).
+- End-to-end CLI in a folder named `foot age ü` with a `face's [pic].jpg` asset: `init` → `validate` → `transcribe` (real `say` speech) → `expand` → `render` (track_face on a photo, whip/fade transitions, LUT, hook title, HTML lower third, SVG layer, VO, bold_pop captions, loudness −14.0 LUFS) → `render --draft --hw` (`h264_videotoolbox`) → `review` → `preview --at/--range` → `thumbnail` → `chapters` → `qa` → `cache stats` → `deps status` / `deps update --check`.
+- Packaged layout: an arm64 `--target aarch64-apple-darwin` release binary with `assets/` beside it passes `selftest --quick` from an unrelated directory and links only system libraries.
+
+Fixed (see decisions, 2026-11-12):
+- **Release builds with `onnx` failed to link on macOS** (`___isPlatformVersionAtLeast` undefined under thin LTO). This broke `scripts/release.sh`. Also set the deployment target to 13.4 to match ONNX Runtime.
+- **Freshly installed chrome-headless-shell produced no frames for its first minutes on macOS.** All HTML layers failed. The renderer now health-checks Chrome and falls back to the next browser (tested with a hanging fake headless shell).
+- `track_face` on still images found no faces, and `review` / `thumbnail` failed on photo clips (ffmpeg 9 + `-ss` on image inputs).
+- `deps install --all` + `transcribe` / auto captions used a model that was not installed: transcribe failed and renders silently wrote an empty `.srt`. Render plan warnings (`W_REFRAME_NO_FACES`, the new `W_CAPTIONS_NO_TRANSCRIPT`) are now shown.
+- `scripts/release.sh` stops with a clear message when `rustup` is missing (Homebrew Rust has no x86_64 std).
+
+Not run on macOS:
+- The x86_64 half of the universal binary (`lipo`): this machine has Homebrew Rust without rustup or an x86_64 std. arm64 was built and tested.
+- Reproducing the headless-shell stall on demand: it needs a never-launched Chrome build, and that download was not permitted in this session.
+
+Observed, not changed: an SVG layer renders on a target-size canvas unless the asset sets `width`/`height` (documented). An SVG without a `viewBox` is then drawn at its intrinsic size in the canvas's top-left corner, so `scale`/`position` apply to the canvas, not to the graphic.
+
 ## Summary of what was not verified in this environment
-- macOS runs of anything (no macOS host): covered by the macOS-14 CI job.
+- macOS runs of anything (no macOS host): covered by the macOS-14 CI job. **Since done:** see "macOS verification".
 - Windows CI.
 - whisper.cpp transcription and the WER test (building whisper.cpp was not permitted here; the test skips without whisper-cli/TTS; macOS CI installs `whisper-cpp` via Homebrew).
 - Performance targets (60 s Shorts ≤ 90 s cold / ≤ 20 s warm on Apple Silicon): measured only on this 4-core x86 container and recorded by `selftest --full`, not tuned.

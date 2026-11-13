@@ -166,6 +166,20 @@ pub fn captions(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, extras: &
         cw = load_caption_file(&f)?;
     }
     extras.srt = srt(&cw, &cuts);
+    if source == CaptionSource::Auto && cw.is_empty() && !crate::auto::speech_assets(p, l).is_empty() {
+        let why = match cutline_transcribe::whisper::available(&crate::auto::whisper_model()) {
+            Err(e) => format!("{e:#}"),
+            Ok(_) => "no words were recognized".into(),
+        };
+        extras.warnings.push(
+            cutline_core::Diagnostic::warning(
+                "W_CAPTIONS_NO_TRANSCRIPT",
+                "/captions",
+                format!("captions are `auto` but no transcript is available: {why}"),
+            )
+            .hint("run `cutline transcribe <file>` (or `cutline deps install whisper-model`), or set an asset `transcript`"),
+        );
+    }
     if source == CaptionSource::None || cw.is_empty() {
         return Ok(());
     }

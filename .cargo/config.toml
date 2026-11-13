@@ -1,2 +1,8 @@
 [alias]
 xtask = "run --package xtask --"
+
+[env]
+# macOS only (ignored elsewhere): the prebuilt ONNX Runtime used by the `onnx` feature is built
+# for macOS 13.4; without this the binary claims 11.0 and would crash on older systems.
+# An explicit MACOSX_DEPLOYMENT_TARGET in the environment still wins.
+MACOSX_DEPLOYMENT_TARGET = { value = "13.4", force = false }

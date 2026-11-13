@@ -65,21 +65,30 @@ pub fn assets_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets")
 }
 
-/// Locate a Chrome/Chromium/Edge executable for headless rendering.
+/// Locate a Chrome/Chromium/Edge executable for headless rendering (the first of
+/// [`chrome_candidates`]).
 pub fn find_chrome() -> Option<PathBuf> {
+    chrome_candidates().into_iter().next()
+}
+
+/// Every usable Chrome, in preference order: `CUTLINE_CHROME` (exclusively, when set), the
+/// installed headless shell, then system Chrome/Chromium/Edge. The renderer falls back along
+/// this list when a browser launches but never produces frames.
+pub fn chrome_candidates() -> Vec<PathBuf> {
     if let Some(p) = std::env::var_os("CUTLINE_CHROME") {
-        return Some(PathBuf::from(p));
+        return vec![PathBuf::from(p)];
     }
+    let mut cands: Vec<PathBuf> = vec![];
     let tools = tools_dir().join("chrome");
     if let Ok(cur) = std::fs::read_to_string(tools.join("current")) {
         let d = tools.join(cur.trim());
         for n in ["chrome-headless-shell", "chrome-headless-shell.exe"] {
             if let Some(p) = find_named(&d, n, 4) {
-                return Some(p);
+                cands.push(p);
+                break;
             }
         }
     }
-    let mut cands: Vec<PathBuf> = vec![];
     if cfg!(target_os = "macos") {
         cands.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into());
         cands.push("/Applications/Chromium.app/Contents/MacOS/Chromium".into());
@@ -98,7 +107,13 @@ pub fn find_chrome() -> Option<PathBuf> {
             cands.push(p);
         }
     }
-    cands.into_iter().find(|p| p.exists())
+    let mut out: Vec<PathBuf> = vec![];
+    for p in cands {
+        if p.exists() && !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
 }
 
 pub fn find_named(dir: &std::path::Path, name: &str, depth: u32) -> Option<PathBuf> {

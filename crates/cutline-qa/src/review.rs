@@ -26,10 +26,18 @@ pub struct ReviewReport {
     pub qa_ok: bool,
 }
 
-/// Grab one frame (seconds) from any media as RGB.
+/// Grab one frame (seconds) from any media as RGB. Still images have a single frame and any
+/// `-ss` (even 0) makes ffmpeg output nothing, so `t` is ignored for them.
 pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
-    let o = std::process::Command::new(&tc.ffmpeg)
-        .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", &format!("{:.6}", t.max(0.0)), "-i"])
+    let still =
+        cutline_core::timeline::default_kind_from_ext(&path.to_string_lossy()) == cutline_core::model::AssetKind::Image;
+    let mut cmd = std::process::Command::new(&tc.ffmpeg);
+    cmd.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
+    if !still {
+        cmd.args(["-ss", &format!("{:.6}", t.max(0.0))]);
+    }
+    let o = cmd
+        .arg("-i")
         .arg(path)
         .args(["-frames:v", "1", "-vf", cutline_testkit::analyze::CONV, "-f", "image2pipe", "-c:v", "png", "-"])
         .output()?;

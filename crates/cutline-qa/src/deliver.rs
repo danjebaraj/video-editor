@@ -21,6 +21,8 @@ pub struct ExportResult {
     pub qa: QaReport,
     pub exec: ExecReport,
     pub duration: f64,
+    /// Non-fatal plan findings (e.g. `W_REFRAME_NO_FACES`, `W_CAPTIONS_NO_TRANSCRIPT`).
+    pub diagnostics: Vec<cutline_core::Diagnostic>,
 }
 
 /// QA expectations derived from the edit.
@@ -163,6 +165,7 @@ fn finish(
         qa,
         exec,
         duration: plan.duration,
+        diagnostics: pr.diags.clone(),
     })
 }
 

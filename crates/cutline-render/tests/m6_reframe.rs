@@ -181,3 +181,33 @@ fn tracks_panned_face_with_yunet() {
         assert!((faces[0].cx() - 0.5).abs() < 0.15, "face at {:.2} of output width", faces[0].cx());
     }
 }
+
+/// A still image clip with `track_face`: the analysis must loop the single frame (ffmpeg
+/// yields no frames for `-ss`/`-t` on an image input), so faces are found and no fallback
+/// warning is emitted.
+#[test]
+fn tracks_face_on_still_image() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(_tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let face = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/face_armstrong.jpg");
+    std::fs::copy(&face, d.path().join("face.jpg")).unwrap();
+    let frames_seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let fs2 = frames_seen.clone();
+    cutline_reframe::set_detector_factory(Some(Box::new(move || {
+        let fs3 = fs2.clone();
+        Box::new(FnDetector::new("mock-still", move |_, _rgb, _w, _h| {
+            fs3.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            vec![Face { x: FACE_CX - 0.15, y: FACE_CY - 0.1, w: 0.3, h: 0.2, score: 0.95 }]
+        })) as Box<dyn Detector>
+    })));
+    let p = d.path().join("p.json5");
+    std::fs::write(&p, "{version: 1, name: 'st', target: 'shorts', assets: {img: {path: 'face.jpg'}}, main: [{id: 'c', clip: 'img', duration: 2, reframe: {mode: 'track_face'}}]}").unwrap();
+    let l = pipeline::load(&p).unwrap();
+    let (name, e) = pipeline::exports(&l.project).remove(0);
+    let pr = pipeline::prepare(&l, name, &e, false).unwrap();
+    cutline_reframe::set_detector_factory(None);
+    assert!(frames_seen.load(std::sync::atomic::Ordering::SeqCst) >= 6, "analysis decoded no frames");
+    assert!(!pr.diags.iter().any(|x| x.code == "W_REFRAME_NO_FACES"), "{:?}", pr.diags);
+    assert!(pr.extras.crop_paths.contains_key("c"), "no crop path for the still");
+}

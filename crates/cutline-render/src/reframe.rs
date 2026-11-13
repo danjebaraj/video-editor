@@ -26,14 +26,23 @@ pub fn analysis(l: &Loaded, c: &TClip) -> Result<Option<Analysis>> {
         m.fingerprint.as_bytes(),
         format!("{:.4}-{:.4}-{ANALYSIS_RATE}-{ANALYSIS_WIDTH}", c.src_in, c.src_out).as_bytes(),
         det.id().as_bytes(),
-        b"faces-v1",
+        b"faces-v2",
     ]);
     let cc = cache(l);
     if let Some(a) = cc.get_json::<Analysis>(&key) {
         return Ok(Some(a));
     }
     let tc = cutline_deps::toolchain()?;
-    let a = cutline_reframe::analyze(tc, &m.path, c.src_in, c.src_out, det.as_mut(), ANALYSIS_RATE, ANALYSIS_WIDTH)?;
+    let a = cutline_reframe::analyze(
+        tc,
+        &m.path,
+        c.src_in,
+        c.src_out,
+        c.kind == cutline_core::model::AssetKind::Image,
+        det.as_mut(),
+        ANALYSIS_RATE,
+        ANALYSIS_WIDTH,
+    )?;
     cc.put_json(&key, &a)?;
     Ok(Some(a))
 }
