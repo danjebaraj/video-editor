@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css">
+<style>
+  :root { --accent: #FFC400; --text: #FFFFFF; }
+  .lt { position: absolute; left: 6vw; bottom: 26vh; display: flex; align-items: stretch; gap: 1.4vmin;
+        animation: out .3s ease-in calc(var(--dur, 3s) - .3s) forwards; }
+  .bar { width: 1.3vmin; border-radius: 1vmin; background: var(--accent); transform-origin: bottom; animation: grow .35s cubic-bezier(.2,.9,.3,1) both; }
+  .txt { display: flex; flex-direction: column; justify-content: center; padding: .6vmin 1.4vmin; background: rgba(0,0,0,.45); border-radius: 1vmin;
+         animation: slide .45s cubic-bezier(.2,.9,.3,1) .1s both; }
+  .name { font-family: "Inter", sans-serif; font-weight: 800; color: var(--text); font-size: 5.6vmin; line-height: 1.1; }
+  .sub { font-family: "Inter", sans-serif; font-weight: 500; color: var(--text); opacity: .85; font-size: 3.4vmin; line-height: 1.2; }
+  @keyframes grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  @keyframes slide { from { transform: translateX(-30%); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes out { to { opacity: 0; transform: translateX(-10%); } }
+</style></head>
+<body><div class="lt"><div class="bar"></div><div class="txt"><div class="name" id="n"></div><div class="sub" id="s"></div></div></div>
+<script>
+  const p = window.__cutline_params || {};
+  const root = document.documentElement.style;
+  if (p.accent) root.setProperty('--accent', p.accent);
+  if (p.color) root.setProperty('--text', p.color);
+  if (p.duration) root.setProperty('--dur', p.duration + 's');
+  if (p.vertical === false) document.querySelector('.lt').style.bottom = '12vh';
+  document.getElementById('n').textContent = p.text || '';
+  document.getElementById('s').textContent = p.subtitle || '';
+  if (!p.subtitle) document.getElementById('s').remove();
+</script></body></html>

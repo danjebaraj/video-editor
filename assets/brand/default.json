@@ -1,0 +1,20 @@
+{
+  "name": "default",
+  "fonts": { "title": "Anton", "body": "Inter", "caption": "Poppins ExtraBold" },
+  "colors": {
+    "primary": "#FFFFFF",
+    "accent": "#FFC400",
+    "text": "#FFFFFF",
+    "stroke": "#000000",
+    "background": "#101014"
+  },
+  "logo": null,
+  "caption_style": "bold_pop",
+  "lower_third": "lower_third",
+  "intro": null,
+  "outro": null,
+  "sfx": { "whoosh": null, "pop": null, "ding": null, "riser": null },
+  "lut": null,
+  "watermark_position": "top_right",
+  "dictionary": {}
+}

@@ -1,0 +1,30 @@
+[package]
+name = "cutline-reframe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+cutline-core = { version = "0.1.0", path = "../cutline-core" }
+cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+cutline-media = { version = "0.1.0", path = "../cutline-media" }
+ort = { version = "=2.0.0-rc.15", optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tracing = "0.1.44"
+
+[features]
+# YuNet face detection through ONNX Runtime (downloads the runtime at build time).
+onnx = ["dep:ort"]
+
+[lints]
+workspace = true
+
+
+[dev-dependencies]
+cutline-testkit = { path = "../cutline-testkit" }
+image = "0.25.6"
+tempfile = "3.27.0"

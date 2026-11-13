@@ -1,0 +1,2904 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Project",
+  "type": "object",
+  "properties": {
+    "assets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Asset"
+      },
+      "default": {}
+    },
+    "audio": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AudioSettings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "auto": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AutoDirectives"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "brand": {
+      "description": "Brand file path (relative to the project) or `default` for the bundled brand.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "captions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Captions"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "default_reframe": {
+      "description": "Default geometry for clips whose aspect differs from the target (default `cover`).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Reframe"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "exports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Export"
+      }
+    },
+    "fps": {
+      "description": "Timeline fps. Defaults from the target (long-form targets follow the first clip's source).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Fps"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "height": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Layer"
+      }
+    },
+    "main": {
+      "description": "Main storyline: clips, with transitions between them.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MainItem"
+      }
+    },
+    "markers": {
+      "description": "Chapter markers (long form).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Marker"
+      }
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "safe_zone": {
+      "description": "Override the target's safe zone.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SafeZone"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target": {
+      "description": "Output target preset (geometry, fps, encoder, safe zones).",
+      "$ref": "#/$defs/TargetName",
+      "default": "shorts"
+    },
+    "version": {
+      "description": "Schema version. Must be 1.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "width": {
+      "description": "Width/height for `target: custom`.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "$defs": {
+    "Anim": {
+      "type": "string",
+      "enum": [
+        "none",
+        "fade",
+        "slide_left",
+        "slide_right",
+        "slide_up",
+        "slide_down",
+        "pop",
+        "scale_in"
+      ]
+    },
+    "Asset": {
+      "type": "object",
+      "properties": {
+        "alpha": {
+          "description": "Asset is expected to carry alpha (validated against probe).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "duration": {
+          "description": "Duration for HTML/Lottie/SVG/still assets.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fps": {
+          "description": "Frame rate for image sequences / HTML renders.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fps"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "kind": {
+          "description": "Auto-detected from ffprobe and the extension when omitted.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "params": {
+          "description": "Parameters injected into HTML templates as `window.__cutline_params`."
+        },
+        "path": {
+          "description": "Path relative to the project file. Image sequences use a printf pattern (`frames/%05d.png`).",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Role"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "synthetic": {
+          "description": "Mark this asset as AI-generated (affects the publishing checklist).",
+          "type": "boolean"
+        },
+        "transcript": {
+          "description": "Transcript for this asset: Scribe JSON or cutline transcript JSON (relative path).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "description": "Render size for HTML/SVG/Lottie (defaults to the target size).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "AssetKind": {
+      "type": "string",
+      "enum": [
+        "video",
+        "image",
+        "audio",
+        "image_sequence",
+        "html",
+        "lottie",
+        "svg"
+      ]
+    },
+    "AudioSettings": {
+      "type": "object",
+      "properties": {
+        "dialogue_chain": {
+          "description": "Chain applied to dialogue (main clip audio); default same as voice_chain.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duck": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duck"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loudness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LoudnessTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "micro_fade": {
+          "description": "Micro-fade length at cuts in seconds (default 0.01).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "voice_chain": {
+          "description": "clean_voice | podcast_warm | raw — applied to voice (VO) assets.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AutoDirectives": {
+      "type": "object",
+      "properties": {
+        "jump_cuts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JumpCuts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "punch_ins": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PunchIns"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remove_fillers": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoveFillers"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sfx_on_transitions": {
+          "description": "SFX asset/alias auto-placed on every transition.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "CaptionSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "none"
+          ]
+        },
+        {
+          "description": "Transcribe / import transcripts and map words through the edit.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Use `file` (SRT or cutline transcript JSON in timeline time).",
+          "type": "string",
+          "const": "file"
+        }
+      ]
+    },
+    "Captions": {
+      "type": "object",
+      "properties": {
+        "accent_color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assets": {
+          "description": "Asset ids whose transcripts feed captions (default: all clip assets + voice layers).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "corrections": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "emoji": {
+          "description": "Emoji to append to emphasis words (word → emoji name).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "emphasis": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lang": {
+          "description": "Language for transcription (e.g. `en`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_chars_per_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_lines": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_words_per_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "position": {
+          "description": "lower_mid (default) | center | upper_mid | bottom | top, or {x, y}",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "size": {
+          "description": "Font size in px at the output resolution.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "source": {
+          "$ref": "#/$defs/CaptionSource",
+          "default": "auto"
+        },
+        "style": {
+          "description": "bold_pop | karaoke | word_by_word | clean_sentence | boxed",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uppercase": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Clip": {
+      "type": "object",
+      "properties": {
+        "audio": {
+          "description": "Clip audio: keep (default), mute, duck (−12 dB), or an asset id replacing it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chapter": {
+          "description": "Chapter title (long form); defaults to the clip id when the clip starts a chapter.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clip": {
+          "description": "Asset id.",
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorGrade"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duration": {
+          "description": "Timeline duration for stills / generated assets.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        },
+        "gain_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "generated_by": {
+          "description": "Set by `auto` expansion (e.g. `jump_cuts`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Unique id (used for anchors, chapters, review output).",
+          "type": "string"
+        },
+        "in": {
+          "description": "Source in point (default 0).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "out": {
+          "description": "Source out point (default: end of the asset).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reframe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reframe"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reverse": {
+          "description": "Play the clip backwards (short clips only).",
+          "type": "boolean"
+        },
+        "speed": {
+          "description": "Constant speed factor 0.25–4.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "speed_ramp": {
+          "description": "Keyframed speed curve (overrides `speed`).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpeedKey"
+          }
+        },
+        "stabilize": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Stabilize"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "clip"
+      ]
+    },
+    "ColorGrade": {
+      "type": "object",
+      "properties": {
+        "contrast": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "exposure": {
+          "description": "Stops (−2..2).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "intensity": {
+          "description": "LUT blend 0..1 (default 1).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "lut": {
+          "description": "Bundled LUT name or a `.cube` path relative to the project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preset": {
+          "description": "natural | punchy | warm_film | cool_clean | bw_contrast",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "saturation": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "sharpen": {
+          "description": "unsharp amount 0..2.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "temperature": {
+          "description": "Kelvin (e.g. 5500 warm … 7500 cool); 6500 is neutral.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "tint": {
+          "description": "Green/magenta −1..1.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Duck": {
+      "type": "object",
+      "properties": {
+        "amount_db": {
+          "type": "number",
+          "format": "double",
+          "default": -12.0
+        },
+        "attack": {
+          "type": "number",
+          "format": "double",
+          "default": 0.12
+        },
+        "mode": {
+          "description": "envelope (default) | sidechain",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "release": {
+          "type": "number",
+          "format": "double",
+          "default": 0.45
+        },
+        "target": {
+          "description": "Roles that get ducked.",
+          "type": "array",
+          "default": [
+            "music"
+          ],
+          "items": {
+            "$ref": "#/$defs/Role"
+          }
+        },
+        "under": {
+          "description": "Roles whose speech triggers ducking.",
+          "type": "array",
+          "default": [
+            "voice",
+            "dialogue"
+          ],
+          "items": {
+            "$ref": "#/$defs/Role"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Ease": {
+      "description": "Easing curves.",
+      "type": "string",
+      "enum": [
+        "linear",
+        "in_quad",
+        "out_quad",
+        "in_out_quad",
+        "in_cubic",
+        "out_cubic",
+        "in_out_cubic",
+        "in_expo",
+        "out_expo",
+        "in_out_expo",
+        "back",
+        "spring"
+      ]
+    },
+    "Effect": {
+      "oneOf": [
+        {
+          "description": "Quick zoom in at `at` (clip-relative seconds), holding until `hold` ends, then optionally out.",
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number",
+              "format": "double"
+            },
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.25
+            },
+            "ease": {
+              "$ref": "#/$defs/Ease",
+              "default": "out_cubic"
+            },
+            "focus": {
+              "description": "Zoom focus point in output-normalized coordinates (default center).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "hold": {
+              "description": "Seconds to hold the zoom (default: until clip end).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "scale": {
+              "type": "number",
+              "format": "double",
+              "default": 1.15
+            },
+            "type": {
+              "type": "string",
+              "const": "punch_in"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "at"
+          ]
+        },
+        {
+          "description": "Continuous zoom from→to across [start, end] (clip-relative).",
+          "type": "object",
+          "properties": {
+            "ease": {
+              "$ref": "#/$defs/Ease",
+              "default": "out_cubic"
+            },
+            "end": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "focus": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "from": {
+              "type": "number",
+              "format": "double",
+              "default": 1.0
+            },
+            "start": {
+              "type": "number",
+              "format": "double",
+              "default": 0.0
+            },
+            "to": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "zoom"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "to"
+          ]
+        },
+        {
+          "description": "Slow pan+zoom (stills and B-roll).",
+          "type": "object",
+          "properties": {
+            "ease": {
+              "$ref": "#/$defs/Ease",
+              "default": "out_cubic"
+            },
+            "from": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "from_scale": {
+              "type": "number",
+              "format": "double",
+              "default": 1.0
+            },
+            "to": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "to_scale": {
+              "type": "number",
+              "format": "double",
+              "default": 1.15
+            },
+            "type": {
+              "type": "string",
+              "const": "ken_burns"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number",
+              "format": "double"
+            },
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.3
+            },
+            "intensity": {
+              "type": "number",
+              "format": "double",
+              "default": 0.02
+            },
+            "type": {
+              "type": "string",
+              "const": "shake"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "at"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number",
+              "format": "double"
+            },
+            "color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.15
+            },
+            "type": {
+              "type": "string",
+              "const": "flash"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "at"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.4
+            },
+            "type": {
+              "type": "string",
+              "const": "blur_in"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "amount": {
+              "type": "number",
+              "format": "double",
+              "default": 12.0
+            },
+            "at": {
+              "type": "number",
+              "format": "double"
+            },
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.15
+            },
+            "type": {
+              "type": "string",
+              "const": "glitch"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "at"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "strength": {
+              "type": "number",
+              "format": "double",
+              "default": 0.4
+            },
+            "type": {
+              "type": "string",
+              "const": "vignette"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number",
+              "format": "double"
+            },
+            "duration": {
+              "type": "number",
+              "format": "double",
+              "default": 0.15
+            },
+            "type": {
+              "type": "string",
+              "const": "motion_blur"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "at"
+          ]
+        },
+        {
+          "description": "Hold the frame at `at` (clip-relative) for `duration` seconds (extends the clip).",
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number",
+              "format": "double"
+            },
+            "duration": {
+              "type": "number",
+              "format": "double"
+            },
+            "type": {
+              "type": "string",
+              "const": "freeze"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "at",
+            "duration"
+          ]
+        }
+      ]
+    },
+    "Export": {
+      "type": "object",
+      "properties": {
+        "crf": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "fps": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fps"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "name": {
+          "description": "Export name (used in the output file name). Defaults to the target name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "out": {
+          "description": "Output path (relative to the project). Default `out/<name>.mp4`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/TargetName",
+          "default": "shorts"
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Fit": {
+      "type": "string",
+      "enum": [
+        "cover",
+        "contain",
+        "stretch"
+      ]
+    },
+    "Fps": {
+      "description": "Frames per second: number (30, 29.97) or rational string \"30000/1001\".",
+      "oneOf": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "JumpCuts": {
+      "type": "object",
+      "properties": {
+        "applies_to": {
+          "description": "Asset ids (default: all clip assets).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "keep_padding": {
+          "type": "number",
+          "format": "double",
+          "default": 0.08
+        },
+        "min_silence": {
+          "type": "number",
+          "format": "double",
+          "default": 0.35
+        },
+        "noise_db": {
+          "description": "silencedetect noise floor in dB (default −35).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Layer": {
+      "oneOf": [
+        {
+          "description": "Text template (hook_title, lower_third, callout, step_counter, big_number, quote,\ncta_subscribe, end_card, emoji_pop).",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "anim_duration": {
+              "description": "Enter/exit animation duration (default 0.3 s).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border": {
+              "description": "Border width (px) and color.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border_color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Fit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "opacity": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "params": {
+              "description": "Template parameters (colors, font, size, emphasis, …).",
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true
+            },
+            "position": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radius": {
+              "description": "Corner radius in output pixels (PiP).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rotation": {
+              "description": "Degrees clockwise.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "scale": {
+              "description": "Width as a fraction of the frame width (1 = full width).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "shadow": {
+              "type": "boolean"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "subtitle": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "template": {
+              "type": "string"
+            },
+            "text": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "text"
+            },
+            "z": {
+              "description": "Stacking order (higher = on top). Default: order in `layers`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          "required": [
+            "type",
+            "template"
+          ]
+        },
+        {
+          "description": "Alpha or opaque video overlay.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "anim_duration": {
+              "description": "Enter/exit animation duration (default 0.3 s).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "asset": {
+              "type": "string"
+            },
+            "audio": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "border": {
+              "description": "Border width (px) and color.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border_color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Fit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "gain_db": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "opacity": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "position": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radius": {
+              "description": "Corner radius in output pixels (PiP).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rotation": {
+              "description": "Degrees clockwise.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "scale": {
+              "description": "Width as a fraction of the frame width (1 = full width).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "shadow": {
+              "type": "boolean"
+            },
+            "src_in": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "src_out": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "video"
+            },
+            "z": {
+              "description": "Stacking order (higher = on top). Default: order in `layers`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
+          "description": "B-roll (full-frame cover by default, or PiP with scale/position).",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "anim_duration": {
+              "description": "Enter/exit animation duration (default 0.3 s).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "asset": {
+              "type": "string"
+            },
+            "audio": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "border": {
+              "description": "Border width (px) and color.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border_color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Fit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "gain_db": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "ken_burns": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "opacity": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "position": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radius": {
+              "description": "Corner radius in output pixels (PiP).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rotation": {
+              "description": "Degrees clockwise.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "scale": {
+              "description": "Width as a fraction of the frame width (1 = full width).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "shadow": {
+              "type": "boolean"
+            },
+            "src_in": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "src_out": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "broll"
+            },
+            "z": {
+              "description": "Stacking order (higher = on top). Default: order in `layers`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
+          "description": "Timing shared by all layers.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "anim_duration": {
+              "description": "Enter/exit animation duration (default 0.3 s).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "asset": {
+              "type": "string"
+            },
+            "border": {
+              "description": "Border width (px) and color.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border_color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Fit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ken_burns": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "opacity": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "position": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radius": {
+              "description": "Corner radius in output pixels (PiP).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rotation": {
+              "description": "Degrees clockwise.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "scale": {
+              "description": "Width as a fraction of the frame width (1 = full width).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "shadow": {
+              "type": "boolean"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "image"
+            },
+            "z": {
+              "description": "Stacking order (higher = on top). Default: order in `layers`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
+          "description": "HTML/Lottie/SVG asset rendered via headless Chrome.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "anim_duration": {
+              "description": "Enter/exit animation duration (default 0.3 s).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "asset": {
+              "type": "string"
+            },
+            "border": {
+              "description": "Border width (px) and color.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border_color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "exit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Anim"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Fit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "opacity": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "position": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "radius": {
+              "description": "Corner radius in output pixels (PiP).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rotation": {
+              "description": "Degrees clockwise.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "scale": {
+              "description": "Width as a fraction of the frame width (1 = full width).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "shadow": {
+              "type": "boolean"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "html"
+            },
+            "z": {
+              "description": "Stacking order (higher = on top). Default: order in `layers`.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
+          "description": "Retention progress bar.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "edge": {
+              "description": "top (default) | bottom",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "description": "Height in px (default 12 for shorts, 8 otherwise).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "style": {
+              "description": "`brand` or a color.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "progress_bar"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Music / VO bed.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "asset": {
+              "type": "string"
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fade_in": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "fade_out": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "gain_db": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "loop": {
+              "description": "Loop the asset to fill the span.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "role": {
+              "description": "Override the asset role (voice/music/sfx).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Role"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "src_in": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "audio"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
+          "description": "One-shot sound effect at `at` (or anchored).",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "asset": {
+              "description": "Asset id, brand SFX alias, or a list to pick from deterministically.",
+              "type": "string"
+            },
+            "at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "gain_db": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offset": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "pick_from": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "type": {
+              "type": "string",
+              "const": "sfx"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        }
+      ]
+    },
+    "LoudnessTarget": {
+      "type": "object",
+      "properties": {
+        "integrated": {
+          "type": "number",
+          "format": "double",
+          "default": -14.0
+        },
+        "lra": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "true_peak": {
+          "type": "number",
+          "format": "double",
+          "default": -1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "MainItem": {
+      "description": "An element of `main`: either a clip or `{transition: {...}}` between two clips.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TransitionItem"
+        },
+        {
+          "$ref": "#/$defs/Clip"
+        }
+      ]
+    },
+    "Marker": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/TimeValue"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "title"
+      ]
+    },
+    "Point": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "Position": {
+      "description": "Position: a preset name or normalized center coordinates.",
+      "anyOf": [
+        {
+          "description": "center | top | bottom | left | right | top_left | top_right | bottom_left | bottom_right |\nlower_mid | upper_mid",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Point"
+        }
+      ]
+    },
+    "PunchIns": {
+      "type": "object",
+      "properties": {
+        "duration": {
+          "type": "number",
+          "format": "double",
+          "default": 0.25
+        },
+        "every": {
+          "type": "number",
+          "format": "double",
+          "default": 4.0
+        },
+        "scale": {
+          "description": "[min, max] scale; alternates between them.",
+          "type": "array",
+          "default": [
+            1.08,
+            1.15
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "skip_if_other_motion": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "Rect": {
+      "type": "object",
+      "properties": {
+        "h": {
+          "type": "number",
+          "format": "double"
+        },
+        "w": {
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ]
+    },
+    "Reframe": {
+      "type": "object",
+      "properties": {
+        "bias": {
+          "description": "Where the subject should sit in the output (default x=0.5, y=0.38).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Point"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fallback": {
+          "description": "Fallback when no faces are found (default fit_blur).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReframeMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keys": {
+          "description": "Manual keys: crop center (x, y in 0..1 of source) and zoom (1 = largest crop).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReframeKey"
+          }
+        },
+        "max_pan_speed": {
+          "description": "Max pan speed in fractions of the frame width per second.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "mode": {
+          "$ref": "#/$defs/ReframeMode",
+          "default": "cover"
+        },
+        "pad_color": {
+          "description": "fit_pad color (default brand background).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "regions": {
+          "description": "Split layout regions (source-normalized rectangles), top then bottom.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Rect"
+          }
+        },
+        "subject": {
+          "description": "largest | most_persistent | left | right | index | speaker (experimental)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReframeKey": {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        },
+        "zoom": {
+          "type": "number",
+          "format": "double",
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "t",
+        "x",
+        "y"
+      ]
+    },
+    "ReframeMode": {
+      "oneOf": [
+        {
+          "description": "Scale to cover and center-crop.",
+          "type": "string",
+          "const": "cover"
+        },
+        {
+          "description": "Alias of cover.",
+          "type": "string",
+          "const": "center"
+        },
+        {
+          "description": "Fit inside with a blurred, scaled copy as background.",
+          "type": "string",
+          "const": "fit_blur"
+        },
+        {
+          "description": "Fit inside, pad with the brand background color.",
+          "type": "string",
+          "const": "fit_pad"
+        },
+        {
+          "description": "Follow the detected face.",
+          "type": "string",
+          "const": "track_face"
+        },
+        {
+          "description": "Keyframed crop rectangle.",
+          "type": "string",
+          "const": "manual"
+        },
+        {
+          "description": "Two regions stacked vertically.",
+          "type": "string",
+          "const": "split"
+        }
+      ]
+    },
+    "RemoveFillers": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "words": {
+          "type": "array",
+          "default": [
+            "um",
+            "uh",
+            "erm",
+            "uhm",
+            "hmm"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Role": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "music",
+            "sfx"
+          ]
+        },
+        {
+          "description": "Main clip audio.",
+          "type": "string",
+          "const": "dialogue"
+        },
+        {
+          "description": "Voice-over.",
+          "type": "string",
+          "const": "voice"
+        }
+      ]
+    },
+    "SafeZone": {
+      "type": "object",
+      "properties": {
+        "bottom": {
+          "type": "number",
+          "format": "double"
+        },
+        "left": {
+          "type": "number",
+          "format": "double"
+        },
+        "right": {
+          "type": "number",
+          "format": "double"
+        },
+        "top": {
+          "description": "Fractions of the frame kept clear.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "top",
+        "bottom",
+        "left",
+        "right"
+      ]
+    },
+    "SpeedKey": {
+      "type": "object",
+      "properties": {
+        "speed": {
+          "type": "number",
+          "format": "double"
+        },
+        "t": {
+          "description": "Source-relative time (seconds from the clip's in point).",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "t",
+        "speed"
+      ]
+    },
+    "Stabilize": {
+      "type": "object",
+      "properties": {
+        "strength": {
+          "type": "number",
+          "format": "double",
+          "default": 0.5
+        }
+      },
+      "additionalProperties": false
+    },
+    "TargetName": {
+      "type": "string",
+      "enum": [
+        "shorts",
+        "long_1080p",
+        "long_4k",
+        "square",
+        "custom"
+      ]
+    },
+    "TimeValue": {
+      "description": "Seconds (number), timecode string \"mm:ss.mmm\" / \"hh:mm:ss.mmm\", frames \"f:N\", or \"end\".",
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^(end|f:\\d+|(\\d+:){0,2}\\d+(\\.\\d+)?)$"
+        }
+      ]
+    },
+    "Transition": {
+      "type": "object",
+      "properties": {
+        "audio": {
+          "description": "Audio behaviour: crossfade (default) or cut (hard cut with micro-fades).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TransitionAudio"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "color": {
+          "description": "Flash/fill color for flash_cut and similar.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "curve": {
+          "description": "acrossfade curve (tri, qsin, exp, …).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration": {
+          "description": "Seconds.",
+          "type": "number",
+          "format": "double"
+        },
+        "generated_by": {
+          "description": "Set by `auto` expansion.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sfx": {
+          "description": "SFX asset id or brand alias played at the transition midpoint.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sfx_gain_db": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "type": {
+          "description": "xfade name (fade, wipeleft, slideup, circleopen, …) or custom: whip_left/right/up/down,\nzoom_punch, flash_cut, glitch, cut.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "duration"
+      ]
+    },
+    "TransitionAudio": {
+      "type": "string",
+      "enum": [
+        "crossfade",
+        "cut"
+      ]
+    },
+    "TransitionItem": {
+      "type": "object",
+      "properties": {
+        "transition": {
+          "$ref": "#/$defs/Transition"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "transition"
+      ]
+    }
+  }
+}

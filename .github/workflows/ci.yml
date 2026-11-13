@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CUTLINE_HOME: ${{ github.workspace }}/.cutline-home
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # Apple Silicon
+            allow_fail: false
+          - os: windows-latest
+            allow_fail: true      # until M9 is green
+          - os: ubuntu-latest     # dev platform
+            allow_fail: false
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.allow_fail }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install ffmpeg (pinned static build)
+        run: cargo run -q -p cutline-cli -- deps install ffmpeg
+      - name: whisper.cpp + base.en model (macOS speech tests)
+        if: runner.os == 'macOS'
+        run: |
+          brew install whisper-cpp
+          cargo run -q -p cutline-cli -- deps install whisper-model base.en
+      - name: Face model (reframe tests with the onnx feature)
+        run: cargo run -q -p cutline-cli -- deps install face-model
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
+      - run: cargo run -q -p cutline-cli --features onnx -- selftest --quick
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources

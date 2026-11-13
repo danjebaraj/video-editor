@@ -1,0 +1,23 @@
+[package]
+name = "cutline-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+image = "0.25.6"
+rustfft = "6.4.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tracing = "0.1.44"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+cutline-media = { path = "../cutline-media" }
+tempfile = "3.27.0"

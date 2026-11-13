@@ -1,0 +1,19 @@
+[package]
+name = "cutline-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ab_glyph = "0.2.32"
+anyhow = "1.0.104"
+cutline-core = { version = "0.1.0", path = "../cutline-core" }
+cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+ttf-parser = "0.25.1"
+
+[lints]
+workspace = true

@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "ffmpeg",
+      "version": "9.0.2",
+      "platform": "linux-arm64",
+      "url": "https://ffmpeg.martin-riedl.de/download/linux/arm64/1789931697_9.0.2/ffmpeg.zip",
+      "sha256": "93a76ae90db5474eecdf951a729857c64f3de23567228d6a7d5e6e8e3cd1021b",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffmpeg",
+      "version": "9.0.2",
+      "platform": "linux-x86_64",
+      "url": "https://ffmpeg.martin-riedl.de/download/linux/amd64/1789931100_9.0.2/ffmpeg.zip",
+      "sha256": "fa8ecf4abbd290d98f7d188b8649cc6b391ae209a98452be955a15aab1909d7f",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffmpeg",
+      "version": "9.0.2",
+      "platform": "macos-arm64",
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffmpeg.zip",
+      "sha256": "c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffmpeg",
+      "version": "9.0.2",
+      "platform": "macos-x86_64",
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip",
+      "sha256": "7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffprobe",
+      "version": "9.0.2",
+      "platform": "linux-arm64",
+      "url": "https://ffmpeg.martin-riedl.de/download/linux/arm64/1789931697_9.0.2/ffprobe.zip",
+      "sha256": "bcbe80fb741c180083327afaf5434812e006b33cacde2016b9aeaf6936128330",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffprobe",
+      "version": "9.0.2",
+      "platform": "linux-x86_64",
+      "url": "https://ffmpeg.martin-riedl.de/download/linux/amd64/1789931100_9.0.2/ffprobe.zip",
+      "sha256": "3f428c49070be3d24ec338602b76d412e401ffcb8a5641ef0e729181a232fc32",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffprobe",
+      "version": "9.0.2",
+      "platform": "macos-arm64",
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2/ffprobe.zip",
+      "sha256": "fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffprobe",
+      "version": "9.0.2",
+      "platform": "macos-x86_64",
+      "url": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffprobe.zip",
+      "sha256": "2322438ed2f6319a691291b247d09c69dcaa3a982460d1f269a7e1af335cfdfd",
+      "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    }
+  ]
+}
