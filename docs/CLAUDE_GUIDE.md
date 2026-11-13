@@ -92,6 +92,10 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ## Audio
 
+- Music under narration: set `audio.music_level: 18` instead of guessing `gain_db`, and put
+  `align: "end"` (with a `fade_in`) on the music layer so the track's real ending closes the
+  video rather than a fade-out mid-phrase.
+
 - Roles: `dialogue` (clip audio), `voice` (VO assets), `music`, `sfx`. Voice/dialogue chain
   `clean_voice` by default (`podcast_warm`, `raw` available).
 - Loudness: two-pass normalization to −14 LUFS / −1 dBTP by default (`audio.loudness`).

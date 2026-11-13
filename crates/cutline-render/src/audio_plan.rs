@@ -49,6 +49,8 @@ pub struct AudioPlan {
     /// (integrated LUFS, true peak dBTP, LRA)
     pub loudness: Option<(f64, f64, f64)>,
     pub duration: f64,
+    /// `audio.music_level`: LU the ducked music sits below the voice (measured and applied).
+    pub music_level: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -61,6 +63,9 @@ pub struct LoudnessResult {
     pub encoded_tp: f64,
     pub output_lra: f64,
     pub correction_db: f64,
+    /// Gain applied to the music stem for `music_level` (dB).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub music_gain_db: Option<f64>,
     pub speech_spans: usize,
     pub speech_source: String,
 }
@@ -435,6 +440,7 @@ pub fn plan(
         final_wav,
         loudness: loud,
         duration: dur,
+        music_level: a.music_level,
     })
 }
 
@@ -475,6 +481,10 @@ pub fn execute(tc: &Toolchain, a: &AudioPlan) -> Result<Option<LoudnessResult>> 
             wav::write_f32(&a.env_wav, &env, ENV_RATE, 1)?;
         }
     }
+    let music_gain_db = match a.music_level {
+        Some(level) => set_music_level(tc, a, level)?,
+        None => None,
+    };
     a.mix_job.run(tc)?;
     let Some((i, tp, lra)) = a.loudness else { return Ok(None) };
     // pass 1
@@ -530,9 +540,28 @@ pub fn execute(tc: &Toolchain, a: &AudioPlan) -> Result<Option<LoudnessResult>> 
         encoded_tp,
         output_lra: out_meas.lra,
         correction_db: correction,
+        music_gain_db,
         speech_spans: spans.len(),
         speech_source: src,
     }))
+}
+
+/// Scale the music stem so the ducked music sits `level` LU below the voice (the measure review
+/// reports: music + duck amount − voice). Returns the gain applied, or `None` without both stems.
+fn set_music_level(tc: &Toolchain, a: &AudioPlan, level: f64) -> Result<Option<f64>> {
+    let voice = ["voice", "dialogue"].iter().filter_map(|r| a.stems.get(*r)).find(|p| p.exists());
+    let (Some(v), Some(m)) = (voice, a.stems.get("music").filter(|p| p.exists())) else { return Ok(None) };
+    let lv = cutline_media::probe::measure_loudness(tc, v).context("measuring the voice stem")?;
+    let lm = cutline_media::probe::measure_loudness(tc, m).context("measuring the music stem")?;
+    if lv.integrated_lufs < -60.0 || lm.integrated_lufs < -60.0 {
+        return Ok(None); // silent stem: nothing to balance
+    }
+    let duck = a.duck.as_ref().filter(|d| !d.sidechain).map(|d| d.params.amount_db).unwrap_or(0.0);
+    let gain = (lv.integrated_lufs - level - (lm.integrated_lufs + duck)).clamp(-40.0, 20.0);
+    let tmp = m.with_extension("level.wav");
+    run_af(tc, m, &format!("volume={}dB", f(gain)), Some(&tmp))?;
+    std::fs::rename(&tmp, m)?;
+    Ok(Some(gain))
 }
 
 /// True peak (dBTP) of `wav` after encoding it the way the final mux does.

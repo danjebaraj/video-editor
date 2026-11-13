@@ -817,6 +817,10 @@ pub enum Layer {
         /// Loop the asset to fill the span.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         r#loop: Option<bool>,
+        /// `end`: backtime so the music's real ending lands on the layer end (default: the
+        /// timeline end), instead of fading out mid-phrase.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        align: Option<AudioAlign>,
         /// Override the asset role (voice/music/sfx).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<Role>,
@@ -1000,6 +1004,19 @@ pub struct AudioSettings {
     /// Micro-fade length at cuts in seconds (default 0.01).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub micro_fade: Option<f64>,
+    /// How far the music sits below the voice, in LU, while ducked (e.g. 18). The music gain
+    /// is measured and set at render time, replacing trial-and-error with `gain_db`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music_level: Option<f64>,
+}
+
+/// How an audio layer's asset lines up with the layer span.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioAlign {
+    /// Backtime: the asset's own ending lands on the layer's end (the start is trimmed, or
+    /// the layer starts later when the asset is shorter).
+    End,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]

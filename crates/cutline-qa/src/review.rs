@@ -434,8 +434,13 @@ pub fn suggestions(
         {
             let duck = audio.duck.as_ref().filter(|d| !d.sidechain).map(|d| d.params.amount_db).unwrap_or(0.0);
             let diff = lm.integrated_lufs + duck - lv.integrated_lufs;
-            if lv.integrated_lufs > -60.0 && diff > -18.0 {
-                s.push(format!("Music is only {:.1} LU below the voice under ducking (aim for ≤ −18 LU): lower the music gain_db or increase duck.amount_db.", -diff));
+            // with music_level set the mix was balanced to it; allow measurement slack
+            let (aim, slack) = match audio.music_level {
+                Some(l) => (l, 1.0),
+                None => (18.0, 0.0),
+            };
+            if lv.integrated_lufs > -60.0 && diff > -aim + slack {
+                s.push(format!("Music is only {:.1} LU below the voice under ducking (aim for ≤ −{aim:.0} LU): set audio.music_level, lower the music gain_db or increase duck.amount_db.", -diff));
             }
         }
     }

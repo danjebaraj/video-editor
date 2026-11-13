@@ -302,6 +302,16 @@
         "svg"
       ]
     },
+    "AudioAlign": {
+      "description": "How an audio layer's asset lines up with the layer span.",
+      "oneOf": [
+        {
+          "description": "Backtime: the asset's own ending lands on the layer's end (the start is trimmed, or\nthe layer starts later when the asset is shorter).",
+          "type": "string",
+          "const": "end"
+        }
+      ]
+    },
     "AudioSettings": {
       "type": "object",
       "properties": {
@@ -334,6 +344,14 @@
         },
         "micro_fade": {
           "description": "Micro-fade length at cuts in seconds (default 0.01).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "music_level": {
+          "description": "How far the music sits below the voice, in LU, while ducked (e.g. 18). The music gain\nis measured and set at render time, replacing trial-and-error with `gain_db`.",
           "type": [
             "number",
             "null"
@@ -2408,6 +2426,17 @@
           "description": "Music / VO bed.",
           "type": "object",
           "properties": {
+            "align": {
+              "description": "`end`: backtime so the music's real ending lands on the layer end (default: the\ntimeline end), instead of fading out mid-phrase.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AudioAlign"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "anchor": {
               "description": "Main clip id this layer follows.",
               "type": [

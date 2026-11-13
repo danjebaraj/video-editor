@@ -148,7 +148,7 @@ others until the end. Visual layers take: `position` (preset `center`, `top`, `b
 | `image` | `asset`, `ken_burns` |
 | `html` | `asset` (HTML/SVG/Lottie) |
 | `progress_bar` | `style` (`brand` or color), `edge` (top/bottom), `height` |
-| `audio` | `asset`, `src_in`, `gain_db`, `fade_in`, `fade_out`, `loop`, `role` |
+| `audio` | `asset`, `src_in`, `gain_db`, `fade_in`, `fade_out`, `loop`, `role`, `align` (`end`: backtime so the asset's own ending lands on the layer end — default the timeline end; the head is trimmed, or a shorter asset starts later; not with `src_in`/`loop`) |
 | `sfx` | `asset` (or brand alias), `at` or `anchor`+`offset`, `gain_db`, `pick_from` |
 | `mask` | `rect` `{x, y, w, h}` (fractions of the frame), `mode` (`blur` default, `pixelate`, `fill`), `color` (fill, default `#000000`), `strength` (default 1), `text` (replacement text, Inter), `text_color` (`#9AA0A6`), `text_size` (px at full size; default 60 % of the rect height). Hides part of the frame over the footage and overlays, under text and captions; until the end by default. Use `fill` for secrets: blurred or pixelated text can sometimes be recovered |
 
@@ -179,6 +179,9 @@ Text templates: `hook_title`, `lower_third`, `callout`, `step_counter`, `big_num
 `loudness` `{integrated: -14, true_peak: -1.0, lra}`, `voice_chain` (`clean_voice`),
 `dialogue_chain` (= voice_chain), `duck` `{under: [voice, dialogue], target: [music],
 amount_db: -12, attack: 0.12, release: 0.45, mode: "envelope"|"sidechain"}`, `micro_fade` 0.01.
+`music_level` (LU, 3–40): the music stem's gain is measured and set so the ducked music sits
+this far below the voice (`render_report.json` → `loudness.music_gain_db`); 18 is a typical
+narration bed.
 
 ## Auto directives
 

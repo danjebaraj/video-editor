@@ -43,7 +43,8 @@ cutline guide                               # the workflow Claude should follow
   them (`"cue:clocks"`); clips fit themselves to the cut with `end_at`.
 - **Edit assist:** automatic jump cuts, filler removal, punch-in cadence, SFX on transitions,
   all expanded to inspectable timeline items.
-- **Audio:** role stems, voice chains, transcript/VAD-driven ducking, two-pass loudness
+- **Audio:** role stems, voice chains, transcript/VAD-driven ducking, music level set relative to
+  the voice (`music_level`), backtimed music endings (`align: end`), two-pass loudness
   (−14 LUFS / −1 dBTP default), micro-fades, `audio.png`.
 - **Reframe:** YuNet face detection (ONNX Runtime, `onnx` feature), tracking with a dead zone,
   spring smoothing, max pan speed, scene-cut resets; manual keys and split layouts.

@@ -221,3 +221,8 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-13 — zoom_to computes the zoom from a rectangle
 - **Decision:** `zoom_to` derives scale `s = min(1/w', 1/h')` (rect plus padding, capped at 3×) and the fixed point `f = x0·s/(s−1)` that puts the view window `x0` (centred on the rect, clamped inside the frame) on screen, and feeds them to the existing zoom chain as a ramp (+ release for `end`).
 - **Reason:** pointing at a UI element is the common case in screencasts, and the focus-point maths is easy to get wrong by hand.
+
+## 2026-11-13 — Music level and backtimed music
+- **Decision:** `audio.music_level` measures the voice (or dialogue) and music stems after they are rendered and before the mix, and applies `voice − level − (music + duck)` dB to the music stem: the same measure `review` reports, which now uses the chosen level as its aim. `align: end` on an audio layer sets `src_in = duration − span` (or starts a shorter asset later) during timeline resolution, so audio planning, captions and QA see an ordinary layer.
+- **Not done:** snapping cuts to musical beats (needs beat tracking; left for later).
+- **Reason:** both replace trial-and-error renders: the Glance demo needed two renders to find `gain_db: -9` (17.1 LU); `music_level: 18` lands at 18 in one.

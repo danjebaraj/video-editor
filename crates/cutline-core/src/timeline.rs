@@ -709,6 +709,8 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         Some(o - i)
                     }
                     Layer::Audio { r#loop: Some(true), .. } => None,
+                    // backtimed music runs to the timeline end unless told otherwise
+                    Layer::Audio { align: Some(AudioAlign::End), .. } => None,
                     Layer::Audio { src_in, .. } => {
                         media_len.map(|ml| ml - src_in.map(|t| t.seconds(fps, ml)).unwrap_or(0.0))
                     }
@@ -745,7 +747,30 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             continue;
         }
         let z = l.visual().and_then(|v| v.z).unwrap_or(li as i32);
-        layers.push(TLayer { index: li, start, end: end.min(total), z, layer: l.clone() });
+        let end = end.min(total);
+        let (mut start, mut layer) = (start, l.clone());
+        if let Layer::Audio { align: Some(AudioAlign::End), src_in, r#loop, .. } = &mut layer {
+            if src_in.is_some() || *r#loop == Some(true) {
+                d.push(
+                    Diagnostic::error(
+                        "E_FIELD_CONFLICT",
+                        format!("{base}/align"),
+                        "align: end chooses the source start itself, so it cannot be combined with `src_in` or `loop`",
+                    )
+                    .hint("remove `src_in`/`loop`, or remove `align`"),
+                );
+            } else if let Some(ml) = media_len {
+                let span = fps.frames_to_secs(end - start);
+                if ml >= span {
+                    // trim the head so the asset's last sample lands on the layer end
+                    *src_in = Some(TimeValue::Seconds(crate::time::round6(ml - span)));
+                } else {
+                    // shorter than the span: start later instead
+                    start = end - fps.secs_to_frames(ml);
+                }
+            }
+        }
+        layers.push(TLayer { index: li, start, end, z, layer });
     }
 
     // ---- captions / audio settings
@@ -792,6 +817,18 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         .hint(catalog::VOICE_CHAINS.join(", ")),
                     );
                 }
+            }
+        }
+        if let Some(m) = a.music_level {
+            if !(3.0..=40.0).contains(&m) {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        "/audio/music_level",
+                        "music_level is how many LU the music sits below the voice: 3–40",
+                    )
+                    .hint("18 is a typical bed under narration; 12 for a livelier mix"),
+                );
             }
         }
         if let Some(l) = &a.loudness {
