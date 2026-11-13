@@ -65,7 +65,10 @@ Requires Rust ≥ 1.80. External tools are managed by `cutline deps` (pinned in
 `tools.lock.json`); a system ffmpeg ≥ 6 works as a fallback. `scripts/release.sh` builds a
 universal macOS binary and a Windows zip with the `assets/` directory alongside.
 
-Environment overrides: `CUTLINE_HOME` (tools + cache), `CUTLINE_ASSETS`, `CUTLINE_FFMPEG` +
+Tools and caches live in the cutline home: `CUTLINE_HOME` if set, else the nearest
+`.cutline-home/` with a `tools/` folder above the working directory or the `cutline` binary (so a
+repo checkout's `target/release/cutline` finds the repo's tools from anywhere), else the platform
+data directory; `cutline doctor` shows which. Environment overrides: `CUTLINE_HOME` (tools + cache), `CUTLINE_ASSETS`, `CUTLINE_FFMPEG` +
 `CUTLINE_FFPROBE`, `CUTLINE_CHROME`, `CUTLINE_WHISPER_CLI`, `CUTLINE_WHISPER_MODEL`,
 `CUTLINE_FACE_MODEL`, `CUTLINE_LOCKFILE`.
 

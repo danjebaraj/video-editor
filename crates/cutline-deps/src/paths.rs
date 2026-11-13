@@ -1,16 +1,51 @@
-//! Platform directories. `CUTLINE_HOME` overrides everything (tools + cache live under it).
+//! Platform directories. `CUTLINE_HOME` overrides everything (tools + cache live under it); a
+//! `.cutline-home` with a `tools/` folder near the working directory or the binary is used next.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Root of cutline's per-user data. `CUTLINE_HOME` wins; otherwise the platform data dir
-/// (`~/Library/Application Support/cutline`, `%LOCALAPPDATA%\cutline`, `~/.local/share/cutline`).
-pub fn data_dir() -> PathBuf {
+/// Where the cutline home came from (reported by `doctor`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HomeSource {
+    /// `CUTLINE_HOME`
+    Env,
+    /// a `.cutline-home` above the working directory
+    WorkingDir,
+    /// a `.cutline-home` above the cutline binary (e.g. a repo checkout's `target/release`)
+    Binary,
+    /// the platform data directory
+    Platform,
+}
+
+/// Nearest `.cutline-home` containing `tools/`, searching each start directory and its
+/// ancestors in order.
+pub fn find_home_from(starts: &[&Path]) -> Option<PathBuf> {
+    starts.iter().find_map(|s| s.ancestors().map(|a| a.join(".cutline-home")).find(|h| h.join("tools").is_dir()))
+}
+
+/// The cutline home and how it was chosen: `CUTLINE_HOME`, else the nearest `.cutline-home`
+/// (with a `tools/` folder) above the working directory, then above the binary, else the
+/// platform data dir (`~/Library/Application Support/cutline`, `%LOCALAPPDATA%\cutline`,
+/// `~/.local/share/cutline`).
+pub fn home() -> (PathBuf, HomeSource) {
     if let Some(h) = std::env::var_os("CUTLINE_HOME") {
-        return PathBuf::from(h);
+        return (PathBuf::from(h), HomeSource::Env);
     }
-    directories::ProjectDirs::from("", "", "cutline")
+    if let Some(h) = std::env::current_dir().ok().and_then(|d| find_home_from(&[&d])) {
+        return (h, HomeSource::WorkingDir);
+    }
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+    if let Some(h) = exe_dir.and_then(|d| find_home_from(&[&d])) {
+        return (h, HomeSource::Binary);
+    }
+    let platform = directories::ProjectDirs::from("", "", "cutline")
         .map(|d| d.data_local_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".cutline-home"))
+        .unwrap_or_else(|| PathBuf::from(".cutline-home"));
+    (platform, HomeSource::Platform)
+}
+
+/// Root of cutline's per-user data (see `home`).
+pub fn data_dir() -> PathBuf {
+    home().0
 }
 
 /// Directory holding downloaded tools (ffmpeg, models, chrome).
@@ -20,8 +55,9 @@ pub fn tools_dir() -> PathBuf {
 
 /// Cache directory (analysis, transcripts, segment mezzanines live in project `.cutline/` instead).
 pub fn cache_dir() -> PathBuf {
-    if let Some(h) = std::env::var_os("CUTLINE_HOME") {
-        return PathBuf::from(h).join("cache");
+    let (h, src) = home();
+    if src != HomeSource::Platform {
+        return h.join("cache");
     }
     directories::ProjectDirs::from("", "", "cutline")
         .map(|d| d.cache_dir().to_path_buf())
@@ -132,4 +168,28 @@ pub fn find_named(dir: &std::path::Path, name: &str, depth: u32) -> Option<PathB
         }
     }
     None
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::find_home_from;
+
+    #[test]
+    fn nearest_home_with_tools_wins() {
+        let d = tempfile::tempdir().unwrap();
+        let repo = d.path().join("repo");
+        let bin = repo.join("target").join("release");
+        std::fs::create_dir_all(&bin).unwrap();
+        // a .cutline-home without tools/ does not count
+        std::fs::create_dir_all(bin.join(".cutline-home")).unwrap();
+        assert_eq!(find_home_from(&[&bin]), None);
+        std::fs::create_dir_all(repo.join(".cutline-home").join("tools")).unwrap();
+        assert_eq!(find_home_from(&[&bin]), Some(repo.join(".cutline-home")));
+        // earlier starts (the working directory) are searched first
+        let other = d.path().join("other");
+        std::fs::create_dir_all(other.join(".cutline-home").join("tools")).unwrap();
+        let project = other.join("videos").join("demo");
+        std::fs::create_dir_all(&project).unwrap();
+        assert_eq!(find_home_from(&[&project, &bin]), Some(other.join(".cutline-home")));
+    }
 }
