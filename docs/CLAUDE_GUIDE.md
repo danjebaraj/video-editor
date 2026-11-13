@@ -69,6 +69,9 @@ Segments are cached: changing captions, text or music does not re-render clips.
   Offsets: `"cue:clocks+0.3"`.
 - `end_at` fits each clip: give `in`+`out` to let cutline pick the speed, or only `in` to trim.
   No hand arithmetic for clip lengths, speeds or transition overlaps.
+- Set the VO asset's `script` to the text you generated it from: captions then show your exact
+  wording (names, capitals, punctuation) instead of recogniser slips, and cue phrases copied
+  from the script match exactly. Audio tags like `[warm]` are ignored.
 - `cutline cues project.json5` shows what each cue matched and where it landed; fix
   `W_CUE_FUZZY` / `E_CUE_NOT_FOUND` from the hint.
 

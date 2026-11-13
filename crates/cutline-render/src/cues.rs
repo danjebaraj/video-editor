@@ -200,6 +200,42 @@ impl<'a> Ctx<'a> {
         Ok(Self { dir, assets, layers, voice_assets, lang, transcripts: BTreeMap::new() })
     }
 
+    /// The asset's transcript (script-aligned when it has a `script`), or `None` after
+    /// reporting why there is none.
+    fn load(&self, asset: &str, at: &str, d: &mut Vec<Diagnostic>) -> Option<Transcript> {
+        let a = self.assets.get(asset);
+        let mut missing = false;
+        for (field, file) in a.map(|a| [("transcript", &a.transcript), ("script", &a.script)]).into_iter().flatten() {
+            if let Some(f) = file {
+                if !self.dir.join(f).exists() {
+                    d.push(Diagnostic::error(
+                        "E_ASSET_NOT_FOUND",
+                        format!("/assets/{}/{field}", ptr_token(asset)),
+                        format!("{field} file not found: {f}"),
+                    ));
+                    missing = true;
+                }
+            }
+        }
+        if missing {
+            return None;
+        }
+        match crate::auto::load_transcript(self.dir, asset, a, self.lang.as_deref(), true) {
+            Ok(Some(t)) => Some(t),
+            Ok(None) => {
+                d.push(
+                    Diagnostic::error("E_CUE_TRANSCRIPT", at, format!("no transcript for `{asset}`"))
+                        .hint("set the asset's `transcript` (Scribe or cutline JSON), run `cutline transcribe`, or install a whisper model"),
+                );
+                None
+            }
+            Err(e) => {
+                d.push(Diagnostic::error("E_CUE_TRANSCRIPT", at, format!("{e:#}")));
+                None
+            }
+        }
+    }
+
     fn cue(&mut self, name: &str, cue: &Cue, d: &mut Vec<Diagnostic>) -> Option<ResolvedCue> {
         let at = format!("/cues/{}", ptr_token(name));
         let asset = match cue.asset() {
@@ -255,28 +291,11 @@ impl<'a> Ctx<'a> {
             }
         };
         if !self.transcripts.contains_key(&asset) {
-            let t = match crate::auto::load_transcript(
-                self.dir,
-                &asset,
-                self.assets.get(&asset),
-                self.lang.as_deref(),
-                true,
-            ) {
-                Ok(t) => t,
-                Err(e) => {
-                    d.push(Diagnostic::error("E_CUE_TRANSCRIPT", at.clone(), format!("{e:#}")));
-                    None
-                }
-            };
+            // each asset's transcript problem is reported once, however many cues use it
+            let t = self.load(&asset, &at, d);
             self.transcripts.insert(asset.clone(), t);
         }
-        let Some(t) = self.transcripts[&asset].as_ref() else {
-            d.push(
-                Diagnostic::error("E_CUE_TRANSCRIPT", at, format!("no transcript for `{asset}`"))
-                    .hint("set the asset's `transcript` (Scribe or cutline JSON), run `cutline transcribe`, or install a whisper model"),
-            );
-            return None;
-        };
+        let t = self.transcripts[&asset].as_ref()?;
         let m = match cutline_transcribe::text::find_phrase(&t.words, cue.phrase(), cue.occurrence()) {
             Ok(m) => m,
             Err(nf) => {

@@ -37,6 +37,7 @@ pub fn compute(l: &Loaded, p: &Project, tl: &Timeline, draft: bool) -> Result<Pl
     text_layers(p, tl, &brand, &mut extras)?;
     html_layers(l, p, tl, &brand, &mut extras)?;
     captions(l, p, tl, &brand, &mut extras)?;
+    extras.warnings.extend(crate::auto::script_warnings(l, p));
     for c in &tl.clips {
         let mut x = ClipExtras {
             pad_color: c

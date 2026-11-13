@@ -235,6 +235,13 @@
             }
           ]
         },
+        "script": {
+          "description": "The text that was spoken (relative path to a .txt file), e.g. the TTS script. Captions\nand cues then use the script's exact words, timed from the transcript.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "synthetic": {
           "description": "Mark this asset as AI-generated (affects the publishing checklist).",
           "type": "boolean"

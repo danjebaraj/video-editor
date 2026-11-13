@@ -32,7 +32,8 @@ cutline guide                               # the workflow Claude should follow
 - **Text:** libass-rendered templates (hook title, lower third, callout, step counter, big
   number, quote, CTA, end card, emoji pop) with bundled fonts, safe zones and auto-fit; HTML
   variants via headless Chrome.
-- **Captions:** whisper.cpp or ElevenLabs Scribe import, words mapped through the edit;
+- **Captions:** whisper.cpp or ElevenLabs Scribe import, words mapped through the edit; a
+  `script` replaces recognised words with the exact text, keeping the audio's timing;
   `bold_pop`, `karaoke`, `word_by_word`, `clean_sentence`, `boxed`; emphasis and emoji; SRT.
 - **Script timing:** name phrases in the voice-over (`cues`) and cut, place text and SFX on
   them (`"cue:clocks"`); clips fit themselves to the cut with `end_at`.

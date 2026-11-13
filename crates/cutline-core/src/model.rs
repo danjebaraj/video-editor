@@ -172,6 +172,10 @@ pub struct Asset {
     /// Transcript for this asset: Scribe JSON or cutline transcript JSON (relative path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<String>,
+    /// The text that was spoken (relative path to a .txt file), e.g. the TTS script. Captions
+    /// and cues then use the script's exact words, timed from the transcript.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
     /// Duration for HTML/Lottie/SVG/still assets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration: Option<TimeValue>,

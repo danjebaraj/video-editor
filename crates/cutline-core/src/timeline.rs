@@ -206,13 +206,15 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             }
             None => {}
         }
-        if let Some(t) = &a.transcript {
-            if !ctx.project_dir.join(t).exists() {
-                d.push(Diagnostic::error(
-                    "E_ASSET_NOT_FOUND",
-                    format!("{base}/transcript"),
-                    format!("transcript file not found: {t}"),
-                ));
+        for (field, file) in [("transcript", &a.transcript), ("script", &a.script)] {
+            if let Some(t) = file {
+                if !ctx.project_dir.join(t).exists() {
+                    d.push(Diagnostic::error(
+                        "E_ASSET_NOT_FOUND",
+                        format!("{base}/{field}"),
+                        format!("{field} file not found: {t}"),
+                    ));
+                }
             }
         }
     }

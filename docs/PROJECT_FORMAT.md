@@ -54,6 +54,7 @@ cue). See [Cues](#cues).
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |
+| `script` | — | the text that was spoken (a `.txt`, e.g. the TTS script). Captions, ducking and cues use the script's exact words, timed from the transcript; `[audio tags]` are ignored. `W_SCRIPT_MISMATCH` when under 70 % of the script is heard |
 | `duration` | 3 s | stills / HTML / Lottie / SVG |
 | `alpha` | — | assert alpha exists (`E_ALPHA_NOT_PRESENT` if not) |
 | `fps` | 30 | image sequences / HTML |

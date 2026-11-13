@@ -202,3 +202,8 @@ Non-trivial design choices not dictated by the spec. Format: date — decision �
 ## 2026-11-13 — `end_at` is the cut point, not the clip end
 - **Decision:** `end_at` is where the cut to the next clip lands: the midpoint of the outgoing transition (or the clip end without one). With `in` and `out` the speed is computed; otherwise `out` is. Jump cuts and filler removal leave fitted clips whole.
 - **Reason:** a viewer perceives the cut at the transition midpoint, so that is what should sit on the spoken cue. Splitting a fitted clip would change its length and break the fit.
+
+## 2026-11-13 — Script alignment
+- **Decision:** an asset `script` is aligned to its transcript with a banded Needleman–Wunsch over normalised tokens (exact 3, close 2, substitution −1, gap −2). Paired script words take the transcript word's times; unpaired ones are interpolated between neighbours (or share the previous word's span when there is no gap); transcript words absent from the script are dropped. `[bracketed]` audio tags and dash-only tokens are not words. Alignment happens wherever transcripts are loaded (captions, ducking, cues, jump cuts), after the transcript cache, so caches stay script-independent.
+- **Alternatives:** forced alignment on the audio (needs an acoustic model); replacing caption text per segment.
+- **Reason:** the TTS script is known exactly, and the recogniser's word timings are good; only its spelling is unreliable ("pains" for "panes"). Word-level pairing keeps per-word timing for karaoke and bold_pop styles.
