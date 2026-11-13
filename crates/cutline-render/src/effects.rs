@@ -211,8 +211,10 @@ pub fn zoom_chain(c: &TClip, g: &Geometry, dur: f64) -> Option<String> {
     let (w, h) = (g.width, g.height);
     let s = terms.iter().map(|t| t.expr("t")).collect::<Vec<_>>().join("*");
     // even growth on each axis keeps the centered crop offset integral
-    let sw = format!("{w}+2*round({w}*(({s})-1)/2)");
-    let sh = format!("{h}+2*round({h}*(({s})-1)/2)");
+    let ex = format!("2*round({w}*(({s})-1)/2)");
+    let ey = format!("2*round({h}*(({s})-1)/2)");
+    let sw = format!("{w}+{ex}");
+    let sh = format!("{h}+{ey}");
     let (fx, fy) = match kb {
         Some(((x0, y0), (x1, y1), ez)) => {
             let u = ease_expr(ez, &u_expr("t", 0.0, dur));
@@ -227,8 +229,11 @@ pub fn zoom_chain(c: &TClip, g: &Geometry, dur: f64) -> Option<String> {
         sx.push_str(&format!("+{}*{w}*sin(2*PI*23*t)*{env}", f(sk.amp_x)));
         sy.push_str(&format!("+{}*{h}*cos(2*PI*17*t)*{env}", f(sk.amp_y)));
     }
+    // The crop offset reuses the scale's per-frame growth instead of `iw`/`ih`: crop keeps
+    // the input size it was configured with, so with a size that changes every frame
+    // `iw-w` stays 0 and every animated zoom would anchor at the top-left corner.
     Some(format!(
-        "scale=w='{sw}':h='{sh}':eval=frame:flags=bicubic,crop={w}:{h}:x='clip(round((iw-{w})*{fx}{sx}),0,iw-{w})':y='clip(round((ih-{h})*{fy}{sy}),0,ih-{h})'"
+        "scale=w='{sw}':h='{sh}':eval=frame:flags=bicubic,crop={w}:{h}:x='clip(round(({ex})*{fx}{sx}),0,{ex})':y='clip(round(({ey})*{fy}{sy}),0,{ey})'"
     ))
 }
 
