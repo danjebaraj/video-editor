@@ -29,7 +29,7 @@ pub struct ExportResult {
 pub fn qa_context(p: &Project, tl: &Timeline, extras: &cutline_render::PlanExtras) -> QaContext {
     let mut c = QaContext {
         expected_duration: Some(tl.duration()),
-        is_shorts: tl.target.is_vertical(),
+        is_shorts: tl.target.is_vertical() && tl.target.name != cutline_core::model::TargetName::Portrait4x5,
         max_cps: 20.0,
         screencast: tl.target.screencast,
         chroma444: tl.target.chroma444,
@@ -58,6 +58,71 @@ pub fn qa_context(p: &Project, tl: &Timeline, extras: &cutline_render::PlanExtra
     c.caption_boxes = extras_caption_boxes(extras);
     c.first_text_at = extras_first_text(extras);
     c
+}
+
+/// QA expectations for one export: `qa_context`, moved onto the delivered file's own clock
+/// (a cut-out or a loop starts later than the edit) and told about the delivery choices.
+pub fn qa_context_for(pr: &Prepared, d: &cutline_render::Delivery) -> QaContext {
+    let tl = &pr.timeline;
+    let mut c = qa_context(&pr.project, tl, &pr.extras);
+    c.webm = d.format == cutline_core::model::ExportFormat::Webm;
+    c.no_audio = d.no_audio;
+    c.max_bytes = d.max_bytes;
+    c.looped = d.loop_frames > 0;
+    let frames = d.frames(tl.total_frames);
+    let len = tl.secs(frames);
+    c.expected_duration = Some(len);
+    let partial = d.range.is_some() || d.loop_frames > 0;
+    if partial {
+        // the mix was normalized as a whole; a part of it has its own loudness
+        c.loudness_target = None;
+        let off = tl.secs(d.range.map(|r| r.0).unwrap_or(0) + d.loop_frames);
+        let shift = |v: &mut Vec<(f64, f64)>| {
+            *v = v.iter().map(|(a, b)| (a - off, b - off)).filter(|(a, b)| *b > 0.0 && *a < len).collect();
+        };
+        shift(&mut c.intended_black);
+        shift(&mut c.intended_freeze);
+        shift(&mut c.intended_silence);
+        c.caption_boxes = c
+            .caption_boxes
+            .into_iter()
+            .map(|mut b| {
+                b.start -= off;
+                b.end -= off;
+                b
+            })
+            .filter(|b| b.end > 0.0 && b.start < len)
+            .collect();
+        c.first_text_at = c
+            .caption_boxes
+            .iter()
+            .map(|b| b.start.max(0.0))
+            .fold(None, |a: Option<f64>, s| Some(a.map_or(s, |a| a.min(s))));
+        if d.loop_frames > 0 {
+            // the dissolve at the end is meant to look like one
+            c.intended_freeze.push((len - tl.secs(d.loop_frames) - 0.1, len));
+        }
+    }
+    if d.no_audio {
+        let off = tl.secs(d.range.map(|r| r.0).unwrap_or(0) + d.loop_frames);
+        c.muted_speech =
+            pr.extras.speech.iter().map(|(a, b)| (a - off, b - off)).filter(|(a, b)| *b > 0.0 && *a < len).collect();
+    }
+    c
+}
+
+/// Scale the laid-out text boxes (full-size pixels) to the size of the file being checked,
+/// e.g. a draft preview.
+pub fn scale_boxes(c: &mut QaContext, k: f64) {
+    if (k - 1.0).abs() < 1e-9 {
+        return;
+    }
+    for b in &mut c.caption_boxes {
+        b.x *= k;
+        b.y *= k;
+        b.w *= k;
+        b.h *= k;
+    }
 }
 
 fn extras_caption_boxes(e: &cutline_render::PlanExtras) -> Vec<crate::qa::CaptionBox> {
@@ -101,6 +166,7 @@ pub fn render_all(l: &Loaded, opts: &RenderOptions, only: Option<&str>) -> Resul
         if let Some(out) = &e.out {
             o2.out = Some(l.dir.join(out));
         }
+        let o2 = pipeline::options_for(&pr, &o2);
         let (plan, exec) = pipeline::render(l, &pr, &o2)?;
         results.push(finish(tc, l, &pr, &plan, exec)?);
         // temp hygiene: remove the run's tmp dir on success
@@ -120,7 +186,8 @@ fn finish(
     exec: ExecReport,
 ) -> Result<ExportResult> {
     let t = std::time::Instant::now();
-    let ctx = qa_context(&pr.project, &pr.timeline, &pr.extras);
+    let mut ctx = qa_context_for(pr, &plan.delivery);
+    scale_boxes(&mut ctx, plan.geometry.width as f64 / pr.timeline.target.width as f64);
     let target = if plan.draft {
         let mut t = pr.timeline.target.clone();
         t.width = plan.geometry.width;
@@ -135,6 +202,26 @@ fn finish(
     std::fs::write(&qa_path, serde_json::to_vec_pretty(&qa)?)?;
     let srt_path = side_path(&plan.output, "srt");
     std::fs::write(&srt_path, &pr.extras.srt)?;
+    // the same captions for web players
+    std::fs::write(side_path(&plan.output, "vtt"), srt_to_vtt(&pr.extras.srt))?;
+    // poster frame for embeds (edit time; 0.5 s in by default)
+    let tl = &pr.timeline;
+    let body = tl.secs(tl.body_end - tl.origin);
+    let at = pr.export.poster.map(|t| t.seconds(tl.fps, body)).unwrap_or(0.5).clamp(0.0, body);
+    let file_t = (tl.from_edit(at)
+        - tl.secs(plan.delivery.range.map(|r| r.0).unwrap_or(0) + plan.delivery.loop_frames))
+    .clamp(0.0, (plan.duration - tl.secs(1)).max(0.0));
+    let poster_path = side_path(&plan.output, "poster.jpg");
+    let st = tc
+        .ffmpeg_cmd()
+        .args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-ss", &format!("{file_t:.3}"), "-i"])
+        .arg(&plan.output)
+        .args(["-frames:v", "1", "-q:v", "3"])
+        .arg(&poster_path)
+        .status();
+    if !st.map(|s| s.success()).unwrap_or(false) {
+        tracing::warn!("could not write the poster frame {}", poster_path.display());
+    }
     let credits_path = plan.output.with_file_name("credits.txt");
     std::fs::write(&credits_path, credits(&pr.project, l))?;
     let report_path = side_path(&plan.output, "render_report.json");
@@ -169,6 +256,20 @@ fn finish(
         duration: plan.duration,
         diagnostics: pr.diags.clone(),
     })
+}
+
+/// SubRip → WebVTT: the header, and `.` instead of `,` in the timings.
+pub fn srt_to_vtt(srt: &str) -> String {
+    let mut out = String::from("WEBVTT\n\n");
+    for line in srt.lines() {
+        if line.contains("-->") {
+            out.push_str(&line.replace(',', "."));
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// `credits.txt`: every asset used, for attribution and audits.

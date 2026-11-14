@@ -19,6 +19,12 @@ struct Cli {
     /// Log every ffmpeg command and more.
     #[arg(long, short, global = true)]
     verbose: bool,
+    /// Work on this variant of the project (default: the first by name; `render` does all).
+    #[arg(long, global = true)]
+    variant: Option<String>,
+    /// Work on this locale of the project (default: the base language).
+    #[arg(long, global = true)]
+    locale: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -66,8 +72,13 @@ enum Cmd {
         /// Directory to create the project in.
         #[arg(default_value = ".")]
         dir: PathBuf,
-        #[arg(long, default_value = "shorts")]
-        target: String,
+        /// Default: shorts (long_1080p with --style business).
+        #[arg(long)]
+        target: Option<String>,
+        /// creator (Shorts-style defaults) or business (product demos: screencast profile,
+        /// sentence captions, business brand).
+        #[arg(long, default_value = "creator")]
+        style: String,
         /// Add every media file in this directory as an asset.
         #[arg(long)]
         assets: Option<PathBuf>,
@@ -137,6 +148,10 @@ enum Cmd {
         project: PathBuf,
         #[arg(long, default_value = "review")]
         out: PathBuf,
+        /// Text recognition for the demo checks: auto, vision (macOS), tesseract or off.
+        /// Default: CUTLINE_OCR, else the project's `qa.ocr`, else auto.
+        #[arg(long)]
+        ocr: Option<String>,
     },
     /// Thumbnail (1280×720, or 1080×1920 for Shorts) with template text.
     Thumbnail {
@@ -255,6 +270,10 @@ fn main() {
 }
 
 fn dispatch(cli: Cli) -> CmdResult {
+    cutline_render::select::set_current(cutline_render::select::Selection {
+        variant: cli.variant.clone(),
+        locale: cli.locale.clone(),
+    });
     match cli.cmd {
         Cmd::Doctor => doctor::run(),
         Cmd::Deps { cmd } => match cmd {
@@ -310,7 +329,9 @@ fn dispatch(cli: Cli) -> CmdResult {
         }
         Cmd::Validate { project } => edit::validate(&project),
         Cmd::Schema => edit::schema(),
-        Cmd::Init { dir, target, assets, name } => edit::init(&dir, &target, assets.as_deref(), name.as_deref()),
+        Cmd::Init { dir, target, style, assets, name } => {
+            edit::init(&dir, target.as_deref(), &style, assets.as_deref(), name.as_deref())
+        }
         Cmd::Expand { project } => edit::expand(&project),
         Cmd::Cues { project } => edit::cues(&project),
         Cmd::Beats { project, asset } => edit::beats(&project, asset.as_deref()),
@@ -326,7 +347,7 @@ fn dispatch(cli: Cli) -> CmdResult {
             edit::preview(&project, &at, range.as_deref(), safe_zones, out)
         }
         Cmd::Templates { cmd: TemplatesCmd::List } => templates_list(),
-        Cmd::Review { project, out } => edit::review(&project, &out),
+        Cmd::Review { project, out, ocr } => edit::review(&project, &out, ocr.as_deref()),
         Cmd::Thumbnail { project, at, text, template, out } => {
             edit::thumbnail(&project, &at, text.as_deref(), &template, out)
         }

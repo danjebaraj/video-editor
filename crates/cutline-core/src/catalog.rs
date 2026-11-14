@@ -81,7 +81,19 @@ pub const TEXT_TEMPLATES: &[&str] = &[
     "hook_title_html",
     "lower_third_html",
     "end_card_html",
+    "title_card",
+    "section_card",
+    "feature_list",
+    "stat",
+    "testimonial",
+    "compare",
+    "logo_wall",
+    "cta_link",
 ];
+
+/// Business card templates: drawn with their own background, images and motion.
+pub const CARD_TEMPLATES: &[&str] =
+    &["title_card", "section_card", "feature_list", "stat", "testimonial", "compare", "logo_wall", "cta_link"];
 
 pub const CAPTION_STYLES: &[&str] = &["bold_pop", "karaoke", "word_by_word", "clean_sentence", "boxed"];
 

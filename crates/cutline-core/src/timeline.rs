@@ -63,6 +63,13 @@ pub struct TClip {
     pub start: i64,
     /// Timeline duration in frames (including freezes).
     pub frames: i64,
+    /// Where the clip's picture sits in the output frame (fractions) when it is drawn inside
+    /// a screen frame. Rects on the clip (`zoom_to`, annotations) are relative to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Rect>,
+    /// The screen frame in effect (the clip's own, or the project's `default_frame`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<ScreenFrame>,
     pub clip: Clip,
 }
 
@@ -97,6 +104,11 @@ pub struct Timeline {
     pub fps: Fps,
     pub target: TargetSpec,
     pub total_frames: i64,
+    /// Frame where the edit starts: 0, or the end of the brand intro. Timeline times written in
+    /// the project (layer `start`/`end`, sfx `at`, `end_at`, markers, cues) count from here.
+    pub origin: i64,
+    /// Frame where the edit ends (the brand outro, if any, starts around here).
+    pub body_end: i64,
     pub clips: Vec<TClip>,
     pub transitions: Vec<TTransition>,
     pub layers: Vec<TLayer>,
@@ -108,6 +120,10 @@ impl Timeline {
     }
     pub fn secs(&self, frames: i64) -> f64 {
         self.fps.frames_to_secs(frames)
+    }
+    /// Output seconds of a time written in the project (seconds on the edit).
+    pub fn from_edit(&self, secs: f64) -> f64 {
+        secs + self.secs(self.origin)
     }
     pub fn clip_by_id(&self, id: &str) -> Option<&TClip> {
         self.clips.iter().find(|c| c.id == id)
@@ -254,6 +270,8 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
     let mut transitions: Vec<TTransition> = vec![];
     let mut pending_trans: Option<(usize, Transition)> = None;
     let mut ok = true;
+    // start of the edit (after a brand intro): project times count from here
+    let mut origin: Option<i64> = None;
     for (mi, item) in p.main.iter().enumerate() {
         let base = format!("/main/{mi}");
         match item {
@@ -335,11 +353,11 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     continue;
                 }
                 let mut speed = c.speed.unwrap_or(1.0);
-                if !(0.25..=4.0).contains(&speed) {
+                if !(0.25..=8.0).contains(&speed) {
                     d.push(Diagnostic::error(
                         "E_SPEED_RANGE",
                         format!("{base}/speed"),
-                        format!("speed {speed} outside 0.25–4"),
+                        format!("speed {speed} outside 0.25–8"),
                     ));
                 }
                 for (k, sk) in c.speed_ramp.iter().enumerate() {
@@ -395,7 +413,8 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             _ => 0,
                         };
                         let start = prev_end - tf_in;
-                        let content = e.frames(fps, 0) + tf_out / 2 - start - freeze_frames;
+                        let org = origin.unwrap_or(if c.is_bumper() { 0 } else { start });
+                        let content = e.frames(fps, 0) + org + tf_out / 2 - start - freeze_frames;
                         if content < 1 {
                             d.push(
                                 Diagnostic::error(
@@ -404,7 +423,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                                     format!(
                                         "end_at {:.3}s is not after this clip's start ({:.3}s)",
                                         e.seconds(fps, 0.0),
-                                        fps.frames_to_secs(start)
+                                        fps.frames_to_secs(start - org)
                                     ),
                                 )
                                 .hint("cues and end_at times must increase along `main`"),
@@ -454,13 +473,11 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         (None, None, None) => media_dur,
                     };
                     if c.fit.is_some() && (fit_frames.is_none() || c.out.is_none()) {
-                        d.push(
-                            Diagnostic::warning(
-                                "W_FIT_UNUSED",
-                                format!("{base}/fit"),
-                                "`fit` only applies to a clip with `end_at`, `in` and `out`",
-                            ),
-                        );
+                        d.push(Diagnostic::warning(
+                            "W_FIT_UNUSED",
+                            format!("{base}/fit"),
+                            "`fit` only applies to a clip with `end_at`, `in` and `out`",
+                        ));
                     }
                     if let (Some(ff), Some(_), true) = (fit_frames, c.out, fit_speed) {
                         // in and out fixed: the speed absorbs the difference
@@ -597,13 +614,31 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         });
                     }
                 }
+                if origin.is_none() && !c.is_bumper() {
+                    origin = Some(start);
+                }
                 let mut clip = (**c).clone();
                 if fit_frames.is_some() && !is_visual_still(kind) {
                     // keep the clip copy consistent with what `end_at` resolved to
                     clip.speed = Some(crate::time::round6(speed));
                     clip.out = Some(TimeValue::Seconds(crate::time::round6(src_out)));
                 }
+                // screen frame: the clip's own, else the project default for recordings
+                let frame = c
+                    .frame
+                    .clone()
+                    .or_else(|| p.default_frame.clone().filter(|_| kind == AssetKind::Video && !c.is_bumper()))
+                    .filter(|f| f.style != FrameStyle::Off);
+                if let Some(fr) = &frame {
+                    check_frame(fr, c, p, &facts, &format!("{base}/frame"), &mut d);
+                }
+                let content = frame.as_ref().map(|fr| {
+                    let src = f.map(|f| (f.width, f.height)).filter(|s| s.0 > 0 && s.1 > 0).unwrap_or((16, 9));
+                    crate::frame::layout(fr, src, (spec.width, spec.height)).content_rect((spec.width, spec.height))
+                });
                 clips.push(TClip {
+                    content,
+                    frame,
                     main_index: mi,
                     index,
                     id: c.id.clone(),
@@ -633,7 +668,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             .iter()
             .filter(|t| t.frames > 0 && matches!(t.transition.kind.as_str(), "fade" | "dissolve"))
             .filter(|t| {
-                let is_rec = |c: &TClip| c.kind == AssetKind::Video;
+                let is_rec = |c: &TClip| c.kind == AssetKind::Video && !c.clip.is_bumper();
                 is_rec(&clips[t.after]) && clips.get(t.after + 1).is_some_and(is_rec)
             })
             .collect();
@@ -652,6 +687,10 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
         }
     }
     let total = clips.last().map(|c| c.end()).unwrap_or(0);
+    let origin = origin.unwrap_or(0);
+    let body_end = clips.iter().rev().find(|c| !c.clip.is_bumper()).map(|c| c.end()).unwrap_or(total);
+    // layer times are written on the edit: `end` is the edit's end, 0 its start
+    let body_len = body_end - origin;
     if let Some(maxd) = spec.max_duration {
         let secs = fps.frames_to_secs(total);
         if secs > maxd {
@@ -693,6 +732,18 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 );
             }
         }
+        if let Layer::Mask { follow: Some(true), mode, .. } = l {
+            if !matches!(mode, Some(MaskMode::Fill)) {
+                d.push(
+                    Diagnostic::error(
+                        "E_FIELD_CONFLICT",
+                        format!("{base}/follow"),
+                        "a mask that follows its clip must be `mode: \"fill\"` (blur and pixelate work on a fixed region of the frame)",
+                    )
+                    .hint("add `mode: \"fill\"` with the background `color`, or remove `follow`"),
+                );
+            }
+        }
         if let Layer::Mask { rect, strength, text_size, .. } = l {
             let inside = |v: f64| (0.0..=1.0).contains(&v);
             if !(inside(rect.x) && inside(rect.y) && rect.w > 0.0 && rect.h > 0.0)
@@ -715,6 +766,32 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/text_size"), "text_size must be positive"));
             }
         }
+        if let Layer::Presenter { asset, scale, layouts, focus, .. } = l {
+            if facts.get(asset).is_some_and(|f| !f.has_video) {
+                d.push(Diagnostic::error(
+                    "E_WRONG_ASSET_KIND",
+                    format!("{base}/asset"),
+                    format!("presenter asset `{asset}` has no video"),
+                ));
+            }
+            if scale.is_some_and(|s| !(0.05..=0.6).contains(&s)) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/scale"), "scale must be within 0.05–0.6"));
+            }
+            if focus.is_some_and(|p| !((0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y))) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/focus"), "focus x and y are fractions (0–1)"));
+            }
+            for (i, w) in layouts.windows(2).enumerate() {
+                if w[1].at.frames(fps, body_len) <= w[0].at.frames(fps, body_len) {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/layouts/{}/at", i + 1),
+                        "layout times must increase",
+                    ));
+                }
+            }
+        }
+        check_annotation(l, &base, &mut d);
+        check_card(l, p, &base, &mut d);
         if let Some(v) = l.visual() {
             if let Some(o) = v.opacity {
                 if !(0.0..=1.0).contains(&o) {
@@ -743,7 +820,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             continue;
                         }
                     },
-                    None => at.map(|t| t.frames(fps, total)).unwrap_or(0),
+                    None => origin + at.map(|t| t.frames(fps, body_len)).unwrap_or(0),
                 };
                 let len = fps.secs_to_frames(media_len.unwrap_or(1.0)).max(1);
                 (s, s + len)
@@ -762,7 +839,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             continue;
                         }
                     },
-                    None => at.start.map(|t| t.frames(fps, total)).unwrap_or(0),
+                    None => origin + at.start.map(|t| t.frames(fps, body_len)).unwrap_or(0),
                 };
                 let src_len = match l {
                     Layer::Video { src_in, src_out, .. } | Layer::Broll { src_in, src_out, .. } => {
@@ -778,6 +855,9 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         }
                         Some(o - i)
                     }
+                    Layer::Presenter { src_in, .. } => {
+                        media_len.map(|ml| ml - src_in.map(|t| t.seconds(fps, ml)).unwrap_or(0.0))
+                    }
                     Layer::Audio { r#loop: Some(true), .. } => None,
                     // backtimed music runs to the timeline end unless told otherwise
                     Layer::Audio { align: Some(AudioAlign::End), .. } => None,
@@ -790,18 +870,27 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     _ => None,
                 };
                 let default_end = match l {
-                    Layer::Text { .. } => s + fps.secs_to_frames(3.0),
+                    Layer::Text { .. }
+                    | Layer::Highlight { .. }
+                    | Layer::Spotlight { .. }
+                    | Layer::Arrow { .. }
+                    | Layer::Badge { .. }
+                    | Layer::Keys { .. } => s + fps.secs_to_frames(3.0),
+                    // a little after the pointer arrives at its last key
+                    Layer::Cursor { path, .. } => {
+                        s + fps.secs_to_frames(path.iter().map(|k| k.t).fold(0.0, f64::max) + 0.6)
+                    }
                     _ => match src_len {
                         Some(sl) => s + fps.secs_to_frames(sl),
-                        None => total,
+                        None => body_end,
                     },
                 };
                 let e = match (at.end, at.duration) {
-                    (Some(e), _) => e.frames(fps, total),
-                    (None, Some(dd)) => s + dd.frames(fps, total),
+                    (Some(e), _) => origin + e.frames(fps, body_len),
+                    (None, Some(dd)) => s + dd.frames(fps, body_len),
                     (None, None) => default_end,
                 };
-                (s, e.min(total.max(s + 1)))
+                (s, e.min(body_end.max(s + 1)))
             }
         };
         if end <= start {
@@ -812,12 +901,12 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             ));
             continue;
         }
-        if start >= total && total > 0 {
+        if start >= body_end && total > 0 {
             d.push(Diagnostic::error("E_LAYER_TIME", base.clone(), "layer starts after the timeline ends"));
             continue;
         }
         let z = l.visual().and_then(|v| v.z).unwrap_or(li as i32);
-        let end = end.min(total);
+        let end = end.min(body_end);
         let (mut start, mut layer) = (start, l.clone());
         if let Layer::Audio { align: Some(AudioAlign::End), src_in, r#loop, .. } = &mut layer {
             if src_in.is_some() || *r#loop == Some(true) {
@@ -929,15 +1018,351 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             }
         }
     }
+    if let Some(a) = &p.auto {
+        if let Some(z) = &a.zoom_on_clicks {
+            if !(1.2..=3.0).contains(&z.max_scale) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    "/auto/zoom_on_clicks/max_scale",
+                    "max_scale must be within 1.2–3",
+                ));
+            }
+            if !(0.1..=3.0).contains(&z.duration) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    "/auto/zoom_on_clicks/duration",
+                    "duration must be within 0.1–3 s",
+                ));
+            }
+        }
+        if let Some(ff) = &a.fast_forward_idle {
+            if !(1.5..=8.0).contains(&ff.speed) {
+                d.push(Diagnostic::error("E_BAD_VALUE", "/auto/fast_forward_idle/speed", "speed must be within 1.5–8"));
+            }
+            if !(0.5..=600.0).contains(&ff.min_idle) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    "/auto/fast_forward_idle/min_idle",
+                    "min_idle must be at least 0.5 s",
+                ));
+            }
+            for id in &ff.applies_to {
+                if !p.assets.contains_key(id) {
+                    d.push(Diagnostic::error(
+                        "E_UNKNOWN_ASSET",
+                        "/auto/fast_forward_idle/applies_to",
+                        format!("unknown asset `{id}`"),
+                    ));
+                }
+            }
+        }
+    }
     if let Some(s) = p.auto.as_ref().and_then(|a| a.sfx_on_transitions.as_ref()) {
         check_sfx(s, p, ctx, "/auto/sfx_on_transitions", &mut d);
     }
 
+    for (i, e) in p.exports.iter().enumerate() {
+        let base = format!("/exports/{i}");
+        if e.r#loop == Some(true) && e.audio != Some(false) {
+            d.push(
+                Diagnostic::error(
+                    "E_FIELD_CONFLICT",
+                    format!("{base}/loop"),
+                    "a looping export dissolves its end into its start, which audio cannot follow",
+                )
+                .hint("add `audio: false` (loops are for silent autoplay), or remove `loop`"),
+            );
+        }
+        if let Some(m) = &e.max_bytes {
+            if m.bytes().map_or(true, |b| b < 10_000) {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/max_bytes"),
+                        "max_bytes must be a size of at least 10 KB",
+                    )
+                    .hint("e.g. \"8MB\", \"900KB\" or a number of bytes"),
+                );
+            }
+        }
+        if let Some([a, b]) = e.range {
+            let (fa, fb) = (a.frames(fps, body_len), b.frames(fps, body_len));
+            if fa < 0 || fb > body_len || fb - fa < 2 {
+                d.push(
+                    Diagnostic::error(
+                        "E_TIME_OUT_OF_RANGE",
+                        format!("{base}/range"),
+                        format!(
+                            "range {:.3}–{:.3}s must lie inside the edit (0–{:.3}s) and run forwards",
+                            fps.frames_to_secs(fa),
+                            fps.frames_to_secs(fb),
+                            fps.frames_to_secs(body_len)
+                        ),
+                    )
+                    .hint("range is [from, to] in seconds on the edit, or cues: [\"cue:export\", \"cue:done\"]"),
+                );
+            }
+        }
+        if e.poster.is_some_and(|t| t.frames(fps, body_len) > body_len) {
+            d.push(Diagnostic::error(
+                "E_TIME_OUT_OF_RANGE",
+                format!("{base}/poster"),
+                "poster time is after the edit ends",
+            ));
+        }
+    }
+
     let tl = (ok && !clips.is_empty()).then(|| {
         layers.sort_by_key(|l| (l.z, l.index));
-        Timeline { fps, target: spec, total_frames: total, clips, transitions, layers }
+        Timeline { fps, target: spec, total_frames: total, origin, body_end, clips, transitions, layers }
     });
     (tl, d)
+}
+
+fn check_frame(
+    fr: &ScreenFrame,
+    c: &Clip,
+    p: &Project,
+    facts: &BTreeMap<String, MediaFacts>,
+    base: &str,
+    d: &mut Vec<Diagnostic>,
+) {
+    if c.frame.is_some() && c.reframe.is_some() {
+        d.push(
+            Diagnostic::error(
+                "E_FIELD_CONFLICT",
+                base,
+                "a framed clip is fitted inside its window, so it cannot also have `reframe`",
+            )
+            .hint("remove `reframe`, or remove `frame` (or `frame: {style: \"off\"}` to opt out of default_frame)"),
+        );
+    }
+    for (k, v, hi) in [("padding", fr.padding, 0.4), ("shadow", fr.shadow, 1.0)] {
+        if v.is_some_and(|v| !(0.0..=hi).contains(&v)) {
+            d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/{k}"), format!("{k} must be within 0–{hi}")));
+        }
+    }
+    if fr.radius.is_some_and(|r| r.is_nan() || r < 0.0) {
+        d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/radius"), "radius must not be negative"));
+    }
+    match &fr.background {
+        Some(FrameBackground::Gradient { gradient }) if gradient.len() != 2 => {
+            d.push(Diagnostic::error(
+                "E_BAD_VALUE",
+                format!("{base}/background/gradient"),
+                "a gradient needs exactly two colors",
+            ));
+        }
+        Some(FrameBackground::Name(n)) if n != "brand" && !n.starts_with('#') => match p.assets.get(n) {
+            None => d.push(
+                Diagnostic::error(
+                    "E_UNKNOWN_ASSET",
+                    format!("{base}/background"),
+                    format!("background `{n}` is not `brand`, a #color or an asset id"),
+                )
+                .hint("e.g. \"brand\", \"#101014\", {gradient: [\"#1b1f3b\", \"#0b0d1a\"]} or an image asset"),
+            ),
+            Some(_) => {
+                if facts.get(n).is_some_and(|f| f.kind != AssetKind::Image) {
+                    d.push(Diagnostic::error(
+                        "E_WRONG_ASSET_KIND",
+                        format!("{base}/background"),
+                        format!("background asset `{n}` must be an image"),
+                    ));
+                }
+            }
+        },
+        _ => {}
+    }
+}
+
+/// A rect in fractions of the frame, inside it.
+pub fn rect_in_frame(r: &Rect) -> bool {
+    let inside = |v: f64| (0.0..=1.0).contains(&v);
+    inside(r.x) && inside(r.y) && r.w > 0.0 && r.h > 0.0 && r.x + r.w <= 1.0 + 1e-9 && r.y + r.h <= 1.0 + 1e-9
+}
+
+/// Parameters of the business card templates.
+fn check_card(l: &Layer, p: &Project, base: &str, d: &mut Vec<Diagnostic>) {
+    let Layer::Text { template, text, params, .. } = l else { return };
+    if !catalog::CARD_TEMPLATES.contains(&template.as_str()) {
+        return;
+    }
+    let empty = serde_json::Map::new();
+    let pm = params.as_ref().unwrap_or(&empty);
+    let list = |k: &str| -> Vec<&str> {
+        pm.get(k).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default()
+    };
+    let asset = |id: &str, field: String, d: &mut Vec<Diagnostic>| {
+        if !p.assets.contains_key(id) {
+            d.push(
+                Diagnostic::error("E_UNKNOWN_ASSET", format!("{base}/params/{field}"), format!("unknown asset `{id}`"))
+                    .hint("image params take the id of an image asset"),
+            );
+        }
+    };
+    let need_text = |d: &mut Vec<Diagnostic>| {
+        if text.as_deref().map_or(true, |t| t.trim().is_empty()) {
+            d.push(Diagnostic::error("E_MISSING_FIELD", format!("{base}/text"), format!("`{template}` needs `text`")));
+        }
+    };
+    match template.as_str() {
+        "title_card" | "section_card" | "testimonial" => need_text(d),
+        "feature_list" => {
+            let n = list("items").len();
+            if n == 0 || n > 5 {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/params/items"),
+                        "feature_list needs 1–5 `items` (strings)",
+                    )
+                    .hint("params: {items: [\"Shared dashboards\", \"One-click export\"]}"),
+                );
+            }
+            if let Some(r) = pm.get("reveal") {
+                let ok = r.as_array().is_some_and(|a| a.len() == n && a.iter().all(|x| x.is_number()));
+                if !ok {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/params/reveal"),
+                        "reveal needs one time per item (seconds or \"cue:name\")",
+                    ));
+                }
+            }
+        }
+        "stat" => {
+            if !pm.get("number").is_some_and(|v| v.is_number()) {
+                d.push(Diagnostic::error(
+                    "E_MISSING_FIELD",
+                    format!("{base}/params/number"),
+                    "stat needs a numeric `number`",
+                ));
+            }
+        }
+        "compare" => {
+            for side in ["left", "right"] {
+                let ok = pm.get(side).and_then(|v| v.as_object()).is_some_and(|o| {
+                    o.get("title").is_some_and(|t| t.is_string())
+                        && o.get("items").and_then(|i| i.as_array()).is_some_and(|a| !a.is_empty() && a.len() <= 6)
+                });
+                if !ok {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/params/{side}"),
+                        format!("compare needs `{side}: {{title, items: [1–6 strings]}}`"),
+                    ));
+                }
+            }
+        }
+        "logo_wall" => {
+            let logos = list("logos");
+            if logos.is_empty() || logos.len() > 12 {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    format!("{base}/params/logos"),
+                    "logo_wall needs 1–12 `logos` (image asset ids)",
+                ));
+            }
+            for (i, id) in logos.iter().enumerate() {
+                asset(id, format!("logos/{i}"), d);
+            }
+        }
+        "cta_link" => {
+            need_text(d);
+            if pm.get("url").and_then(|v| v.as_str()).map_or(true, |u| u.trim().is_empty()) {
+                d.push(Diagnostic::error("E_MISSING_FIELD", format!("{base}/params/url"), "cta_link needs `url`"));
+            }
+        }
+        _ => {}
+    }
+    for k in ["photo", "logo"] {
+        if template == "testimonial" {
+            if let Some(id) = pm.get(k).and_then(|v| v.as_str()) {
+                asset(id, k.to_string(), d);
+            }
+        }
+    }
+}
+
+fn check_annotation(l: &Layer, base: &str, d: &mut Vec<Diagnostic>) {
+    let bad_rect = |r: &Rect, d: &mut Vec<Diagnostic>| {
+        if !rect_in_frame(r) {
+            d.push(
+                Diagnostic::error(
+                    "E_RECT_OUT_OF_FRAME",
+                    format!("{base}/rect"),
+                    "rect must lie inside the frame: x, y, w, h are fractions (0–1) with x+w ≤ 1 and y+h ≤ 1",
+                )
+                .hint("e.g. {x: 0.2, y: 0.44, w: 0.3, h: 0.08}; divide pixel values by the frame width/height"),
+            );
+        }
+    };
+    let bad_point = |p: &Point, field: &str, d: &mut Vec<Diagnostic>| {
+        if !((0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y)) {
+            d.push(Diagnostic::error(
+                "E_RECT_OUT_OF_FRAME",
+                format!("{base}/{field}"),
+                "point must lie inside the frame (x and y are fractions, 0–1)",
+            ));
+        }
+    };
+    let positive = |v: &Option<f64>, field: &str, d: &mut Vec<Diagnostic>| {
+        if v.is_some_and(|v| v.is_nan() || v < 0.0) {
+            d.push(Diagnostic::error(
+                "E_BAD_VALUE",
+                format!("{base}/{field}"),
+                format!("{field} must not be negative"),
+            ));
+        }
+    };
+    match l {
+        Layer::Highlight { rect, width, radius, .. } => {
+            bad_rect(rect, d);
+            positive(width, "width", d);
+            positive(radius, "radius", d);
+        }
+        Layer::Spotlight { rect, dim, feather, radius, .. } => {
+            bad_rect(rect, d);
+            positive(feather, "feather", d);
+            positive(radius, "radius", d);
+            if dim.is_some_and(|v| !(0.0..=1.0).contains(&v)) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/dim"), "dim must be within 0–1"));
+            }
+        }
+        Layer::Arrow { from, to, width, size, .. } => {
+            bad_point(from, "from", d);
+            bad_point(to, "to", d);
+            positive(width, "width", d);
+            positive(size, "size", d);
+        }
+        Layer::Keys { keys, size, .. } => {
+            if keys.is_empty() || keys.iter().any(|k| k.trim().is_empty()) {
+                d.push(
+                    Diagnostic::error("E_BAD_VALUE", format!("{base}/keys"), "keys needs at least one key name")
+                        .hint("e.g. [\"cmd\", \"K\"]"),
+                );
+            }
+            positive(size, "size", d);
+        }
+        Layer::Cursor { path, size, .. } => {
+            if path.is_empty() {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/path"), "cursor path needs at least one key"));
+            }
+            for (i, k) in path.iter().enumerate() {
+                bad_point(&Point { x: k.x, y: k.y }, &format!("path/{i}"), d);
+                if k.t < 0.0 || (i > 0 && k.t < path[i - 1].t) {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/path/{i}/t"),
+                        "cursor key times must not be negative and must increase",
+                    ));
+                }
+            }
+            positive(size, "size", d);
+        }
+        _ => {}
+    }
 }
 
 fn check_sfx(s: &str, p: &Project, ctx: &Context, path: &str, d: &mut Vec<Diagnostic>) {

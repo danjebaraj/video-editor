@@ -54,6 +54,16 @@ pub struct QaContext {
     pub screencast: bool,
     /// `chroma: "444"`: a 4:4:4 High 4:4:4 Predictive stream is also correct.
     pub chroma444: bool,
+    /// Delivered as WebM (VP9 + Opus) instead of MP4 (H.264 + AAC).
+    pub webm: bool,
+    /// The export has no audio track by design.
+    pub no_audio: bool,
+    /// Size cap in bytes.
+    pub max_bytes: Option<u64>,
+    /// The export should loop seamlessly (last frame leads into the first).
+    pub looped: bool,
+    /// Spans of speech (file seconds) in an export delivered without audio.
+    pub muted_speech: Vec<(f64, f64)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,23 +123,58 @@ pub fn run_qa(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext) -> R
         "acodec": a["codec_name"], "aprofile": a["profile"], "sample_rate": a["sample_rate"], "channels": a["channels"], "faststart": faststart
     });
     let is444 = ctx.chroma444 && v["profile"] == "High 4:4:4 Predictive" && v["pix_fmt"] == "yuv444p";
-    let ok = fmt_name.contains("mp4")
-        && v["codec_name"] == "h264"
-        && ((v["profile"] == "High" && v["pix_fmt"] == "yuv420p") || is444)
-        && a["codec_name"] == "aac"
-        && a["profile"] == "LC"
-        && a["sample_rate"] == "48000"
-        && a["channels"] == 2
-        && faststart;
-    let summary = if !ok {
-        "container or codec settings differ from the delivery profile"
-    } else if is444 {
-        "MP4 / H.264 High 4:4:4 yuv444p / AAC-LC 48k stereo / faststart"
+    let silent_ok = ctx.no_audio && a.is_null();
+    if ctx.webm {
+        let ok = fmt_name.contains("webm")
+            && v["codec_name"] == "vp9"
+            && v["pix_fmt"] == "yuv420p"
+            && (silent_ok
+                || (!ctx.no_audio && a["codec_name"] == "opus" && a["sample_rate"] == "48000" && a["channels"] == 2));
+        let want = if ctx.no_audio { "WebM / VP9 yuv420p / no audio" } else { "WebM / VP9 yuv420p / Opus 48k stereo" };
+        b.add(
+            "container_codec",
+            Sev::Error,
+            ok,
+            if ok { want } else { "container or codec settings differ from the delivery profile" },
+            measured,
+            json!({"format": "webm", "vcodec": "vp9", "pix_fmt": "yuv420p", "acodec": if ctx.no_audio { Value::Null } else { json!("opus") }}),
+        );
     } else {
-        "MP4 / H.264 High yuv420p / AAC-LC 48k stereo / faststart"
-    };
-    b.add("container_codec", Sev::Error, ok, summary, measured,
-        json!({"format": "mp4", "vcodec": "h264", "profile": "High", "pix_fmt": "yuv420p", "acodec": "aac", "aprofile": "LC", "sample_rate": "48000", "channels": 2, "faststart": true}));
+        let audio_ok = silent_ok
+            || (!ctx.no_audio
+                && a["codec_name"] == "aac"
+                && a["profile"] == "LC"
+                && a["sample_rate"] == "48000"
+                && a["channels"] == 2);
+        let ok = fmt_name.contains("mp4")
+            && v["codec_name"] == "h264"
+            && ((v["profile"] == "High" && v["pix_fmt"] == "yuv420p") || is444)
+            && audio_ok
+            && faststart;
+        let summary = if !ok {
+            "container or codec settings differ from the delivery profile"
+        } else if ctx.no_audio {
+            "MP4 / H.264 High yuv420p / no audio / faststart"
+        } else if is444 {
+            "MP4 / H.264 High 4:4:4 yuv444p / AAC-LC 48k stereo / faststart"
+        } else {
+            "MP4 / H.264 High yuv420p / AAC-LC 48k stereo / faststart"
+        };
+        b.add("container_codec", Sev::Error, ok, summary, measured,
+            json!({"format": "mp4", "vcodec": "h264", "profile": "High", "pix_fmt": "yuv420p", "acodec": "aac", "aprofile": "LC", "sample_rate": "48000", "channels": 2, "faststart": true}));
+    }
+    // size cap
+    if let Some(max) = ctx.max_bytes {
+        let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+        b.add(
+            "file_size",
+            Sev::Error,
+            size <= max,
+            format!("{:.2} MB (cap {:.2} MB)", size as f64 / 1e6, max as f64 / 1e6),
+            json!(size),
+            json!({"max_bytes": max}),
+        );
+    }
 
     // geometry / fps
     let w = v["width"].as_u64().unwrap_or(0) as u32;
@@ -158,9 +203,9 @@ pub fn run_qa(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext) -> R
         json!({"primaries": v["color_primaries"], "transfer": v["color_transfer"], "matrix": v["color_space"], "range": v["color_range"]}),
         json!({"primaries": "bt709", "transfer": "bt709", "matrix": "bt709", "range": "tv"}));
 
-    // duration
-    let vdur = fnum(&v["duration"]).unwrap_or(0.0);
-    let adur = fnum(&a["duration"]).unwrap_or(0.0);
+    // duration (WebM keeps it on the container, not the streams)
+    let vdur = fnum(&v["duration"]).or_else(|| fnum(&fmt["duration"])).unwrap_or(0.0);
+    let adur = fnum(&a["duration"]).or_else(|| fnum(&fmt["duration"])).unwrap_or(0.0);
     let frame = 1.0 / want;
     if let Some(ed) = ctx.expected_duration {
         let ok = (vdur - ed).abs() <= frame + 1e-3;
@@ -182,14 +227,16 @@ pub fn run_qa(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext) -> R
     let vs = fnum(&v["start_time"]).unwrap_or(0.0);
     let as_ = fnum(&a["start_time"]).unwrap_or(0.0);
     let ok = vs.abs() < 1e-3 && as_.abs() < 0.03 && (vdur - adur).abs() <= frame + 0.03;
-    b.add(
-        "av_alignment",
-        Sev::Error,
-        ok,
-        format!("starts v={vs:.3} a={as_:.3}, durations v={vdur:.3} a={adur:.3}"),
-        json!({"video_start": vs, "audio_start": as_, "video_duration": vdur, "audio_duration": adur}),
-        json!({"start": 0, "tolerance_s": frame}),
-    );
+    if !ctx.no_audio {
+        b.add(
+            "av_alignment",
+            Sev::Error,
+            ok,
+            format!("starts v={vs:.3} a={as_:.3}, durations v={vdur:.3} a={adur:.3}"),
+            json!({"video_start": vs, "audio_start": as_, "video_duration": vdur, "audio_duration": adur}),
+            json!({"start": 0, "tolerance_s": frame}),
+        );
+    }
 
     // bitrate (info)
     if let Some(br) = fnum(&v["bit_rate"]).or_else(|| fnum(&fmt["bit_rate"])) {

@@ -157,13 +157,47 @@ pub struct Shake {
     pub amp_y: f64,
 }
 
-/// Collect zoom/shake terms for a clip. Returns (terms, focus, shakes, ken-burns pan).
+/// Where a zoom looks from time `a`: the focus moves there over `d` from wherever the previous
+/// zoom left it (the first key holds for the whole clip before it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FocusKey {
+    pub a: f64,
+    pub d: f64,
+    pub ease: Ease,
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Zoom focus at clip-local time `t` (frame fractions).
+pub fn focus_at(keys: &[FocusKey], t: f64) -> (f64, f64) {
+    let Some(first) = keys.first() else { return (0.5, 0.5) };
+    let mut cur = (first.x, first.y);
+    for k in &keys[1..] {
+        let u = ease(k.ease, (t - k.a) / k.d.max(1e-6));
+        cur = (cur.0 + (k.x - cur.0) * u, cur.1 + (k.y - cur.1) * u);
+    }
+    cur
+}
+
+/// ffmpeg expressions for `focus_at` (x, y) in terms of the time expression `t`.
+fn focus_expr(keys: &[FocusKey], t: &str) -> (String, String) {
+    let Some(first) = keys.first() else { return (f(0.5), f(0.5)) };
+    let (mut x, mut y) = (f(first.x), f(first.y));
+    for k in &keys[1..] {
+        let u = ease_expr(k.ease, &u_expr(t, k.a, k.d));
+        x = format!("({x}*(1-{u})+{}*{u})", f(k.x));
+        y = format!("({y}*(1-{u})+{}*{u})", f(k.y));
+    }
+    (x, y)
+}
+
+/// Collect zoom/shake terms for a clip. Returns (terms, focus keys, shakes, ken-burns pan).
 pub fn zoom_terms(
     c: &TClip,
     dur: f64,
-) -> (Vec<ScaleTerm>, (f64, f64), Vec<Shake>, Option<((f64, f64), (f64, f64), Ease)>) {
+) -> (Vec<ScaleTerm>, Vec<FocusKey>, Vec<Shake>, Option<((f64, f64), (f64, f64), Ease)>) {
     let mut terms = vec![];
-    let mut focus = (0.5, 0.5);
+    let mut focus: Vec<FocusKey> = vec![];
     let mut shakes = vec![];
     let mut kb = None;
     for e in &c.clip.effects {
@@ -174,24 +208,34 @@ pub fn zoom_terms(
                     terms.push(ScaleTerm::Release { a: at + duration + h, d: *duration, to: *scale, ease: *ez });
                 }
                 if let Some(p) = fo {
-                    focus = (p.x, p.y);
+                    focus.push(FocusKey { a: *at, d: *duration, ease: *ez, x: p.x, y: p.y });
                 }
             }
             Effect::Zoom { from, to, start, end, ease: ez, focus: fo } => {
                 let e2 = end.unwrap_or(dur);
                 terms.push(ScaleTerm::Ramp { a: *start, d: e2 - start, from: *from, to: *to, ease: *ez });
                 if let Some(p) = fo {
-                    focus = (p.x, p.y);
+                    focus.push(FocusKey { a: *start, d: (e2 - start).min(0.6), ease: *ez, x: p.x, y: p.y });
                 }
             }
             Effect::ZoomTo { rect, start, duration, ease: ez, padding, end } => {
-                let (s, p) = cutline_core::model::zoom_to_params(rect, padding.unwrap_or(0.03), 3.0);
+                // in a screen frame the rect is relative to the recording
+                let placed = match &c.content {
+                    Some(ct) => cutline_core::model::Rect {
+                        x: ct.x + rect.x * ct.w,
+                        y: ct.y + rect.y * ct.h,
+                        w: rect.w * ct.w,
+                        h: rect.h * ct.h,
+                    },
+                    None => *rect,
+                };
+                let (s, p) = cutline_core::model::zoom_to_params(&placed, padding.unwrap_or(0.03), 3.0);
                 if s > 1.0 {
                     terms.push(ScaleTerm::Ramp { a: *start, d: *duration, from: 1.0, to: s, ease: *ez });
                     if let Some(e) = end {
                         terms.push(ScaleTerm::Release { a: *e, d: *duration, to: s, ease: *ez });
                     }
-                    focus = (p.x, p.y);
+                    focus.push(FocusKey { a: *start, d: *duration, ease: *ez, x: p.x, y: p.y });
                 }
             }
             Effect::KenBurns { from_scale, to_scale, from, to, ease: ez } => {
@@ -207,6 +251,8 @@ pub fn zoom_terms(
             _ => {}
         }
     }
+    // several zooms on one clip: each has its own focus, and the view pans from one to the next
+    focus.sort_by(|a, b| a.a.partial_cmp(&b.a).unwrap());
     (terms, focus, shakes, kb)
 }
 
@@ -222,6 +268,25 @@ pub fn max_zoom(c: &TClip, dur: f64) -> f64 {
             terms.iter().map(|x| x.eval(t)).product::<f64>()
         })
         .fold(1.0, f64::max)
+}
+
+/// The zoom at clip-local time `t`: scale, and the left/top of the visible window as fractions
+/// of the frame. Mirrors `zoom_chain` (without shake), so overlays can follow the picture.
+pub fn zoom_at(c: &TClip, dur: f64, t: f64) -> (f64, f64, f64) {
+    let (terms, focus, _, kb) = zoom_terms(c, dur);
+    if terms.is_empty() {
+        return (1.0, 0.0, 0.0);
+    }
+    let s = terms.iter().map(|x| x.eval(t)).product::<f64>().max(1e-6);
+    let (fx, fy) = match kb {
+        Some(((x0, y0), (x1, y1), ez)) => {
+            let u = ease(ez, t / dur.max(1e-6));
+            (x0 + (x1 - x0) * u, y0 + (y1 - y0) * u)
+        }
+        None => focus_at(&focus, t),
+    };
+    let win = |f: f64| ((s - 1.0) * f / s).clamp(0.0, (1.0 - 1.0 / s).max(0.0));
+    (s, win(fx), win(fy))
 }
 
 /// Zoom/pan/shake chain with sub-pixel motion.
@@ -246,7 +311,7 @@ pub fn zoom_chain(c: &TClip, g: &Geometry, dur: f64) -> Option<String> {
             let u = ease_expr(ez, &u_expr(&t, 0.0, dur));
             (format!("({}+{}*{u})", f(x0), f(x1 - x0)), format!("({}+{}*{u})", f(y0), f(y1 - y0)))
         }
-        None => (f(focus.0), f(focus.1)),
+        None => focus_expr(&focus, &t),
     };
     let mut sx = String::new();
     let mut sy = String::new();

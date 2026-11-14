@@ -107,12 +107,39 @@ const INIT_TEMPLATE: &str = r#"// cutline project — see `cutline guide` and `c
 }
 "#;
 
-pub fn init(dir: &Path, target: &str, assets_dir: Option<&Path>, name: Option<&str>) -> CmdResult {
+/// `init --style business`: product demos and company videos. Screen-recording profile, sentence
+/// captions (most business video is watched muted), no retention devices.
+const INIT_BUSINESS: &str = r#"// cutline project (business / product demo) — see `cutline guide` and `cutline schema`
+{
+  version: 1,
+  name: "{{name}}",
+  target: "{{target}}",
+  profile: "screencast",
+  // set `logo`, `intro`, `outro` and colors in the brand file
+  brand: "brand/default.json",
+  assets: {
+{{assets}}  },
+  main: [
+{{main}}  ],
+  layers: [],
+  captions: { source: "auto", style: "clean_sentence" },
+  audio: { loudness: { integrated: -14, true_peak: -1.0 }, voice_chain: "clean_voice", music_level: 18 },
+}
+"#;
+
+pub fn init(dir: &Path, target: Option<&str>, style: &str, assets_dir: Option<&Path>, name: Option<&str>) -> CmdResult {
+    let business = match style {
+        "business" => true,
+        "creator" => false,
+        _ => return Err(CliError::usage(anyhow::anyhow!("unknown style `{style}` (creator, business)"))),
+    };
+    let target = target.unwrap_or(if business { "long_1080p" } else { "shorts" });
     std::fs::create_dir_all(dir).map_err(CliError::usage)?;
     for sub in ["footage", "audio", "gen", "sfx", "brand", "out"] {
         std::fs::create_dir_all(dir.join(sub)).map_err(CliError::internal)?;
     }
-    let brand_src = cutline_deps::paths::assets_dir().join("brand").join("default.json");
+    let brand_src =
+        cutline_deps::paths::assets_dir().join("brand").join(if business { "business.json" } else { "default.json" });
     let brand_dst = dir.join("brand").join("default.json");
     if !brand_dst.exists() {
         let b = std::fs::read_to_string(&brand_src).unwrap_or_else(|_| "{}".into());
@@ -160,7 +187,7 @@ pub fn init(dir: &Path, target: &str, assets_dir: Option<&Path>, name: Option<&s
             .unwrap_or_else(|| "video".into())
     });
     let style = if target == "shorts" { "bold_pop" } else { "clean_sentence" };
-    let text = INIT_TEMPLATE
+    let text = if business { INIT_BUSINESS } else { INIT_TEMPLATE }
         .replace("{{name}}", &name)
         .replace("{{target}}", target)
         .replace("{{assets}}", &assets)
@@ -279,6 +306,7 @@ pub fn edl_table(tl: &cutline_core::Timeline) -> String {
     s
 }
 
+#[derive(Clone)]
 pub struct RenderArgs {
     pub export: Option<String>,
     pub draft: bool,
@@ -292,6 +320,26 @@ pub struct RenderArgs {
 
 pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
     let l = load_or_return!(path);
+    // several variants and none chosen: render each in turn
+    let sel = cutline_render::select::current();
+    if sel.variant.is_none() && l.variants.len() > 1 && !a.dry_run {
+        let mut human = vec![];
+        let mut all = vec![];
+        let mut code = EXIT_OK;
+        for v in &l.variants {
+            cutline_render::select::set_current(cutline_render::select::Selection {
+                variant: Some(v.clone()),
+                locale: sel.locale.clone(),
+            });
+            let r = render(path, a.clone());
+            cutline_render::select::set_current(sel.clone());
+            let o = r?;
+            code = code.max(o.code);
+            human.push(format!("── variant {v} ──\n{}", o.human));
+            all.push(json!({"variant": v, "result": o.json}));
+        }
+        return Ok(Output::ok(json!({"ok": code == EXIT_OK, "variants": all}), human.join("\n")).with_code(code));
+    }
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
     }
@@ -303,6 +351,7 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
         hw: a.hw,
         out: a.out.clone(),
         skip_loudness: false,
+        ..Default::default()
     };
     if a.dry_run {
         let mut text = String::new();
@@ -314,7 +363,7 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
                 }
             }
             let pr = pipeline::prepare(&l, name.clone(), &e, a.draft).map_err(CliError::validation)?;
-            let plan = pipeline::plan_for(&l, &pr, &opts).map_err(CliError::internal)?;
+            let plan = pipeline::plan_for(&l, &pr, &pipeline::options_for(&pr, &opts)).map_err(CliError::internal)?;
             text.push_str(&cutline_render::dry_run_text(tc, &plan));
             plans.push(json!({
                 "export": name, "output": plan.output, "segments": plan.segments.iter().map(|s| json!({"clip": s.clip_id, "key": s.key, "mezzanine": s.mezzanine, "cached": s.mezzanine.exists(), "command": s.job.display(&tc.ffmpeg.to_string_lossy()), "filter": s.spec.filter})).collect::<Vec<_>>(),
@@ -478,8 +527,8 @@ pub fn qa(video: &Path, target: &str, project: Option<&Path>) -> CmdResult {
             let l = load_or_return!(pp);
             let (name, e) = pipeline::exports(&l.project)
                 .into_iter()
-                .find(|(_, e)| e.target == tn)
-                .unwrap_or((None, cutline_core::model::Export { target: tn, ..Default::default() }));
+                .find(|(_, e)| e.target.unwrap_or(l.project.target) == tn)
+                .unwrap_or((None, cutline_core::model::Export { target: Some(tn), ..Default::default() }));
             let pr = pipeline::prepare(&l, name, &e, false).map_err(CliError::validation)?;
             (pr.timeline.target.clone(), cutline_qa::deliver::qa_context(&pr.project, &pr.timeline, &pr.extras))
         }
@@ -509,13 +558,16 @@ pub fn qa(video: &Path, target: &str, project: Option<&Path>) -> CmdResult {
     Ok(Output::ok(json!(r), cutline_qa::qa::summary(&r)).with_code(code))
 }
 
-pub fn review(path: &Path, out: &Path) -> CmdResult {
+pub fn review(path: &Path, out: &Path, ocr: Option<&str>) -> CmdResult {
+    if let Some(o) = ocr {
+        cutline_qa::ocr::setting(Some(o), None).map_err(CliError::usage)?;
+    }
     let l = load_or_return!(path);
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
     }
     let out = if out.is_absolute() { out.to_path_buf() } else { l.dir.join(out) };
-    let r = cutline_qa::review::review(&l, &out).map_err(classify)?;
+    let r = cutline_qa::review::review_with(&l, &out, ocr).map_err(classify)?;
     let mut h = format!(
         "review pack: {}\nsource: {}\nQA: {}\n",
         r.dir.display(),
@@ -616,7 +668,24 @@ pub fn beats(path: &Path, asset: Option<&str>) -> CmdResult {
 }
 
 pub fn record(path: &Path, asset: Option<&str>) -> CmdResult {
-    let done = cutline_render::terminal::rerecord(path, asset).map_err(CliError::tool)?;
+    // browser recordings and terminal tapes; a project may have either or both
+    let mut done = cutline_render::browser::rerecord(path, asset, cutline_render::select::current().locale.as_deref())
+        .map_err(CliError::tool)?;
+    match cutline_render::terminal::rerecord(path, asset) {
+        Ok(t) => done.extend(t),
+        Err(e) if done.is_empty() => {
+            let msg = format!("{e:#}");
+            return Err(if msg.contains("no `.tape` asset") || msg.contains("has no `.tape` assets") {
+                CliError::usage(anyhow::anyhow!(
+                    "nothing to record: the project has no `.tape` or `.demo.json5` asset{}",
+                    asset.map(|a| format!(" named `{a}`")).unwrap_or_default()
+                ))
+            } else {
+                CliError::tool(e)
+            });
+        }
+        Err(_) => {}
+    }
     let h: Vec<String> = done.iter().map(|(id, p)| format!("✔ {id}: recorded {}", p.display())).collect();
     let j: Vec<_> = done.iter().map(|(id, p)| json!({"asset": id, "recording": p})).collect();
     Ok(Output::ok(json!({"recorded": j}), h.join("\n")))

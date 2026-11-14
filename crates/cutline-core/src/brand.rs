@@ -38,6 +38,22 @@ impl Default for BrandColors {
     }
 }
 
+/// Watermark look. Times are seconds on the edit (bumpers excluded).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Watermark {
+    pub opacity: f64,
+    /// Logo width as a fraction of the frame width.
+    pub scale: f64,
+    pub from: Option<f64>,
+    pub to: Option<f64>,
+}
+impl Default for Watermark {
+    fn default() -> Self {
+        Self { opacity: 0.7, scale: 0.08, from: None, to: None }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default)]
 pub struct Brand {
@@ -53,6 +69,10 @@ pub struct Brand {
     pub sfx: BTreeMap<String, Option<String>>,
     pub lut: Option<String>,
     pub watermark_position: Option<String>,
+    /// How the logo is drawn as a watermark (when `logo` is set).
+    pub watermark: Option<Watermark>,
+    /// Seconds of fade between a bumper (`intro`/`outro`) and the edit (default 0.4; 0 = cut).
+    pub bumper_fade: Option<f64>,
     /// Caption corrections applied after transcription (names, product terms).
     pub dictionary: BTreeMap<String, String>,
     /// Directory the brand file lives in (for relative paths).
@@ -78,6 +98,11 @@ impl Brand {
         let mut b: Brand = json5::from_str(&text).map_err(|e| anyhow::anyhow!("brand file {}: {e}", path.display()))?;
         b.dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         Ok(b)
+    }
+
+    /// A brand file path (`logo`, `intro`, `outro`), relative to the brand file.
+    pub fn file(&self, rel: &Option<String>) -> Option<PathBuf> {
+        rel.as_ref().filter(|s| !s.is_empty()).map(|s| self.dir.join(s))
     }
 
     /// Resolved SFX alias files that exist.

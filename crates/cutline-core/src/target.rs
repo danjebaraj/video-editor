@@ -115,6 +115,21 @@ pub fn resolve(
             screencast: false,
             chroma444: false,
         },
+        TargetName::Portrait4x5 => TargetSpec {
+            name,
+            width: 1080,
+            height: 1350,
+            fps: fps.unwrap_or(Fps::new(30, 1)),
+            crf: 18,
+            max_duration: None,
+            // feed players draw little over the picture; keep a margin for their controls
+            safe: SafeZone { top: 0.06, bottom: 0.10, left: 0.06, right: 0.06 },
+            max_chars: 26,
+            lra_max: 9.0,
+            bitrate_kbps: (1_500, 30_000),
+            screencast: false,
+            chroma444: false,
+        },
         TargetName::Custom => {
             let (w, h) = (w.unwrap_or(1920) & !1, h.unwrap_or(1080) & !1);
             TargetSpec {
@@ -141,6 +156,7 @@ pub fn target_str(t: TargetName) -> &'static str {
         TargetName::Long1080p => "long_1080p",
         TargetName::Long4k => "long_4k",
         TargetName::Square => "square",
+        TargetName::Portrait4x5 => "portrait_4x5",
         TargetName::Custom => "custom",
     }
 }

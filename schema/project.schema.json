@@ -37,6 +37,13 @@
         "null"
       ]
     },
+    "brand_bumpers": {
+      "description": "`false`: do not add the brand's `intro` / `outro` around `main`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "captions": {
       "anyOf": [
         {
@@ -64,6 +71,17 @@
       "additionalProperties": {
         "$ref": "#/$defs/Cue"
       }
+    },
+    "default_frame": {
+      "description": "Screen frame for every video clip that has no `frame` of its own.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScreenFrame"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "default_reframe": {
       "description": "Default geometry for clips whose aspect differs from the target (default `cover`).",
@@ -107,6 +125,13 @@
         "$ref": "#/$defs/Layer"
       }
     },
+    "locales": {
+      "description": "Languages (`cutline render --locale de`); see `Locale`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Locale"
+      }
+    },
     "main": {
       "description": "Main storyline: clips, with transitions between them.",
       "type": "array",
@@ -139,6 +164,17 @@
         }
       ]
     },
+    "qa": {
+      "description": "Review settings (text recognition for the demo checks).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QaSettings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "safe_zone": {
       "description": "Override the target's safe zone.",
       "anyOf": [
@@ -150,16 +186,37 @@
         }
       ]
     },
+    "strings": {
+      "description": "Strings that text can refer to as `\"@key\"` (the base language).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "target": {
       "description": "Output target preset (geometry, fps, encoder, safe zones).",
       "$ref": "#/$defs/TargetName",
       "default": "shorts"
+    },
+    "variants": {
+      "description": "Named cuts of the edit (`cutline render --variant teaser`); see `Variant`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Variant"
+      }
     },
     "version": {
       "description": "Schema version. Must be 1.",
       "type": "integer",
       "format": "uint32",
       "minimum": 0
+    },
+    "watermark": {
+      "description": "`false`: do not draw the brand logo as a watermark.",
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "width": {
       "description": "Width/height for `target: custom`.",
@@ -187,6 +244,14 @@
         "slide_down",
         "pop",
         "scale_in"
+      ]
+    },
+    "AnnotEnter": {
+      "type": "string",
+      "enum": [
+        "draw",
+        "fade",
+        "none"
       ]
     },
     "Asset": {
@@ -368,9 +433,56 @@
       },
       "additionalProperties": false
     },
+    "AutoCursor": {
+      "type": "object",
+      "properties": {
+        "click_ripple": {
+          "type": "boolean",
+          "default": true
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "keys": {
+          "description": "Show a `keys` badge for shortcuts and Enter/Escape/Tab presses (default true).",
+          "type": "boolean",
+          "default": true
+        },
+        "size": {
+          "description": "Pointer size multiplier (default 1.4).",
+          "type": "number",
+          "format": "double",
+          "default": 1.4
+        }
+      },
+      "additionalProperties": false
+    },
     "AutoDirectives": {
       "type": "object",
       "properties": {
+        "cursor": {
+          "description": "Browser recordings: draw the mouse pointer (with click ripples) and shortcut badges.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AutoCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fast_forward_idle": {
+          "description": "Play stretches where little changes on screen and nobody speaks at a higher speed.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FastForwardIdle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "jump_cuts": {
           "anyOf": [
             {
@@ -418,9 +530,41 @@
               "type": "null"
             }
           ]
+        },
+        "zoom_on_clicks": {
+          "description": "Browser recordings: zoom in on each click and follow from one click to the next.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ZoomOnClicks"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
+    },
+    "ByteSize": {
+      "description": "A size in bytes: a number, or a string like `\"8MB\"`, `\"900KB\"`, `\"1.5GB\"` (powers of 1000).",
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "CaptionDelivery": {
+      "type": "string",
+      "enum": [
+        "burn",
+        "sidecar",
+        "none"
+      ]
     },
     "CaptionSource": {
       "oneOf": [
@@ -631,11 +775,29 @@
             }
           ]
         },
+        "except": {
+          "description": "Variants this clip is left out of.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "fit": {
           "description": "With `end_at`, `in` and `out`: `trim` (default) keeps the speed and trims or holds;\n`speed` plays exactly `in`..`out` at whatever speed fills the slot (frame-blended).",
           "anyOf": [
             {
               "$ref": "#/$defs/EndFit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame": {
+          "description": "Draw the clip inside a window (browser, app window, phone, tablet) on a background,\ninstead of full-bleed. `zoom_to` rects and annotations stay relative to the recording.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScreenFrame"
             },
             {
               "type": "null"
@@ -671,6 +833,13 @@
             }
           ]
         },
+        "only": {
+          "description": "Variants this clip belongs to (default: all).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "out": {
           "description": "Source out point (default: end of the asset).",
           "anyOf": [
@@ -697,7 +866,7 @@
           "type": "boolean"
         },
         "speed": {
-          "description": "Constant speed factor 0.25–4.",
+          "description": "Constant speed factor 0.25–8.",
           "type": [
             "number",
             "null"
@@ -858,6 +1027,34 @@
       "additionalProperties": false,
       "required": [
         "phrase"
+      ]
+    },
+    "CursorKey": {
+      "type": "object",
+      "properties": {
+        "click": {
+          "description": "A click happens when the pointer arrives here.",
+          "type": "boolean"
+        },
+        "t": {
+          "description": "Seconds after the layer starts.",
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "t",
+        "x",
+        "y"
       ]
     },
     "Duck": {
@@ -1313,6 +1510,24 @@
     "Export": {
       "type": "object",
       "properties": {
+        "audio": {
+          "description": "`false`: no audio track (silent autoplay embeds).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "captions": {
+          "description": "`burn` (default: captions in the picture), `sidecar` (only the .srt/.vtt files) or `none`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptionDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "chroma": {
           "description": "Overrides the project's `chroma` for this export.",
           "anyOf": [
@@ -1332,6 +1547,17 @@
           "format": "uint32",
           "minimum": 0
         },
+        "format": {
+          "description": "`mp4` (H.264 + AAC, default) or `webm` (VP9 + Opus).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExportFormat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "fps": {
           "anyOf": [
             {
@@ -1350,6 +1576,24 @@
           "format": "uint32",
           "minimum": 0
         },
+        "loop": {
+          "description": "`true`: make the video loop seamlessly (its end dissolves into its start; the export is\nhalf a second shorter). Needs `audio: false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "max_bytes": {
+          "description": "Largest file size, e.g. `\"8MB\"`, `\"900KB\"` or bytes. The bitrate is solved for it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ByteSize"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "name": {
           "description": "Export name (used in the output file name). Defaults to the target name.",
           "type": [
@@ -1358,15 +1602,45 @@
           ]
         },
         "out": {
-          "description": "Output path (relative to the project). Default `out/<name>.mp4`.",
+          "description": "Output path (relative to the project). Default `out/<name>.mp4` (or `.webm`).",
           "type": [
             "string",
             "null"
           ]
         },
+        "poster": {
+          "description": "Time on the edit of the poster frame written next to the video (default 0.5 s).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "range": {
+          "description": "Export only this part of the edit: `[from, to]` (times on the edit; cues allowed).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/TimeValue"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
         "target": {
-          "$ref": "#/$defs/TargetName",
-          "default": "shorts"
+          "description": "Default: the project's target (and size).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetName"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "width": {
           "type": [
@@ -1375,6 +1649,59 @@
           ],
           "format": "uint32",
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExportFormat": {
+      "type": "string",
+      "enum": [
+        "mp4",
+        "webm"
+      ]
+    },
+    "FastForwardIdle": {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "description": "Share of the picture that may change per tenth of a second and still count as idle\n(default 0.006: typing, a spinner or a blinking caret).",
+          "type": "number",
+          "format": "double",
+          "default": 0.006
+        },
+        "applies_to": {
+          "description": "Asset ids (default: every video clip asset).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "badge": {
+          "description": "Show a small speed badge (\"4×\") while fast-forwarding (default true).",
+          "type": "boolean",
+          "default": true
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "keep": {
+          "description": "Seconds kept at normal speed at each end of an idle stretch (default 0.4).",
+          "type": "number",
+          "format": "double",
+          "default": 0.4
+        },
+        "min_idle": {
+          "description": "Shortest idle stretch worth speeding up, in seconds (default 2.5).",
+          "type": "number",
+          "format": "double",
+          "default": 2.5
+        },
+        "speed": {
+          "description": "Playback speed of idle stretches (default 4; up to 8).",
+          "type": "number",
+          "format": "double",
+          "default": 4.0
         }
       },
       "additionalProperties": false
@@ -1397,6 +1724,79 @@
         {
           "type": "string"
         }
+      ]
+    },
+    "FrameBackground": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "gradient": {
+              "description": "Two colors, top-left to bottom-right.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "gradient"
+          ]
+        },
+        {
+          "description": "`brand`, a color (`#101014`) or an image asset id.",
+          "type": "string"
+        }
+      ]
+    },
+    "FrameStyle": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "tablet"
+          ]
+        },
+        {
+          "description": "Title bar with an address field.",
+          "type": "string",
+          "const": "browser"
+        },
+        {
+          "description": "Title bar with a title.",
+          "type": "string",
+          "const": "window"
+        },
+        {
+          "description": "Rounded bezel, portrait recordings.",
+          "type": "string",
+          "const": "phone"
+        },
+        {
+          "description": "No chrome: just rounded corners, shadow and background.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "No frame at all (opts a clip out of `default_frame`).",
+          "type": "string",
+          "const": "off"
+        }
+      ]
+    },
+    "FrameTheme": {
+      "type": "string",
+      "enum": [
+        "dark",
+        "light"
+      ]
+    },
+    "HighlightStyle": {
+      "type": "string",
+      "enum": [
+        "outline",
+        "fill",
+        "underline"
       ]
     },
     "JumpCuts": {
@@ -1499,6 +1899,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -1526,6 +1933,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -1695,6 +2109,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -1729,6 +2150,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -1895,6 +2323,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -1935,6 +2370,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2095,6 +2537,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -2128,6 +2577,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2268,6 +2724,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -2295,6 +2758,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2407,6 +2877,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "height": {
               "description": "Height in px (default 12 for shorts, 8 otherwise).",
               "type": [
@@ -2423,6 +2900,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "start": {
               "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
@@ -2496,6 +2980,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "fade_in": {
               "type": [
                 "number",
@@ -2531,6 +3022,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "role": {
               "description": "Override the asset role (voice/music/sfx).",
@@ -2612,6 +3110,20 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "follow": {
+              "description": "`true`: the rect is in fractions of the clip's picture and the mask moves with the\nclip's screen frame and zoom (like an annotation). Needs `mode: \"fill\"`.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "mode": {
               "description": "blur (default) | pixelate | fill. Use `fill` for secrets: blurred or pixelated text\ncan sometimes be recovered.",
               "anyOf": [
@@ -2630,6 +3142,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "rect": {
               "description": "Region as fractions of the frame: `{x, y, w, h}` (top-left corner, size).",
@@ -2687,6 +3206,850 @@
           ]
         },
         {
+          "description": "Outline, fill or underline a region to show where to look.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "color": {
+              "description": "`brand` (the accent, default) or a color.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enter": {
+              "description": "draw (default: the stroke draws itself) | fade | none",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotEnter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "follow": {
+              "description": "Move with the zoom of the clip underneath (default true).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "radius": {
+              "description": "Corner radius in output px (default 8 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "description": "Region as fractions of the frame: `{x, y, w, h}`.",
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "style": {
+              "description": "outline (default) | fill | underline",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/HighlightStyle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "highlight"
+            },
+            "width": {
+              "description": "Stroke width in output px (default 4 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          },
+          "required": [
+            "type",
+            "rect"
+          ]
+        },
+        {
+          "description": "Dim everything except a region. Spotlights on screen together share one dim layer.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dim": {
+              "description": "How dark the rest gets, 0–1 (default 0.6).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "feather": {
+              "description": "Soft edge in output px (default 12 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "follow": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "radius": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "spotlight"
+            }
+          },
+          "required": [
+            "type",
+            "rect"
+          ]
+        },
+        {
+          "description": "Arrow from one point to another (fractions of the frame), with an optional label at\nits tail.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "follow": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "from": {
+              "$ref": "#/$defs/Point"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "size": {
+              "description": "Label size in output px (default 34 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "to": {
+              "$ref": "#/$defs/Point"
+            },
+            "type": {
+              "type": "string",
+              "const": "arrow"
+            },
+            "width": {
+              "description": "Shaft width in output px (default 6 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          },
+          "required": [
+            "type",
+            "from",
+            "to"
+          ]
+        },
+        {
+          "description": "Keycap badges for a shortcut: `keys: [\"cmd\", \"K\"]`.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "position": {
+              "description": "Default `bottom`.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "size": {
+              "description": "Keycap height in output px (default 64 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "keys"
+            }
+          },
+          "required": [
+            "type",
+            "keys"
+          ]
+        },
+        {
+          "description": "The presenter's camera over the screen: a bubble, a side panel or the full frame,\nswitchable over time with `layouts`.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "asset": {
+              "type": "string"
+            },
+            "audio": {
+              "description": "Use the camera's sound as dialogue (default false).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "border": {
+              "description": "Border width in output px (default 4) and color (default white).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border_color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "focus": {
+              "description": "Where the face is in the camera picture (fractions). Default: detected, else the\nmiddle of the upper half.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "gain_db": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "layouts": {
+              "description": "Layout changes: `[{at: 0, layout: \"bubble\"}, {at: \"cue:intro\", layout: \"presenter_full\"}]`.\nDefault: `bubble` throughout.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LayoutKey"
+              }
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "position": {
+              "description": "Bubble position (default `bottom_right`).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scale": {
+              "description": "Bubble width as a fraction of the frame width (default 0.18; 0.3 on vertical targets).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "shadow": {
+              "description": "Drop shadow (default true).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "shape": {
+              "description": "circle (default) | rounded",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PresenterShape"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "src_in": {
+              "description": "Camera time shown when the layer starts (to line the camera up with the screen).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "presenter"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
+          "description": "A small pill with a short text, e.g. the speed while fast-forwarding (\"4×\").",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "position": {
+              "description": "Default `top_right`.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "size": {
+              "description": "Text size in output px (default 30 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "badge"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ]
+        },
+        {
+          "description": "A drawn mouse pointer moving along `path`, with a ripple on clicks. Use it over\nrecordings made without a cursor.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "click_ripple": {
+              "description": "Ripple on clicks (default true).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "color": {
+              "description": "Ripple color: `brand` (default) or a color.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "follow": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "path": {
+              "description": "Keys: `t` seconds after the layer starts, `x`/`y` fractions of the frame.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CursorKey"
+              }
+            },
+            "size": {
+              "description": "Pointer size multiplier (default 1 = 28 px tall at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "cursor"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ]
+        },
+        {
           "description": "One-shot sound effect at `at` (or anchored).",
           "type": "object",
           "properties": {
@@ -2710,6 +4073,12 @@
                 }
               ]
             },
+            "except": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "gain_db": {
               "type": [
                 "number",
@@ -2730,6 +4099,12 @@
               ],
               "format": "double"
             },
+            "only": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "pick_from": {
               "type": "array",
               "items": {
@@ -2747,6 +4122,52 @@
           ]
         }
       ]
+    },
+    "LayoutKey": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "Time on the edit from which this layout shows.",
+          "$ref": "#/$defs/TimeValue"
+        },
+        "layout": {
+          "$ref": "#/$defs/PresenterLayout"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "layout"
+      ]
+    },
+    "Locale": {
+      "description": "A language of the video.",
+      "type": "object",
+      "properties": {
+        "assets": {
+          "description": "Asset fields to replace, by asset id (voice-over, its script and transcript, recordings).",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "cues": {
+          "description": "Cue phrases in this language, by cue name.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Cue"
+          }
+        },
+        "lang": {
+          "description": "Language code for transcription and browser recordings (e.g. `de`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strings": {
+          "description": "Strings for `\"@key\"` text: a JSON5 file path, or the table itself."
+        }
+      },
+      "additionalProperties": false
     },
     "LoudnessTarget": {
       "type": "object",
@@ -2806,6 +4227,15 @@
         "fill"
       ]
     },
+    "OcrEngine": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "vision",
+        "tesseract",
+        "off"
+      ]
+    },
     "Point": {
       "type": "object",
       "properties": {
@@ -2833,6 +4263,37 @@
         {
           "$ref": "#/$defs/Point"
         }
+      ]
+    },
+    "PresenterLayout": {
+      "oneOf": [
+        {
+          "description": "Small camera picture in a corner.",
+          "type": "string",
+          "const": "bubble"
+        },
+        {
+          "description": "The camera as a tall panel over the right third of the frame.",
+          "type": "string",
+          "const": "side_by_side"
+        },
+        {
+          "description": "The camera fills the frame.",
+          "type": "string",
+          "const": "presenter_full"
+        },
+        {
+          "description": "The camera is hidden.",
+          "type": "string",
+          "const": "screen_full"
+        }
+      ]
+    },
+    "PresenterShape": {
+      "type": "string",
+      "enum": [
+        "circle",
+        "rounded"
       ]
     },
     "Profile": {
@@ -2872,6 +4333,39 @@
         "skip_if_other_motion": {
           "type": "boolean",
           "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "QaSettings": {
+      "type": "object",
+      "properties": {
+        "max_quiet": {
+          "description": "Seconds with nothing said and nothing pointed at before review suggests tightening\n(default 8).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "min_text_px": {
+          "description": "Smallest text height that counts as readable, in output px (default 2 % of the frame's\nshorter side; 2.4 % on vertical targets).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "ocr": {
+          "description": "Text recognition engine for `cutline review`: `auto` (default: macOS Vision on macOS,\nTesseract elsewhere), `vision`, `tesseract` or `off`. The `CUTLINE_OCR` environment\nvariable and `review --ocr` override it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OcrEngine"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -3119,6 +4613,77 @@
         "right"
       ]
     },
+    "ScreenFrame": {
+      "description": "A screen frame: the recording inside generated window chrome on a background.",
+      "type": "object",
+      "properties": {
+        "background": {
+          "description": "`brand` (default: the brand background), a color, `{gradient: [from, to]}`, or the id\nof an image asset.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameBackground"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "padding": {
+          "description": "Space around the window as a fraction of the frame's shorter side (default 0.06).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "radius": {
+          "description": "Corner radius in output px (default 14 at 1080p; phones and tablets have their own).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "shadow": {
+          "description": "Drop shadow strength 0–1 (default 0.5).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "style": {
+          "$ref": "#/$defs/FrameStyle",
+          "default": "browser"
+        },
+        "theme": {
+          "description": "Chrome colors: dark (default) or light.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "description": "Title shown in a `window` frame.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Address shown in a `browser` frame.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "SnapToBeats": {
       "type": "object",
       "properties": {
@@ -3179,13 +4744,22 @@
       "additionalProperties": false
     },
     "TargetName": {
-      "type": "string",
-      "enum": [
-        "shorts",
-        "long_1080p",
-        "long_4k",
-        "square",
-        "custom"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "shorts",
+            "long_1080p",
+            "long_4k",
+            "square",
+            "custom"
+          ]
+        },
+        {
+          "description": "1080×1350 feed video (LinkedIn, Instagram).",
+          "type": "string",
+          "const": "portrait_4x5"
+        }
       ]
     },
     "TimeValue": {
@@ -3295,6 +4869,88 @@
       "required": [
         "transition"
       ]
+    },
+    "Variant": {
+      "description": "A cut of the edit. Clips and layers also choose their variants with `only` / `except`.",
+      "type": "object",
+      "properties": {
+        "assets": {
+          "description": "Asset fields to replace, by asset id: `{vo: {path: \"vo.teaser.mp3\", script: \"vo.teaser.txt\"}}`.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "exclude": {
+          "description": "Clip ids to leave out.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exports": {
+          "description": "Export names to render for this variant (default: all).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include": {
+          "description": "Clip ids to keep (default: all).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_duration": {
+          "description": "Warn when this variant runs longer (seconds).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ZoomOnClicks": {
+      "type": "object",
+      "properties": {
+        "duration": {
+          "description": "Zoom in/out time (default 0.6).",
+          "type": "number",
+          "format": "double",
+          "default": 0.6
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "hold": {
+          "description": "Seconds the zoom stays after the last click of a group (default 1.2).",
+          "type": "number",
+          "format": "double",
+          "default": 1.2
+        },
+        "max_scale": {
+          "description": "Strongest zoom (default 2; 1.2–3).",
+          "type": "number",
+          "format": "double",
+          "default": 2.0
+        },
+        "merge_within": {
+          "description": "Clicks closer together than this many seconds share one zoom (default 2.5).",
+          "type": "number",
+          "format": "double",
+          "default": 2.5
+        },
+        "steps": {
+          "description": "Only these step names (default: every click and typed field).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

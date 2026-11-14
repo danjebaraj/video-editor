@@ -177,6 +177,7 @@ pub fn plan(
                 });
             }
             Layer::Video { asset, audio: Some(true), gain_db, src_in, .. }
+            | Layer::Presenter { asset, audio: Some(true), gain_db, src_in, .. }
             | Layer::Broll { asset, audio: Some(true), gain_db, src_in, .. } => {
                 let Some(m) = media.get(asset) else { continue };
                 if !m.facts.has_audio {

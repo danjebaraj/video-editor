@@ -20,6 +20,13 @@ pub struct Loaded {
     pub timeline: Option<Timeline>,
     /// Cue references resolved while loading (see `cues`).
     pub cues: Vec<crate::cues::ResolvedCue>,
+    /// Events of the browser recordings among the assets (see `browser`), by asset id.
+    pub demos: crate::browser::Demos,
+    /// The variant and locale this was loaded as (see `select`).
+    pub selection: crate::select::Selection,
+    /// Variant and locale names the project defines.
+    pub variants: Vec<String>,
+    pub locales: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -70,6 +77,17 @@ pub fn parse_file_with_cues(
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
     let mut v = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let dir = path.parent().unwrap_or(Path::new("."));
+    let sel = crate::select::current();
+    let (sel_notes, used) = crate::select::apply(&mut v, dir, &file_stem(path), &sel);
+    if has_errors(&sel_notes) {
+        return Err(LoadError::Invalid(sel_notes));
+    }
+    // browser recordings already made are used; none is made here
+    let (mut demo_notes, demos) = crate::browser::prepare(&mut v, dir, false, used.locale.as_deref());
+    demo_notes.extend(crate::browser::resolve_steps(&mut v, &demos));
+    if has_errors(&demo_notes) {
+        return Err(LoadError::Invalid(demo_notes));
+    }
     let beat_notes = crate::beatrefs::resolve(&mut v, dir);
     if has_errors(&beat_notes) {
         return Err(LoadError::Invalid(beat_notes));
@@ -79,7 +97,8 @@ pub fn parse_file_with_cues(
     if has_errors(&notes) {
         return Err(LoadError::Invalid(notes));
     }
-    let p = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+    let mut p = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+    add_brand_bumpers(&mut p, dir);
     Ok((p, notes, cues))
 }
 
@@ -94,6 +113,15 @@ const CUE_ROUNDS: usize = 6;
 /// it stops moving (normally the second round). If it never settles, the anchor clip's own
 /// position depends on those cues (`E_CUE_CYCLE`).
 pub fn load(path: &Path) -> Result<Loaded, LoadError> {
+    load_with(path, &crate::select::current())
+}
+
+fn file_stem(path: &Path) -> String {
+    path.file_stem().and_then(|s| s.to_str()).unwrap_or("video").trim_end_matches(".json5").to_string()
+}
+
+/// `load` as a given variant and locale of the project.
+pub fn load_with(path: &Path, sel: &crate::select::Selection) -> Result<Loaded, LoadError> {
     let path = std::fs::canonicalize(path)
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot open {}: {e}", path.display())))?;
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -101,6 +129,19 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
     let mut v0 = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let tc = cutline_deps::toolchain().map_err(LoadError::Tool)?;
+    // the variant and the locale come first: everything after sees an ordinary project
+    let (variants, locales) = (crate::select::names(&v0, "variants"), crate::select::names(&v0, "locales"));
+    let (sel_notes, selection) = crate::select::apply(&mut v0, &dir, &file_stem(&path), sel);
+    if has_errors(&sel_notes) {
+        return Err(LoadError::Invalid(sel_notes));
+    }
+    // browser recordings (`.demo.json5` assets) become cached videos, and references to their
+    // named steps become numbers and rects
+    let (mut demo_notes, demos) = crate::browser::prepare(&mut v0, &dir, true, selection.locale.as_deref());
+    demo_notes.extend(crate::browser::resolve_steps(&mut v0, &demos));
+    if has_errors(&demo_notes) {
+        return Err(LoadError::Invalid(demo_notes));
+    }
     // `bar:`/`beat:` times become seconds first (they depend only on the music layer)
     let beat_notes = crate::beatrefs::resolve(&mut v0, &dir);
     if has_errors(&beat_notes) {
@@ -117,6 +158,7 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
             return Err(LoadError::Invalid(notes));
         }
         let mut project = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+        add_brand_bumpers(&mut project, &dir);
         // terminal recordings (`.tape` assets) become cached videos before probing (once)
         match &tapes {
             Some(map) => {
@@ -129,6 +171,7 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
             None => {
                 let before: Vec<(String, String)> =
                     project.assets.iter().map(|(k, a)| (k.clone(), a.path.clone())).collect();
+                color_assets(&mut project, &dir).map_err(LoadError::Io)?;
                 let errs = crate::terminal::record_tapes(
                     &mut project,
                     &dir,
@@ -159,7 +202,37 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         if anchored.is_empty() || settled {
             diags.extend(notes);
             diags.extend(beat_notes);
-            return Ok(Loaded { path, dir, project, media: media.unwrap(), diags, timeline, cues });
+            diags.extend(demo_notes.clone());
+            // a variant with a length to keep
+            if let (Some(tl), Some(v)) = (&timeline, selection.variant.as_ref()) {
+                let max = project.variants.get(v).and_then(|x| x.max_duration);
+                let secs = tl.secs(tl.body_end - tl.origin);
+                if let Some(m) = max.filter(|m| secs > *m + 0.05) {
+                    diags.push(
+                        Diagnostic::warning(
+                            "W_VARIANT_TOO_LONG",
+                            format!("/variants/{}/max_duration", cutline_core::diag::ptr_token(v)),
+                            format!("variant `{v}` runs {secs:.1}s; its limit is {m:.0}s"),
+                        )
+                        .hint(
+                            "leave out more clips (`exclude`, or `except` on clips), or give it a shorter voice-over",
+                        ),
+                    );
+                }
+            }
+            return Ok(Loaded {
+                path,
+                dir,
+                project,
+                media: media.unwrap(),
+                diags,
+                timeline,
+                cues,
+                demos,
+                selection,
+                variants,
+                locales,
+            });
         }
         last_anchor = anchored.first().map(|a| a.layer);
         starts = next;
@@ -171,6 +244,76 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         "the voice layer is anchored to a clip whose position depends on cues from this voice layer, so it never settles",
     )
     .hint("anchor the voice layer to an earlier clip (one not fitted to its cues), or give it a numeric `start`")]))
+}
+
+/// Plain-color assets: `path: "color:#101014"` or `"color:brand"` (the brand background)
+/// become a small still of that color, e.g. as the clip under a `title_card`.
+pub fn color_assets(p: &mut Project, dir: &Path) -> Result<()> {
+    let brand_spec = p.brand.clone();
+    for a in p.assets.values_mut() {
+        let Some(c) = a.path.strip_prefix("color:") else { continue };
+        let hex = if c.trim() == "brand" {
+            cutline_core::brand::Brand::load(brand_spec.as_deref(), dir, &cutline_deps::paths::assets_dir())
+                .map(|b| b.colors.background)
+                .unwrap_or_else(|_| "#101014".into())
+        } else {
+            c.trim().to_string()
+        };
+        let rgb = crate::overlay::rgb_of(&hex);
+        let out = crate::cutline_dir(dir).join("cache").join("color");
+        std::fs::create_dir_all(&out)?;
+        let file = out.join(format!("{:02x}{:02x}{:02x}.png", rgb[0], rgb[1], rgb[2]));
+        if !file.exists() {
+            image::RgbImage::from_pixel(64, 64, image::Rgb(rgb)).save(&file).context("writing color asset")?;
+        }
+        a.path = file.to_string_lossy().to_string();
+    }
+    Ok(())
+}
+
+/// Add the brand's `intro` and `outro` around `main` as explicit clips (`generated_by:
+/// "brand_intro"` / `"brand_outro"`), each joined to the edit by a fade (`bumper_fade`).
+/// Times written in the project keep counting from the start of the edit (see
+/// `Timeline::origin`). Does nothing with `brand_bumpers: false`, without a brand intro/outro,
+/// or when the clips are already there (an expanded project).
+pub fn add_brand_bumpers(p: &mut Project, dir: &Path) {
+    use cutline_core::model::{MainItem, BRAND_INTRO, BRAND_OUTRO};
+    if p.brand_bumpers == Some(false) || p.main.is_empty() || p.clips().any(|c| c.is_bumper()) {
+        return;
+    }
+    let Ok(brand) = cutline_core::brand::Brand::load(p.brand.as_deref(), dir, &cutline_deps::paths::assets_dir())
+    else {
+        return; // reported when the brand is loaded for rendering
+    };
+    let fade = brand.bumper_fade.unwrap_or(0.4).clamp(0.0, 5.0);
+    let item = |v: serde_json::Value| -> Option<MainItem> { serde_json::from_value(v).ok() };
+    let add = |p: &mut Project, id: &str, file: std::path::PathBuf, front: bool| {
+        let asset = serde_json::from_value(serde_json::json!({"path": file.to_string_lossy()}));
+        let clip = item(serde_json::json!({"id": id, "clip": id, "generated_by": id}));
+        let (Ok(asset), Some(clip)) = (asset, clip) else { return };
+        if p.assets.contains_key(id) || p.clips().any(|c| c.id == id) {
+            return;
+        }
+        p.assets.insert(id.to_string(), asset);
+        let tr = (fade > 0.0)
+            .then(|| item(serde_json::json!({"transition": {"type": "fade", "duration": fade, "generated_by": id}})))
+            .flatten();
+        if front {
+            if let Some(t) = tr {
+                p.main.insert(0, t);
+            }
+            p.main.insert(0, clip);
+        } else {
+            p.main.extend(tr);
+            p.main.push(clip);
+        }
+    };
+    if let Some(f) = brand.file(&brand.intro) {
+        add(p, BRAND_INTRO, f, true);
+    }
+    if let Some(f) = brand.file(&brand.outro) {
+        add(p, BRAND_OUTRO, f, false);
+    }
 }
 
 /// Timeline start (seconds) of each anchored voice layer: its anchor clip's start (+ offset),
@@ -200,7 +343,7 @@ fn anchor_starts(
         q.captions = None;
         if let (Some(tl), _) = resolve(&q, media, &context(dir)) {
             if let Some(c) = tl.clip_by_id(&a.anchor) {
-                out.insert(a.layer, tl.secs(c.start + tl.fps.secs_to_frames(a.offset)));
+                out.insert(a.layer, tl.secs(c.start + tl.fps.secs_to_frames(a.offset) - tl.origin));
             }
         }
     }
@@ -210,7 +353,9 @@ fn anchor_starts(
 /// Project variant for one export (target/fps/size override).
 pub fn for_export(p: &Project, e: &Export) -> Project {
     let mut q = p.clone();
-    q.target = e.target;
+    if let Some(t) = e.target {
+        q.target = t;
+    }
     if e.fps.is_some() {
         q.fps = e.fps;
     }
@@ -226,14 +371,36 @@ pub fn for_export(p: &Project, e: &Export) -> Project {
     q
 }
 
+/// Delivery choices of an export, resolved against its timeline.
+pub fn delivery(e: &Export, tl: &Timeline) -> crate::Delivery {
+    let body = tl.body_end - tl.origin;
+    let range = e.range.map(|[a, b]| {
+        let f = |t: cutline_core::time::TimeValue| (tl.origin + t.frames(tl.fps, body)).clamp(0, tl.total_frames);
+        (f(a), f(b))
+    });
+    let n = range.map(|(a, b)| b - a).unwrap_or(tl.total_frames);
+    // half a second of dissolve, less for very short pieces
+    let loop_frames = if e.r#loop == Some(true) { tl.fps.secs_to_frames(0.5).min(n / 4).max(1) } else { 0 };
+    crate::Delivery {
+        format: e.format.unwrap_or_default(),
+        no_audio: e.audio == Some(false),
+        range,
+        loop_frames,
+        max_bytes: e.max_bytes.as_ref().and_then(|m| m.bytes()),
+        crf: e.crf,
+    }
+}
+
 pub fn export_name(e: &Export) -> String {
-    e.name.clone().unwrap_or_else(|| cutline_core::target::target_str(e.target).to_string())
+    e.name.clone().unwrap_or_else(|| {
+        e.target.map(|t| cutline_core::target::target_str(t).to_string()).unwrap_or_else(|| "main".into())
+    })
 }
 
 /// The exports to render (project.exports or one implicit export of the project target).
 pub fn exports(p: &Project) -> Vec<(Option<String>, Export)> {
     if p.exports.is_empty() {
-        vec![(None, Export { target: p.target, ..Default::default() })]
+        vec![(None, Export::default())]
     } else if p.exports.len() == 1 {
         vec![(None, p.exports[0].clone())]
     } else {
@@ -248,6 +415,8 @@ pub struct Prepared {
     pub timeline: Timeline,
     pub diags: Vec<Diagnostic>,
     pub extras: PlanExtras,
+    /// The export this was prepared for.
+    pub export: Export,
 }
 
 /// Resolve one export and compute the plan extras.
@@ -272,9 +441,35 @@ pub fn prepare_for(
         bail!(LoadError::Invalid(diags));
     }
     let tl = tl.context("timeline did not resolve")?;
-    let extras = crate::extras::compute_for(l, &p, &tl, draft, stills)?;
+    let mut extras = crate::extras::compute_for(l, &p, &tl, draft, stills)?;
+    // captions only as files (or not at all): keep them out of the picture
+    if !matches!(e.captions.unwrap_or_default(), cutline_core::model::CaptionDelivery::Burn) {
+        extras.ass_docs.retain(|(name, _)| name != "captions.ass");
+        extras.text_boxes.retain(|b| b.kind != "caption");
+    }
+    if let Some(max) = e.max_bytes.as_ref().and_then(|m| m.bytes()) {
+        let d = delivery(e, &tl);
+        let kbps = crate::video_kbps_for(max, d.frames(tl.total_frames), tl.fps.as_f64(), &d);
+        let floor = (tl.target.width * tl.target.height) as f64 / 2_000.0; // ≈ 1 Mb/s at 1080p
+        if kbps < floor {
+            extras.warnings.push(
+                Diagnostic::warning(
+                    "W_MAX_BYTES_TIGHT",
+                    "/exports",
+                    format!(
+                        "export `{}`: {} bytes leaves about {kbps:.0} kb/s of video at {}×{}; expect visible compression",
+                        export_name.clone().unwrap_or_else(|| self::export_name(e)),
+                        max,
+                        tl.target.width,
+                        tl.target.height
+                    ),
+                )
+                .hint("raise max_bytes, shorten the export with `range`, use a smaller `target`, or `format: \"webm\"`"),
+            );
+        }
+    }
     diags.extend(extras.warnings.clone());
-    Ok(Prepared { export_name, project: p, timeline: tl, diags, extras })
+    Ok(Prepared { export_name, project: p, timeline: tl, diags, extras, export: e.clone() })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -283,6 +478,13 @@ pub struct RenderOutcome {
     pub output: PathBuf,
     pub plan_summary: serde_json::Value,
     pub exec: ExecReport,
+}
+
+/// Render options for a prepared export: the caller's, plus the export's delivery choices.
+pub fn options_for(pr: &Prepared, opts: &RenderOptions) -> RenderOptions {
+    let mut o = opts.clone();
+    o.delivery = delivery(&pr.export, &pr.timeline);
+    o
 }
 
 pub fn plan_for(l: &Loaded, pr: &Prepared, opts: &RenderOptions) -> Result<Plan> {

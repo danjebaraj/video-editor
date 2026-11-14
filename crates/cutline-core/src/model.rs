@@ -70,6 +70,105 @@ pub struct Project {
     /// them as `"cue:clocks"`, `"cue:clocks+0.4"` or `"cue:clocks-0.2"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cues: BTreeMap<String, Cue>,
+    /// Named cuts of the edit (`cutline render --variant teaser`); see `Variant`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variants: BTreeMap<String, Variant>,
+    /// Languages (`cutline render --locale de`); see `Locale`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub locales: BTreeMap<String, Locale>,
+    /// Strings that text can refer to as `"@key"` (the base language).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub strings: BTreeMap<String, String>,
+    /// Review settings (text recognition for the demo checks).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qa: Option<QaSettings>,
+    /// Screen frame for every video clip that has no `frame` of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_frame: Option<ScreenFrame>,
+    /// `false`: do not add the brand's `intro` / `outro` around `main`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brand_bumpers: Option<bool>,
+    /// `false`: do not draw the brand logo as a watermark.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct QaSettings {
+    /// Text recognition engine for `cutline review`: `auto` (default: macOS Vision on macOS,
+    /// Tesseract elsewhere), `vision`, `tesseract` or `off`. The `CUTLINE_OCR` environment
+    /// variable and `review --ocr` override it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr: Option<OcrEngine>,
+    /// Smallest text height that counts as readable, in output px (default 2 % of the frame's
+    /// shorter side; 2.4 % on vertical targets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_text_px: Option<f64>,
+    /// Seconds with nothing said and nothing pointed at before review suggests tightening
+    /// (default 8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_quiet: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OcrEngine {
+    #[default]
+    Auto,
+    Vision,
+    Tesseract,
+    Off,
+}
+
+/// A cut of the edit. Clips and layers also choose their variants with `only` / `except`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Variant {
+    /// Clip ids to keep (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<String>,
+    /// Clip ids to leave out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+    /// Warn when this variant runs longer (seconds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_duration: Option<f64>,
+    /// Export names to render for this variant (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exports: Vec<String>,
+    /// Asset fields to replace, by asset id: `{vo: {path: "vo.teaser.mp3", script: "vo.teaser.txt"}}`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub assets: BTreeMap<String, serde_json::Value>,
+}
+
+/// A language of the video.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Locale {
+    /// Asset fields to replace, by asset id (voice-over, its script and transcript, recordings).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub assets: BTreeMap<String, serde_json::Value>,
+    /// Strings for `"@key"` text: a JSON5 file path, or the table itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strings: Option<serde_json::Value>,
+    /// Cue phrases in this language, by cue name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cues: BTreeMap<String, Cue>,
+    /// Language code for transcription and browser recordings (e.g. `de`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
+}
+
+/// `generated_by` of the clips and assets added for the brand's intro and outro.
+pub const BRAND_INTRO: &str = "brand_intro";
+pub const BRAND_OUTRO: &str = "brand_outro";
+
+impl Clip {
+    /// A brand intro/outro clip (added around `main`; timeline times do not count it).
+    pub fn is_bumper(&self) -> bool {
+        matches!(self.generated_by.as_deref(), Some(BRAND_INTRO) | Some(BRAND_OUTRO))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
@@ -158,6 +257,9 @@ pub enum TargetName {
     #[serde(rename = "long_4k")]
     Long4k,
     Square,
+    /// 1080×1350 feed video (LinkedIn, Instagram).
+    #[serde(rename = "portrait_4x5")]
+    Portrait4x5,
     Custom,
 }
 
@@ -315,7 +417,7 @@ pub struct Clip {
     /// `speed` plays exactly `in`..`out` at whatever speed fills the slot (frame-blended).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<EndFit>,
-    /// Constant speed factor 0.25–4.
+    /// Constant speed factor 0.25–8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,
     /// Keyframed speed curve (overrides `speed`).
@@ -330,6 +432,10 @@ pub struct Clip {
     pub color: Option<ColorGrade>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
+    /// Draw the clip inside a window (browser, app window, phone, tablet) on a background,
+    /// instead of full-bleed. `zoom_to` rects and annotations stay relative to the recording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<ScreenFrame>,
     /// Clip audio: keep (default), mute, duck (−12 dB), or an asset id replacing it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<String>,
@@ -340,9 +446,81 @@ pub struct Clip {
     /// Chapter title (long form); defaults to the clip id when the clip starts a chapter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chapter: Option<String>,
+    /// Variants this clip belongs to (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
+    /// Variants this clip is left out of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
     /// Set by `auto` expansion (e.g. `jump_cuts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_by: Option<String>,
+}
+
+/// A screen frame: the recording inside generated window chrome on a background.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenFrame {
+    #[serde(default)]
+    pub style: FrameStyle,
+    /// Address shown in a `browser` frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Title shown in a `window` frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// `brand` (default: the brand background), a color, `{gradient: [from, to]}`, or the id
+    /// of an image asset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<FrameBackground>,
+    /// Space around the window as a fraction of the frame's shorter side (default 0.06).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding: Option<f64>,
+    /// Corner radius in output px (default 14 at 1080p; phones and tablets have their own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// Drop shadow strength 0–1 (default 0.5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<f64>,
+    /// Chrome colors: dark (default) or light.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<FrameTheme>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameStyle {
+    /// Title bar with an address field.
+    #[default]
+    Browser,
+    /// Title bar with a title.
+    Window,
+    /// Rounded bezel, portrait recordings.
+    Phone,
+    Tablet,
+    /// No chrome: just rounded corners, shadow and background.
+    None,
+    /// No frame at all (opts a clip out of `default_frame`).
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameTheme {
+    #[default]
+    Dark,
+    Light,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum FrameBackground {
+    Gradient {
+        /// Two colors, top-left to bottom-right.
+        gradient: Vec<String>,
+    },
+    /// `brand`, a color (`#101014`) or an image asset id.
+    Name(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -698,6 +876,12 @@ pub struct Placement {
     /// Seconds after the anchor clip's start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<f64>,
+    /// Variants this layer belongs to (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
+    /// Variants this layer is left out of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
 }
 
 /// Look shared by visual layers.
@@ -869,6 +1053,160 @@ pub enum Layer {
         /// Text size in output px at full resolution (default 60 % of the region height).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text_size: Option<f64>,
+        /// `true`: the rect is in fractions of the clip's picture and the mask moves with the
+        /// clip's screen frame and zoom (like an annotation). Needs `mode: "fill"`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Outline, fill or underline a region to show where to look.
+    Highlight {
+        /// Region as fractions of the frame: `{x, y, w, h}`.
+        rect: Rect,
+        /// outline (default) | fill | underline
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        style: Option<HighlightStyle>,
+        /// `brand` (the accent, default) or a color.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        /// Stroke width in output px (default 4 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<f64>,
+        /// Corner radius in output px (default 8 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<f64>,
+        /// draw (default: the stroke draws itself) | fade | none
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enter: Option<AnnotEnter>,
+        /// Move with the zoom of the clip underneath (default true).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Dim everything except a region. Spotlights on screen together share one dim layer.
+    Spotlight {
+        rect: Rect,
+        /// How dark the rest gets, 0–1 (default 0.6).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dim: Option<f64>,
+        /// Soft edge in output px (default 12 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feather: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Arrow from one point to another (fractions of the frame), with an optional label at
+    /// its tail.
+    Arrow {
+        from: Point,
+        to: Point,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        /// Shaft width in output px (default 6 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<f64>,
+        /// Label size in output px (default 34 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Keycap badges for a shortcut: `keys: ["cmd", "K"]`.
+    Keys {
+        keys: Vec<String>,
+        /// Default `bottom`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<Position>,
+        /// Keycap height in output px (default 64 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generated_by: Option<String>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// The presenter's camera over the screen: a bubble, a side panel or the full frame,
+    /// switchable over time with `layouts`.
+    Presenter {
+        asset: String,
+        /// Camera time shown when the layer starts (to line the camera up with the screen).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_in: Option<TimeValue>,
+        /// circle (default) | rounded
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<PresenterShape>,
+        /// Bubble position (default `bottom_right`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<Position>,
+        /// Bubble width as a fraction of the frame width (default 0.18; 0.3 on vertical targets).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f64>,
+        /// Where the face is in the camera picture (fractions). Default: detected, else the
+        /// middle of the upper half.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        focus: Option<Point>,
+        /// Border width in output px (default 4) and color (default white).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        border: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        border_color: Option<String>,
+        /// Drop shadow (default true).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shadow: Option<bool>,
+        /// Use the camera's sound as dialogue (default false).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gain_db: Option<f64>,
+        /// Layout changes: `[{at: 0, layout: "bubble"}, {at: "cue:intro", layout: "presenter_full"}]`.
+        /// Default: `bubble` throughout.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        layouts: Vec<LayoutKey>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// A small pill with a short text, e.g. the speed while fast-forwarding ("4×").
+    Badge {
+        text: String,
+        /// Default `top_right`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<Position>,
+        /// Text size in output px (default 30 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generated_by: Option<String>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// A drawn mouse pointer moving along `path`, with a ripple on clicks. Use it over
+    /// recordings made without a cursor.
+    Cursor {
+        /// Keys: `t` seconds after the layer starts, `x`/`y` fractions of the frame.
+        path: Vec<CursorKey>,
+        /// Pointer size multiplier (default 1 = 28 px tall at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        /// Ripple on clicks (default true).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click_ripple: Option<bool>,
+        /// Ripple color: `brand` (default) or a color.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generated_by: Option<String>,
         #[serde(flatten)]
         at: Placement,
     },
@@ -886,6 +1224,10 @@ pub enum Layer {
         gain_db: Option<f64>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pick_from: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        only: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        except: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         generated_by: Option<String>,
     },
@@ -903,6 +1245,13 @@ impl Layer {
             Layer::Audio { .. } => "audio",
             Layer::Mask { .. } => "mask",
             Layer::Sfx { .. } => "sfx",
+            Layer::Highlight { .. } => "highlight",
+            Layer::Spotlight { .. } => "spotlight",
+            Layer::Arrow { .. } => "arrow",
+            Layer::Keys { .. } => "keys",
+            Layer::Cursor { .. } => "cursor",
+            Layer::Badge { .. } => "badge",
+            Layer::Presenter { .. } => "presenter",
         }
     }
     pub fn placement(&self) -> Option<&Placement> {
@@ -914,6 +1263,33 @@ impl Layer {
             | Layer::Html { at, .. }
             | Layer::ProgressBar { at, .. }
             | Layer::Mask { at, .. }
+            | Layer::Highlight { at, .. }
+            | Layer::Spotlight { at, .. }
+            | Layer::Arrow { at, .. }
+            | Layer::Keys { at, .. }
+            | Layer::Cursor { at, .. }
+            | Layer::Badge { at, .. }
+            | Layer::Presenter { at, .. }
+            | Layer::Audio { at, .. } => Some(at),
+            Layer::Sfx { .. } => None,
+        }
+    }
+    pub fn placement_mut(&mut self) -> Option<&mut Placement> {
+        match self {
+            Layer::Text { at, .. }
+            | Layer::Video { at, .. }
+            | Layer::Broll { at, .. }
+            | Layer::Image { at, .. }
+            | Layer::Html { at, .. }
+            | Layer::ProgressBar { at, .. }
+            | Layer::Mask { at, .. }
+            | Layer::Highlight { at, .. }
+            | Layer::Spotlight { at, .. }
+            | Layer::Arrow { at, .. }
+            | Layer::Keys { at, .. }
+            | Layer::Cursor { at, .. }
+            | Layer::Badge { at, .. }
+            | Layer::Presenter { at, .. }
             | Layer::Audio { at, .. } => Some(at),
             Layer::Sfx { .. } => None,
         }
@@ -928,17 +1304,96 @@ impl Layer {
             _ => None,
         }
     }
+    /// A text layer using a business card template (`title_card`, `feature_list`, …).
+    pub fn is_card(&self) -> bool {
+        matches!(self, Layer::Text { template, .. } if crate::catalog::CARD_TEMPLATES.contains(&template.as_str()))
+    }
+    /// highlight / spotlight / arrow / keys / cursor (and masks that follow their clip): drawn
+    /// together in the annotation pass.
+    pub fn is_annotation(&self) -> bool {
+        matches!(
+            self,
+            Layer::Mask { follow: Some(true), .. }
+                | Layer::Highlight { .. }
+                | Layer::Spotlight { .. }
+                | Layer::Arrow { .. }
+                | Layer::Keys { .. }
+                | Layer::Cursor { .. }
+                | Layer::Badge { .. }
+        )
+    }
     pub fn asset(&self) -> Option<&str> {
         match self {
             Layer::Video { asset, .. }
             | Layer::Broll { asset, .. }
             | Layer::Image { asset, .. }
             | Layer::Html { asset, .. }
+            | Layer::Presenter { asset, .. }
             | Layer::Audio { asset, .. }
             | Layer::Sfx { asset, .. } => Some(asset),
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenterShape {
+    #[default]
+    Circle,
+    Rounded,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenterLayout {
+    /// Small camera picture in a corner.
+    #[default]
+    Bubble,
+    /// The camera as a tall panel over the right third of the frame.
+    SideBySide,
+    /// The camera fills the frame.
+    PresenterFull,
+    /// The camera is hidden.
+    ScreenFull,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutKey {
+    /// Time on the edit from which this layout shows.
+    pub at: TimeValue,
+    pub layout: PresenterLayout,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HighlightStyle {
+    #[default]
+    Outline,
+    Fill,
+    Underline,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotEnter {
+    #[default]
+    Draw,
+    Fade,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CursorKey {
+    /// Seconds after the layer starts.
+    pub t: f64,
+    pub x: f64,
+    pub y: f64,
+    /// A click happens when the pointer arrives here.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub click: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
@@ -1114,6 +1569,102 @@ pub struct AutoDirectives {
     /// Move cuts onto the music's beats (fitting each clip with `end_at`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snap_to_beats: Option<SnapToBeats>,
+    /// Browser recordings: zoom in on each click and follow from one click to the next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_on_clicks: Option<ZoomOnClicks>,
+    /// Browser recordings: draw the mouse pointer (with click ripples) and shortcut badges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<AutoCursor>,
+    /// Play stretches where little changes on screen and nobody speaks at a higher speed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_forward_idle: Option<FastForwardIdle>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ZoomOnClicks {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Strongest zoom (default 2; 1.2–3).
+    #[serde(default = "zoc_scale")]
+    pub max_scale: f64,
+    /// Clicks closer together than this many seconds share one zoom (default 2.5).
+    #[serde(default = "zoc_merge")]
+    pub merge_within: f64,
+    /// Seconds the zoom stays after the last click of a group (default 1.2).
+    #[serde(default = "zoc_hold")]
+    pub hold: f64,
+    /// Zoom in/out time (default 0.6).
+    #[serde(default = "zoom_to_dur")]
+    pub duration: f64,
+    /// Only these step names (default: every click and typed field).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
+}
+fn zoc_scale() -> f64 {
+    2.0
+}
+fn zoc_merge() -> f64 {
+    2.5
+}
+fn zoc_hold() -> f64 {
+    1.2
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AutoCursor {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Pointer size multiplier (default 1.4).
+    #[serde(default = "cursor_size")]
+    pub size: f64,
+    #[serde(default = "yes")]
+    pub click_ripple: bool,
+    /// Show a `keys` badge for shortcuts and Enter/Escape/Tab presses (default true).
+    #[serde(default = "yes")]
+    pub keys: bool,
+}
+fn cursor_size() -> f64 {
+    1.4
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FastForwardIdle {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Shortest idle stretch worth speeding up, in seconds (default 2.5).
+    #[serde(default = "ffi_min")]
+    pub min_idle: f64,
+    /// Playback speed of idle stretches (default 4; up to 8).
+    #[serde(default = "ffi_speed")]
+    pub speed: f64,
+    /// Seconds kept at normal speed at each end of an idle stretch (default 0.4).
+    #[serde(default = "ffi_keep")]
+    pub keep: f64,
+    /// Share of the picture that may change per tenth of a second and still count as idle
+    /// (default 0.006: typing, a spinner or a blinking caret).
+    #[serde(default = "ffi_activity")]
+    pub activity: f64,
+    /// Show a small speed badge ("4×") while fast-forwarding (default true).
+    #[serde(default = "yes")]
+    pub badge: bool,
+    /// Asset ids (default: every video clip asset).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applies_to: Vec<String>,
+}
+fn ffi_min() -> f64 {
+    2.5
+}
+fn ffi_speed() -> f64 {
+    4.0
+}
+fn ffi_keep() -> f64 {
+    0.4
+}
+fn ffi_activity() -> f64 {
+    0.006
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -1220,8 +1771,9 @@ pub struct Export {
     /// Export name (used in the output file name). Defaults to the target name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default)]
-    pub target: TargetName,
+    /// Default: the project's target (and size).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<TargetName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fps: Option<Fps>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1233,9 +1785,88 @@ pub struct Export {
     /// Overrides the project's `chroma` for this export.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chroma: Option<Chroma>,
-    /// Output path (relative to the project). Default `out/<name>.mp4`.
+    /// Output path (relative to the project). Default `out/<name>.mp4` (or `.webm`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out: Option<String>,
+    /// `mp4` (H.264 + AAC, default) or `webm` (VP9 + Opus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<ExportFormat>,
+    /// `false`: no audio track (silent autoplay embeds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<bool>,
+    /// `true`: make the video loop seamlessly (its end dissolves into its start; the export is
+    /// half a second shorter). Needs `audio: false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#loop: Option<bool>,
+    /// Largest file size, e.g. `"8MB"`, `"900KB"` or bytes. The bitrate is solved for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<ByteSize>,
+    /// Export only this part of the edit: `[from, to]` (times on the edit; cues allowed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<[TimeValue; 2]>,
+    /// `burn` (default: captions in the picture), `sidecar` (only the .srt/.vtt files) or `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captions: Option<CaptionDelivery>,
+    /// Time on the edit of the poster frame written next to the video (default 0.5 s).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<TimeValue>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormat {
+    #[default]
+    Mp4,
+    Webm,
+}
+
+impl ExportFormat {
+    pub fn ext(&self) -> &'static str {
+        match self {
+            ExportFormat::Mp4 => "mp4",
+            ExportFormat::Webm => "webm",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptionDelivery {
+    #[default]
+    Burn,
+    Sidecar,
+    None,
+}
+
+/// A size in bytes: a number, or a string like `"8MB"`, `"900KB"`, `"1.5GB"` (powers of 1000).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum ByteSize {
+    Bytes(u64),
+    Text(String),
+}
+
+impl ByteSize {
+    pub fn bytes(&self) -> Option<u64> {
+        match self {
+            ByteSize::Bytes(b) => Some(*b),
+            ByteSize::Text(t) => {
+                let t = t.trim().to_ascii_uppercase().replace(' ', "");
+                let (num, mul) = if let Some(n) = t.strip_suffix("GB") {
+                    (n, 1e9)
+                } else if let Some(n) = t.strip_suffix("MB") {
+                    (n, 1e6)
+                } else if let Some(n) = t.strip_suffix("KB") {
+                    (n, 1e3)
+                } else if let Some(n) = t.strip_suffix('B') {
+                    (n, 1.0)
+                } else {
+                    (t.as_str(), 1.0)
+                };
+                num.parse::<f64>().ok().filter(|v| *v > 0.0).map(|v| (v * mul) as u64)
+            }
+        }
+    }
 }
 
 impl Project {

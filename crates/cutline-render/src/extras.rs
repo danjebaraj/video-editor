@@ -40,10 +40,13 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         luts_dir: Some(cutline_deps::paths::assets_dir().join("luts")),
         ..Default::default()
     };
+    extras.watermark = watermark(p, tl, &brand, &mut extras.warnings);
     text_layers(p, tl, &brand, &mut extras)?;
     html_layers(l, p, tl, &brand, &mut extras, draft, stills)?;
     captions(l, p, tl, &brand, &mut extras)?;
     extras.warnings.extend(crate::auto::script_warnings(l, p));
+    let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
+    let g = if draft { full.draft() } else { full };
     for c in &tl.clips {
         let mut x = ClipExtras {
             pad_color: c
@@ -73,14 +76,160 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         ) {
             x.source_override = Some(html_clip(l, p, tl, c, draft, stills)?);
         }
-        let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
-        let g = if draft { full.draft() } else { full };
-        if let Some(path) = crate::reframe::apply(l, p, tl, &g, c, &mut x, &mut extras.warnings)? {
+        if let (Some(fr), Some(m)) = (&c.frame, l.media.get(&c.asset)) {
+            let bg = crate::frame::background(fr.background.as_ref(), &brand.colors.background, |id| {
+                l.media.get(id).map(|a| (a.path.clone(), a.fingerprint.clone()))
+            });
+            let zg = crate::segment::zoom_geometry(c, m, &g, &x);
+            let src = if x.source_override.is_some() { (zg.width, zg.height) } else { (m.facts.width, m.facts.height) };
+            let cache = crate::cutline_dir(&l.dir).join("cache").join("frames");
+            x.frame = Some(
+                crate::frame::ensure(fr, src, (zg.width, zg.height), &bg, &cache)
+                    .map_err(|e| anyhow::anyhow!("clip `{}` frame: {e:#}", c.id))?,
+            );
+        } else if let Some(path) = crate::reframe::apply(l, p, tl, &g, c, &mut x, &mut extras.warnings)? {
             extras.crop_paths.insert(c.id.clone(), path);
         }
         extras.clip.insert(c.id.clone(), x);
     }
+    presenter_focus(l, tl, &mut extras);
+    annotations(l, tl, &g, &brand, &mut extras)?;
     Ok(extras)
+}
+
+/// The brand logo as a watermark over the edit (not over the intro/outro), unless the project
+/// says `watermark: false`.
+fn watermark(
+    p: &Project,
+    tl: &Timeline,
+    brand: &Brand,
+    warnings: &mut Vec<cutline_core::Diagnostic>,
+) -> Option<crate::WatermarkSpec> {
+    if p.watermark == Some(false) {
+        return None;
+    }
+    let path = brand.file(&brand.logo)?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !path.exists() || !["png", "jpg", "jpeg", "webp"].contains(&ext.as_str()) {
+        warnings.push(
+            cutline_core::Diagnostic::warning(
+                "W_BRAND_LOGO",
+                "/brand",
+                format!("brand logo {} is missing or not a PNG/JPEG/WebP; no watermark drawn", path.display()),
+            )
+            .hint("use a PNG with transparency; set `watermark: false` in the project to silence this"),
+        );
+        return None;
+    }
+    let wm = brand.watermark.clone().unwrap_or_default();
+    let (o, e) = (tl.secs(tl.origin), tl.secs(tl.body_end));
+    Some(crate::WatermarkSpec {
+        path,
+        position: brand.watermark_position.clone().unwrap_or_else(|| "top_right".into()),
+        opacity: wm.opacity,
+        scale: wm.scale.clamp(0.01, 1.0),
+        start: (o + wm.from.unwrap_or(0.0)).min(e),
+        end: wm.to.map(|t| (o + t).min(e)).unwrap_or(e),
+    })
+}
+
+/// Find the face in each presenter camera (a `focus` on the layer wins; without a detector the
+/// bubble is centred on the middle of the upper half, where a seated presenter usually is).
+fn presenter_focus(l: &Loaded, tl: &Timeline, extras: &mut PlanExtras) {
+    use cutline_core::model::Layer;
+    for x in &tl.layers {
+        let Layer::Presenter { asset, src_in, focus, .. } = &x.layer else { continue };
+        if let Some(f) = focus {
+            extras.presenter_focus.insert(x.index, (f.x, f.y));
+            continue;
+        }
+        let Some(m) = l.media.get(asset) else { continue };
+        let from = src_in.map(|t| t.seconds(tl.fps, m.facts.duration)).unwrap_or(0.0);
+        // the first 20 s tell where the presenter sits
+        let to = (from + tl.secs(x.end - x.start).min(20.0)).min(m.facts.duration.max(from + 0.1));
+        let cache = cutline_media::cache::Cache::new(crate::cutline_dir(&l.dir).join("cache").join("reframe"));
+        let key = cutline_media::hash_key(&[
+            m.fingerprint.as_bytes(),
+            format!("{from:.3}-{to:.3}").as_bytes(),
+            b"presenter-v1",
+        ]);
+        let found: Option<(f64, f64)> = cache.get_json::<Option<(f64, f64)>>(&key).unwrap_or_else(|| {
+            let res = cutline_reframe::default_detector().and_then(|mut det| {
+                let tc = cutline_deps::toolchain().ok()?;
+                let a = cutline_reframe::analyze(tc, &m.path, from, to, false, det.as_mut(), 2.0, 640).ok()?;
+                // the largest face of each sampled frame; the median is where the presenter is
+                let mut pts: Vec<(f64, f64)> = a
+                    .dets
+                    .iter()
+                    .filter_map(|d| d.faces.iter().max_by(|p, q| (p.w * p.h).partial_cmp(&(q.w * q.h)).unwrap()))
+                    .map(|f| (f.cx(), f.cy()))
+                    .collect();
+                if pts.is_empty() {
+                    return None;
+                }
+                pts.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap());
+                let mx = pts[pts.len() / 2].0;
+                pts.sort_by(|p, q| p.1.partial_cmp(&q.1).unwrap());
+                Some((mx, pts[pts.len() / 2].1))
+            });
+            let _ = cache.put_json(&key, &res);
+            res
+        });
+        if let Some(f) = found {
+            extras.presenter_focus.insert(x.index, f);
+        }
+    }
+}
+
+/// Rasterize annotation layers into cached alpha videos.
+fn annotations(l: &Loaded, tl: &Timeline, g: &crate::Geometry, brand: &Brand, extras: &mut PlanExtras) -> Result<()> {
+    if !tl.layers.iter().any(|x| x.layer.is_annotation() || x.layer.is_card()) {
+        return Ok(());
+    }
+    let cards = tl.layers.iter().any(|x| x.layer.is_card()).then(|| {
+        let assets = l.media.assets.iter().map(|(id, m)| (id.clone(), m.path.clone())).collect();
+        crate::cards::CardCtx::new(brand, assets)
+    });
+    let k = g.scale_to(tl.target.width);
+    let (sx, sy, sw, sh) = tl.target.safe_rect();
+    let font = cutline_text::FontDb::bundled().ok().and_then(|db| db.get("Inter", false).map(|f| f.font.clone()));
+    let st = crate::annot::Style {
+        accent: crate::overlay::rgb_of(&brand.colors.accent),
+        safe: (sx * k, sy * k, sw * k, sh * k),
+        k,
+        font,
+        cards: cards.flatten(),
+        // cards draw brand fonts, colors, the logo and image assets
+        look_key: format!(
+            "{} {} {:?}",
+            serde_json::to_string(brand).unwrap_or_default(),
+            brand.file(&brand.logo).and_then(|p| cutline_media::fingerprint(&p).ok()).unwrap_or_default(),
+            l.media
+                .assets
+                .values()
+                .filter(|m| m.facts.kind == cutline_core::model::AssetKind::Image)
+                .map(|m| m.fingerprint.as_str())
+                .collect::<Vec<_>>()
+        ),
+    };
+    // QA: cards count as on-screen text from their start (hook check); the box is the safe zone
+    for x in tl.layers.iter().filter(|x| x.layer.is_card()) {
+        if let cutline_core::model::Layer::Text { text, .. } = &x.layer {
+            extras.text_boxes.push(crate::TextBox {
+                start: tl.secs(x.start),
+                end: tl.secs(x.end),
+                x: sx,
+                y: sy,
+                w: sw,
+                h: sh,
+                text: text.clone().unwrap_or_default(),
+                kind: "card".into(),
+            });
+        }
+    }
+    let cache = crate::cutline_dir(&l.dir).join("cache").join("annot");
+    extras.annot = crate::annot::render(cutline_deps::toolchain()?, tl, g, &st, &cache)?;
+    Ok(())
 }
 
 pub fn frame_of(tl: &Timeline) -> cutline_text::templates::Frame {
@@ -95,6 +244,7 @@ pub fn text_layers(_p: &Project, tl: &Timeline, brand: &Brand, extras: &mut Plan
         .layers
         .iter()
         .filter(|l| matches!(&l.layer, Layer::Text { template, .. } if !template.ends_with("_html")))
+        .filter(|l| !l.layer.is_card())
         .collect();
     if texts.is_empty() {
         return Ok(());

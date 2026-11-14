@@ -236,9 +236,14 @@ pub fn static_gaps(pr: &Prepared, min: f64) -> Vec<(f64, f64)> {
 }
 
 pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
+    review_with(l, out_dir, None)
+}
+
+/// `review`, with a text recognition engine chosen on the command line (`--ocr`).
+pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<ReviewReport> {
     let tc = cutline_deps::toolchain()?;
     std::fs::create_dir_all(out_dir)?;
-    for sub in ["cuts", "captions", "reframe"] {
+    for sub in ["cuts", "captions", "reframe", "annotations"] {
         let d = out_dir.join(sub);
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d)?;
@@ -260,11 +265,13 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
     let mut files: Vec<PathBuf> = vec![];
 
     // ---- QA
-    let ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);
+    let mut ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);
     let mut target = tl.target.clone();
     if !use_final {
         target.width = plan.geometry.width;
         target.height = plan.geometry.height;
+        // the boxes were laid out at full size; the preview is smaller
+        crate::deliver::scale_boxes(&mut ctx, plan.geometry.width as f64 / tl.target.width as f64);
     }
     let qa: QaReport = run_qa(tc, &src, &target, &ctx)?;
     let qa_path = out_dir.join("qa.json");
@@ -343,6 +350,26 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
         stroke_rect(&mut f, sc(b.x), sc(b.y), sc(b.w), sc(b.h), 2, [255, 200, 0]);
         painter.label(&mut f, 8, 8, 16.0, &format!("{}  \"{}\"", format_tc(t), b.text), [255, 255, 255]);
         let p = out_dir.join("captions").join(format!("caption_{:02}.jpg", k + 1));
+        save_jpg(&fit(&f, MAX_SIDE), &p)?;
+        images.push(p);
+    }
+
+    // ---- annotations: a frame of each with it on screen (≤ 8)
+    let annots: Vec<_> = tl.layers.iter().filter(|x| x.layer.is_annotation()).collect();
+    for (k, a) in pick_evenly(annots, 8).iter().enumerate() {
+        // past the enter animation, before the exit
+        let (s, e) = (tl.secs(a.start), tl.secs(a.end));
+        let t = (s + 0.6 * (e - s)).min(e - 0.25).max(s);
+        let mut f = grab(tc, &src, t)?;
+        painter.label(
+            &mut f,
+            8,
+            8,
+            16.0,
+            &format!("layer {} {}  {}–{}", a.index, a.layer.kind(), format_tc(s), format_tc(e)),
+            [255, 255, 255],
+        );
+        let p = out_dir.join("annotations").join(format!("annotation_{:02}_{}.jpg", k + 1, a.layer.kind()));
         save_jpg(&fit(&f, MAX_SIDE), &p)?;
         images.push(p);
     }
@@ -437,6 +464,14 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
             }
         }
     }
+    // ---- demo checks: private details, legibility, pacing
+    let demo = crate::demo_qa::run(l, &pr, ocr)?;
+    for f in &demo.findings {
+        suggestions.push(f.message.clone());
+    }
+    let dp = out_dir.join("demo_checks.json");
+    std::fs::write(&dp, serde_json::to_vec_pretty(&demo)?)?;
+    files.push(dp);
     let mut md = format!(
         "# Review: {}\n\nSource: `{}`  \nDuration: {}  \nTarget: {} ({}×{} @ {} fps)\n\n## QA: {} ({} errors, {} warnings)\n\n",
         cutline_render::output_name(&l.project, &l.path),
@@ -473,7 +508,7 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
             md.push_str(&format!("- `{}` {}: {}\n", d.code, d.path, d.message));
         }
     }
-    md.push_str("\n## Files\n\n- contact_sheet.jpg, cuts/, captions/, reframe/, audio.png, timeline.txt, qa.json, preview_540p.mp4\n");
+    md.push_str("\n## Files\n\n- contact_sheet.jpg, cuts/, captions/, annotations/, reframe/, audio.png, timeline.txt, qa.json, preview_540p.mp4\n");
     let sp = out_dir.join("summary.md");
     std::fs::write(&sp, md)?;
     files.push(sp);

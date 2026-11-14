@@ -19,8 +19,10 @@ pub fn dims(tc: &Toolchain, p: &Path) -> Result<(u32, u32)> {
         .arg(p)
         .output()?;
     let s = String::from_utf8_lossy(&out.stdout);
-    let (w, h) = s.trim().split_once('x').context("no video stream")?;
-    Ok((w.parse()?, h.parse()?))
+    // first line only, first two fields (some streams print side data on further lines)
+    let mut it = s.lines().next().unwrap_or("").trim().split('x');
+    let (w, h) = (it.next().context("no video stream")?, it.next().context("no video stream")?);
+    Ok((w.trim().parse()?, h.trim().parse()?))
 }
 
 /// Decode selected frames (by output frame index) as RGB images. `indices` must be ascending.

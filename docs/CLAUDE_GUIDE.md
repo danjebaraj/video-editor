@@ -62,8 +62,53 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - B-roll every 20–40 s (`broll` layers, PiP with `radius`/`border`/`shadow` or full-frame).
 - Leave the last 20 s free for the YouTube end screen (`end_card` template draws placeholders).
 
+## Business videos and product demos
+
+- Start with `cutline init --style business` (target `long_1080p`, `profile: "screencast"`,
+  `clean_sentence` captions, business brand, no progress bar).
+- Put the company look in the brand file once: `logo` (watermark, top right by default),
+  `intro` / `outro` bumpers, colors and fonts. Every project using the brand gets them;
+  `brand_bumpers: false` or `watermark: false` opt a project out.
+- Times in the project count from the start of the edit, after the intro. Do not add the intro
+  length to anything.
+- Structure with the business cards: `title_card` to open, `section_card` between parts (they
+  become the chapters), `feature_list` with `reveal` on cues while the narration lists
+  features, `stat` for one number that matters, `testimonial` / `logo_wall` for proof,
+  `compare` for before/after, and `cta_link` to close (headline, URL, QR code). Put full-frame
+  cards over a `path: "color:brand"` clip; `feature_list` and `stat` default to a scrim so
+  they can sit over the product.
+- Deliver per channel from the one edit with `exports`: the full video, a `portrait_4x5` cut
+  for LinkedIn, a silent looping hero for the website (`audio: false, loop: true, max_bytes`,
+  usually a `range` of the best 10 seconds), `format: "webm"` where the site wants it. Silent
+  exports must read without sound: keep captions burned in and fix every `muted` QA warning.
+  Each export gets a `.vtt` and a `.poster.jpg` for the embed.
+- One project, several videos. `variants` for cut-downs (a teaser: `exclude` clips, give it a
+  shorter voice-over, set `max_duration`); `locales` for languages (a voice-over and script per
+  language, cue phrases in that language, and `"@key"` strings for on-screen text). Time
+  everything with cues and `end_at` so each version fits its own narration, then check every
+  one: `cutline review project.json5 --variant teaser --locale de`.
+- A person on camera builds trust: add the webcam recording as a `presenter` layer. Open on
+  `presenter_full` for the greeting, switch to `bubble` when the product comes on, hide it
+  (`screen_full`) while zoomed into detail, and come back full for the close; time the
+  switches with cues. Keep the bubble clear of what the narration points at (`position`).
+- Tone: no punch-in cadence, no emoji, no `bold_pop`. Plain cuts between screens, one fade from
+  the title and into the end card. Keep captions on: most business video is watched muted.
+
 ## Screen recordings
 
+- Record web apps from a script, not by hand: write a `.demo.json5` (viewport, `url`, steps:
+  `goto`, `wait`, `click`, `type`, `press`, `scroll`, `hover`), use it as the asset path, and
+  name the steps that matter. Then edit by name: `in: "step:export-1"`,
+  `{type: "zoom_to", step: "export"}`, `{type: "highlight", step: "export"}`,
+  `{type: "mask", step: "email", mode: "fill"}`. When the UI changes, the recording and every
+  rect follow; nothing is measured by hand. Start each script with a `wait` for the page's key
+  element, keep `scale: 2`, give credentials as `$ENV_VAR`, and list third-party origins the
+  page needs in `allow`. `cutline record project.json5` records again on demand.
+- With a browser recording, start from `auto: {cursor: {}, zoom_on_clicks: {}}`: the pointer
+  is drawn from the recording (with click ripples and shortcut badges) and the view follows
+  the clicks. Add `fast_forward_idle: {}` for loading and long typing. Read `cutline expand` to
+  see what they made, then override by hand only where needed (a clip with its own zoom is
+  left alone).
 - Record terminal footage from VHS tapes: use the `.tape` file itself as the asset path and cutline
   records it (and re-records only when the tape changes; run `cutline record project.json5` when
   the screen shows live data you want fresh). End each tape by quitting the program
@@ -73,6 +118,16 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - Point at UI with `{type: "zoom_to", rect: {x, y, w, h}, start, end}` instead of working out
   zoom scales and focus points. Zooms are sub-pixel smooth and use the recording's full
   resolution, so do not pre-crop or pre-scale footage outside cutline.
+- Frame the recording: `default_frame: {style: "browser", url: "app.example.com"}` puts every
+  recording in a window on the brand background (`window` for desktop apps, `phone` / `tablet`
+  for mobile recordings). It reads as a product shot instead of a raw capture, and it is the
+  right way to show a 16:9 recording in a vertical video (prefer it to `fit_blur`). Rects for
+  `zoom_to` and annotations stay relative to the recording.
+- Show where to look. Pair a `zoom_to` with a `highlight` on the same `rect` (it follows the
+  zoom), use `spotlight` when the rest of the screen distracts, an `arrow` with a short `label`
+  for "new here", `keys` when the narration names a shortcut, and a `cursor` layer over
+  recordings made without a pointer. One device at a time: a highlight or a spotlight, not both.
+  Time them with cues (`start: "cue:export"`), and check `review/annotations/`.
 - **Keep recordings at 1×.** `end_at` trims a clip to its slot; it never changes the speed. If
   `W_FIT_HOLD` says a clip runs out of footage, give it more footage (earlier `in`, later
   `out`), cut sooner, or accept the held last frame when the screen is still anyway. Use
@@ -86,9 +141,16 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ### Hide private details
 
+- `cutline review` reads the text in screen recordings and lists possible private details no
+  mask covers, each with a `mask` layer to paste (`demo_checks.json`). It also flags interface
+  text too small to read and long stretches where nothing is said or pointed at. Fix them all,
+  then still:
 - Look for usernames, home paths, emails, tokens and hostnames in every frame (`review`'s
   contact sheet) and cover them with `mask` layers: `{type: "mask", rect: {x, y, w, h},
   anchor: "clip", duration: 2}`; `rect` is in fractions of the frame.
+- On a framed or zooming clip use `mode: "fill", follow: true` with the rect in fractions of
+  the recording: the mask then stays on its text. With a browser recording,
+  `{type: "mask", step: "email"}` does this for the element a step touched.
 - `blur` (default) suits incidental text; use `mode: "fill"` with the background `color` for
   secrets, optionally with replacement `text` (e.g. `~/Library/…`) so the UI still reads well.
 

@@ -435,6 +435,122 @@ pub fn apply(
                 let (dx, dy) = slide_offsets(look, s, e);
                 push_overlay(lines, cur, &format!("{lab}o"), &format!("{x0}{dx}"), &format!("{y0}{dy}"), s, e);
             }
+            Layer::Presenter {
+                asset, src_in, shape, position, scale, border, border_color, shadow, layouts, ..
+            } if media.get(asset).is_some() => {
+                use cutline_core::model::{PresenterLayout, PresenterShape};
+                let m = media.get(asset).unwrap();
+                let (srcw, srch) = (m.facts.width.max(2) as f64, m.facts.height.max(2) as f64);
+                let (fx, fy) = extras.presenter_focus.get(&tlay.index).copied().unwrap_or((0.5, 0.4));
+                // layout over time: bubble until the first key, then each key's layout
+                let body = tl.secs(tl.body_end - tl.origin);
+                let mut segs: Vec<(f64, f64, PresenterLayout)> = vec![(s, e, PresenterLayout::Bubble)];
+                for k in layouts {
+                    let at = tl.from_edit(k.at.seconds(fps, body)).clamp(s, e);
+                    if let Some(last) = segs.last_mut() {
+                        last.1 = at;
+                    }
+                    segs.push((at, e, k.layout));
+                }
+                segs.retain(|g| g.1 - g.0 > 1e-6 && g.2 != PresenterLayout::ScreenFull);
+                if segs.is_empty() {
+                    continue;
+                }
+                let idx = *next_input;
+                *next_input += 1;
+                let from = src_in.map(|t| t.seconds(fps, m.facts.duration)).unwrap_or(0.0);
+                o.input_args
+                    .extend(["-ss", &f(from), "-t", &f(len + 0.1), "-i", &m.path.to_string_lossy()].map(String::from));
+                let outs: String = (0..segs.len()).map(|i| format!("[{lab}s{i}]")).collect();
+                lines.push(format!("[{idx}:v]fps={},setpts=PTS-STARTPTS,split={}{outs}", fps.ff(), segs.len()));
+                let even = |v: f64| ((v.round() as u32).max(2)) & !1;
+                for (i, (ss, se, layout)) in segs.iter().enumerate() {
+                    let l2 = format!("{lab}p{i}");
+                    // size, corner radius and place of the picture in this layout
+                    let (ow, oh, radius, x0, y0, framed) = match layout {
+                        PresenterLayout::PresenterFull => (w, h, 0.0, "0".to_string(), "0".to_string(), false),
+                        PresenterLayout::SideBySide => {
+                            let (ow, oh) = (even(0.32 * w as f64), even(safe.3.min(0.9 * h as f64)));
+                            let x = (safe.0 + safe.2 - ow as f64).round();
+                            let y = ((h as f64 - oh as f64) / 2.0).round();
+                            (ow, oh, 0.035 * w.min(h) as f64, f(x), f(y), true)
+                        }
+                        _ => {
+                            let sc = scale.unwrap_or(if h > w { 0.3 } else { 0.18 });
+                            let side = even(w as f64 * sc);
+                            let r = if shape.unwrap_or_default() == PresenterShape::Circle {
+                                side as f64 / 2.0
+                            } else {
+                                0.14 * side as f64
+                            };
+                            let (x, y) = position_exprs(position.as_ref(), safe, "bottom_right");
+                            (side, side, r, x, y, true)
+                        }
+                    };
+                    // the largest crop of that shape, centred on the face
+                    let aspect = ow as f64 / oh as f64;
+                    let (cw, ch) = if srcw / srch > aspect { (srch * aspect, srch) } else { (srcw, srcw / aspect) };
+                    let (cw, ch) = (even(cw).min(srcw as u32 & !1), even(ch).min(srch as u32 & !1));
+                    let cx = (fx * srcw - cw as f64 / 2.0).clamp(0.0, srcw - cw as f64).round();
+                    let cy = (fy * srch - ch as f64 / 2.0).clamp(0.0, srch - ch as f64).round();
+                    lines.push(format!(
+                        "[{lab}s{i}]crop={cw}:{ch}:{cx}:{cy},scale={ow}:{oh}:flags=lanczos,scale=w=iw:h=ih:{}:out_color_matrix=bt709:out_range=tv,format=yuva444p[{l2}a]",
+                        crate::segment::color_in(m)
+                    ));
+                    let mut cur_l = format!("{l2}a");
+                    let png_input = |o: &mut OverlayOut,
+                                     next_input: &mut usize,
+                                     name: String,
+                                     bytes: Vec<u8>|
+                     -> usize {
+                        let p = work.join(name);
+                        o.files.push((p.clone(), bytes));
+                        let i = *next_input;
+                        *next_input += 1;
+                        o.input_args.extend(
+                            ["-loop", "1", "-framerate", &fps.ff(), "-t", &f(len + 0.1), "-i", &p.to_string_lossy()]
+                                .map(String::from),
+                        );
+                        i
+                    };
+                    let mut off = 0u32;
+                    if radius > 0.0 {
+                        let mi = png_input(
+                            &mut o,
+                            next_input,
+                            format!("pmask_{li}_{i}.png"),
+                            rounded_mask_png(ow, oh, radius),
+                        );
+                        lines.push(format!("[{mi}:v]format=gray,setpts=PTS-STARTPTS[{l2}m]"));
+                        lines.push(format!("[{cur_l}][{l2}m]alphamerge[{l2}r]"));
+                        cur_l = format!("{l2}r");
+                    }
+                    let bw = border.unwrap_or(4.0) * k;
+                    let sh = shadow.unwrap_or(true);
+                    if framed && (bw > 0.0 || sh) {
+                        let bc = rgb_of(border_color.as_deref().unwrap_or("#FFFFFF"));
+                        let (png, _, _, pad) = frame_png(ow, oh, radius, bw, bc, sh);
+                        off = pad;
+                        let fi = png_input(&mut o, next_input, format!("pframe_{li}_{i}.png"), png);
+                        lines.push(format!("[{fi}:v]format=yuva444p,setpts=PTS-STARTPTS[{l2}f]"));
+                        lines.push(format!("[{l2}f][{cur_l}]overlay={off}:{off}:format=auto:shortest=1[{l2}b]"));
+                        cur_l = format!("{l2}b");
+                    }
+                    // a short fade where layouts change hands
+                    let fd = 0.2f64.min((se - ss) / 2.0);
+                    lines.push(format!(
+                        "[{cur_l}]fade=t=in:st={}:d={}:alpha=1,fade=t=out:st={}:d={}:alpha=1,setpts=PTS+{}/TB[{l2}o]",
+                        f(ss - s),
+                        f(fd),
+                        f(se - s - fd),
+                        f(fd),
+                        f(s)
+                    ));
+                    // the frame picture is larger than the camera by its padding
+                    let (px, py) = if off > 0 { (format!("{x0}-{off}"), format!("{y0}-{off}")) } else { (x0, y0) };
+                    push_overlay(lines, cur, &format!("{l2}o"), &px, &py, *ss, *se);
+                }
+            }
             Layer::Html { look, .. } | Layer::Text { look, .. } => {
                 let Some(mz) = extras.html_renders.get(&tlay.index) else {
                     if matches!(layer, Layer::Html { .. }) {
@@ -481,6 +597,8 @@ pub fn apply(
                 ));
                 push_overlay(lines, cur, &format!("{lab}o"), &format!("-W+W*t/{}", f(total)), &y, s, e);
             }
+            // masks that follow their clip are drawn with the annotations
+            Layer::Mask { follow: Some(true), .. } => {}
             Layer::Mask { rect, mode, color, strength, text, text_color, text_size, .. } => {
                 mask_lines(
                     lines,
@@ -502,6 +620,35 @@ pub fn apply(
             }
             _ => {}
         }
+    }
+    // brand logo watermark: over footage and overlays, under text and captions
+    if let Some(wm) = extras.watermark.as_ref().filter(|m| m.end > m.start) {
+        let idx = *next_input;
+        *next_input += 1;
+        let len = wm.end - wm.start;
+        o.input_args.extend(
+            ["-loop", "1", "-framerate", &fps.ff(), "-t", &f(len + 0.1), "-i", &wm.path.to_string_lossy()]
+                .map(String::from),
+        );
+        let ow = ((w as f64 * wm.scale).round() as u32).max(2) & !1;
+        lines.push(format!(
+            "[{idx}:v]fps={},setpts=PTS-STARTPTS,scale={ow}:-2:flags=lanczos,format=yuva444p,colorchannelmixer=aa={},setpts=PTS+{}/TB[wm]",
+            fps.ff(),
+            f(wm.opacity.clamp(0.0, 1.0)),
+            f(wm.start)
+        ));
+        let pos = Position::Preset(wm.position.clone());
+        let (x0, y0) = position_exprs(Some(&pos), safe, "top_right");
+        push_overlay(lines, cur, "wm", &x0, &y0, wm.start, wm.end);
+    }
+    // annotations (highlight, spotlight, arrow, keys, cursor): drawn in Rust, composited here
+    for (i, an) in extras.annot.iter().enumerate() {
+        let idx = *next_input;
+        *next_input += 1;
+        o.input_args.extend(["-i".to_string(), an.path.to_string_lossy().to_string()]);
+        let lab = format!("an{i}");
+        lines.push(format!("[{idx}:v]fps={},format=yuva444p,setpts=PTS-STARTPTS+{}/TB[{lab}]", fps.ff(), f(an.start)));
+        push_overlay(lines, cur, &lab, "0", "0", an.start, an.end);
     }
     // template images (emoji pops)
     for (i, im) in extras.extra_images.iter().enumerate() {
