@@ -330,6 +330,7 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
         hw: a.hw,
         out: a.out.clone(),
         skip_loudness: false,
+        ..Default::default()
     };
     if a.dry_run {
         let mut text = String::new();
@@ -341,7 +342,7 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
                 }
             }
             let pr = pipeline::prepare(&l, name.clone(), &e, a.draft).map_err(CliError::validation)?;
-            let plan = pipeline::plan_for(&l, &pr, &opts).map_err(CliError::internal)?;
+            let plan = pipeline::plan_for(&l, &pr, &pipeline::options_for(&pr, &opts)).map_err(CliError::internal)?;
             text.push_str(&cutline_render::dry_run_text(tc, &plan));
             plans.push(json!({
                 "export": name, "output": plan.output, "segments": plan.segments.iter().map(|s| json!({"clip": s.clip_id, "key": s.key, "mezzanine": s.mezzanine, "cached": s.mezzanine.exists(), "command": s.job.display(&tc.ffmpeg.to_string_lossy()), "filter": s.spec.filter})).collect::<Vec<_>>(),
@@ -505,8 +506,8 @@ pub fn qa(video: &Path, target: &str, project: Option<&Path>) -> CmdResult {
             let l = load_or_return!(pp);
             let (name, e) = pipeline::exports(&l.project)
                 .into_iter()
-                .find(|(_, e)| e.target == tn)
-                .unwrap_or((None, cutline_core::model::Export { target: tn, ..Default::default() }));
+                .find(|(_, e)| e.target.unwrap_or(l.project.target) == tn)
+                .unwrap_or((None, cutline_core::model::Export { target: Some(tn), ..Default::default() }));
             let pr = pipeline::prepare(&l, name, &e, false).map_err(CliError::validation)?;
             (pr.timeline.target.clone(), cutline_qa::deliver::qa_context(&pr.project, &pr.timeline, &pr.extras))
         }

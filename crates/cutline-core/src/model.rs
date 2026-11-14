@@ -178,6 +178,9 @@ pub enum TargetName {
     #[serde(rename = "long_4k")]
     Long4k,
     Square,
+    /// 1080×1350 feed video (LinkedIn, Instagram).
+    #[serde(rename = "portrait_4x5")]
+    Portrait4x5,
     Custom,
 }
 
@@ -1459,8 +1462,9 @@ pub struct Export {
     /// Export name (used in the output file name). Defaults to the target name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default)]
-    pub target: TargetName,
+    /// Default: the project's target (and size).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<TargetName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fps: Option<Fps>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1472,9 +1476,88 @@ pub struct Export {
     /// Overrides the project's `chroma` for this export.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chroma: Option<Chroma>,
-    /// Output path (relative to the project). Default `out/<name>.mp4`.
+    /// Output path (relative to the project). Default `out/<name>.mp4` (or `.webm`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out: Option<String>,
+    /// `mp4` (H.264 + AAC, default) or `webm` (VP9 + Opus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<ExportFormat>,
+    /// `false`: no audio track (silent autoplay embeds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<bool>,
+    /// `true`: make the video loop seamlessly (its end dissolves into its start; the export is
+    /// half a second shorter). Needs `audio: false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#loop: Option<bool>,
+    /// Largest file size, e.g. `"8MB"`, `"900KB"` or bytes. The bitrate is solved for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<ByteSize>,
+    /// Export only this part of the edit: `[from, to]` (times on the edit; cues allowed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<[TimeValue; 2]>,
+    /// `burn` (default: captions in the picture), `sidecar` (only the .srt/.vtt files) or `none`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captions: Option<CaptionDelivery>,
+    /// Time on the edit of the poster frame written next to the video (default 0.5 s).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<TimeValue>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportFormat {
+    #[default]
+    Mp4,
+    Webm,
+}
+
+impl ExportFormat {
+    pub fn ext(&self) -> &'static str {
+        match self {
+            ExportFormat::Mp4 => "mp4",
+            ExportFormat::Webm => "webm",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptionDelivery {
+    #[default]
+    Burn,
+    Sidecar,
+    None,
+}
+
+/// A size in bytes: a number, or a string like `"8MB"`, `"900KB"`, `"1.5GB"` (powers of 1000).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum ByteSize {
+    Bytes(u64),
+    Text(String),
+}
+
+impl ByteSize {
+    pub fn bytes(&self) -> Option<u64> {
+        match self {
+            ByteSize::Bytes(b) => Some(*b),
+            ByteSize::Text(t) => {
+                let t = t.trim().to_ascii_uppercase().replace(' ', "");
+                let (num, mul) = if let Some(n) = t.strip_suffix("GB") {
+                    (n, 1e9)
+                } else if let Some(n) = t.strip_suffix("MB") {
+                    (n, 1e6)
+                } else if let Some(n) = t.strip_suffix("KB") {
+                    (n, 1e3)
+                } else if let Some(n) = t.strip_suffix('B') {
+                    (n, 1.0)
+                } else {
+                    (t.as_str(), 1.0)
+                };
+                num.parse::<f64>().ok().filter(|v| *v > 0.0).map(|v| (v * mul) as u64)
+            }
+        }
+    }
 }
 
 impl Project {

@@ -455,6 +455,27 @@
       },
       "additionalProperties": false
     },
+    "ByteSize": {
+      "description": "A size in bytes: a number, or a string like `\"8MB\"`, `\"900KB\"`, `\"1.5GB\"` (powers of 1000).",
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "CaptionDelivery": {
+      "type": "string",
+      "enum": [
+        "burn",
+        "sidecar",
+        "none"
+      ]
+    },
     "CaptionSource": {
       "oneOf": [
         {
@@ -1385,6 +1406,24 @@
     "Export": {
       "type": "object",
       "properties": {
+        "audio": {
+          "description": "`false`: no audio track (silent autoplay embeds).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "captions": {
+          "description": "`burn` (default: captions in the picture), `sidecar` (only the .srt/.vtt files) or `none`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptionDelivery"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "chroma": {
           "description": "Overrides the project's `chroma` for this export.",
           "anyOf": [
@@ -1404,6 +1443,17 @@
           "format": "uint32",
           "minimum": 0
         },
+        "format": {
+          "description": "`mp4` (H.264 + AAC, default) or `webm` (VP9 + Opus).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExportFormat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "fps": {
           "anyOf": [
             {
@@ -1422,6 +1472,24 @@
           "format": "uint32",
           "minimum": 0
         },
+        "loop": {
+          "description": "`true`: make the video loop seamlessly (its end dissolves into its start; the export is\nhalf a second shorter). Needs `audio: false`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "max_bytes": {
+          "description": "Largest file size, e.g. `\"8MB\"`, `\"900KB\"` or bytes. The bitrate is solved for it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ByteSize"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "name": {
           "description": "Export name (used in the output file name). Defaults to the target name.",
           "type": [
@@ -1430,15 +1498,45 @@
           ]
         },
         "out": {
-          "description": "Output path (relative to the project). Default `out/<name>.mp4`.",
+          "description": "Output path (relative to the project). Default `out/<name>.mp4` (or `.webm`).",
           "type": [
             "string",
             "null"
           ]
         },
+        "poster": {
+          "description": "Time on the edit of the poster frame written next to the video (default 0.5 s).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TimeValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "range": {
+          "description": "Export only this part of the edit: `[from, to]` (times on the edit; cues allowed).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/TimeValue"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
         "target": {
-          "$ref": "#/$defs/TargetName",
-          "default": "shorts"
+          "description": "Default: the project's target (and size).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetName"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "width": {
           "type": [
@@ -1450,6 +1548,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "ExportFormat": {
+      "type": "string",
+      "enum": [
+        "mp4",
+        "webm"
+      ]
     },
     "Fit": {
       "type": "string",
@@ -3890,13 +3995,22 @@
       "additionalProperties": false
     },
     "TargetName": {
-      "type": "string",
-      "enum": [
-        "shorts",
-        "long_1080p",
-        "long_4k",
-        "square",
-        "custom"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "shorts",
+            "long_1080p",
+            "long_4k",
+            "square",
+            "custom"
+          ]
+        },
+        {
+          "description": "1080×1350 feed video (LinkedIn, Instagram).",
+          "type": "string",
+          "const": "portrait_4x5"
+        }
       ]
     },
     "TimeValue": {

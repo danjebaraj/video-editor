@@ -27,7 +27,7 @@ Errors: `E_BEAT_REF`.
 |---|---|---|---|
 | `version` | `1` | required | |
 | `name` | string | file stem | output file name |
-| `target` | `shorts` · `long_1080p` · `long_4k` · `square` · `custom` | `shorts` | geometry, fps, encoder, safe zone |
+| `target` | `shorts` · `long_1080p` · `long_4k` · `square` · `portrait_4x5` · `custom` | `shorts` | geometry, fps, encoder, safe zone |
 | `fps` | number or `"30000/1001"` | target (long-form follows the first video clip) | |
 | `width`, `height` | even int | — | for `custom` |
 | `brand` | path or `"default"` | `brand/default.json` if present, else bundled | |
@@ -56,6 +56,7 @@ Errors: `E_BEAT_REF`.
 | `long_1080p` | 1920×1080 | follows source (24/25/30/50/60) | 5 % / 8 % / 5 % / 5 % | |
 | `long_4k` | 3840×2160 | follows source | same | |
 | `square` | 1080×1080 | 30 | 6 % / 10 % / 6 % / 6 % | |
+| `portrait_4x5` | 1080×1350 | 30 | 6 % / 10 % / 6 % / 6 % | LinkedIn / Instagram feed |
 | `custom` | `width`×`height` | follows source | by orientation | |
 
 ## Asset
@@ -345,8 +346,35 @@ time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`, `E_CU
 
 ## Export
 
-`{name, target, fps, width, height, crf, chroma, out}`. With several exports, output files are named
-`<name>-<export>.mp4`.
+One edit, several deliverables. With several exports, output files are named
+`<name>-<export>.<ext>`.
+
+```json5
+exports: [
+  {name: "youtube"},                                                   // the project target
+  {name: "linkedin", target: "portrait_4x5"},
+  {name: "site", audio: false, loop: true, max_bytes: "8MB", range: ["cue:export", "cue:done"]},
+  {name: "web", format: "webm", captions: "sidecar"},
+]
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `name` | target name | used in the file name |
+| `target`, `fps`, `width`, `height`, `chroma` | the project's | per-export geometry; the edit re-fits (frames, reframe, text) |
+| `format` | `mp4` | `mp4` (H.264 + AAC) or `webm` (VP9 + Opus) |
+| `crf` | per target | quality (x264 scale for MP4, VP9 scale for WebM); ignored with `max_bytes` |
+| `audio` | `true` | `false`: no audio track, for silent autoplay. QA's `muted` check then warns where narration has no caption or text on screen |
+| `loop` | `false` | seamless loop: the end dissolves into the start and the file is 0.5 s shorter. Needs `audio: false`; QA's `loop_seam` compares the last frame with the first |
+| `max_bytes` | — | size cap: `"8MB"`, `"900KB"` or bytes. The video bitrate is solved for it (and lowered and encoded again if the first pass lands over). `W_MAX_BYTES_TIGHT` when the cap leaves too little; QA's `file_size` fails if it is missed |
+| `range` | whole edit | `[from, to]` on the edit (seconds or cues): export only that part |
+| `captions` | `burn` | `burn` (in the picture), `sidecar` (files only) or `none` |
+| `poster` | 0.5 s | time on the edit of the poster frame |
+| `out` | `out/<name>.<ext>` | output path |
+
+Every export also writes `<name>.srt`, `<name>.vtt` (WebVTT for web players), `<name>.poster.jpg`,
+`<name>.qa.json` and `<name>.render_report.json`. A part of the edit (`range`, `loop`) is not
+re-normalized, so its loudness is reported but not checked.
 
 ## Brand file
 
@@ -379,7 +407,8 @@ brand (Inter, blue accent, `clean_sentence` captions).
 
 ## Migration notes
 
-- v1 is the first schema. Breaking changes will bump `version` and be listed here.
+- v1 is the first schema.
+- An export without `target` now uses the project's target (it used to be `shorts`). Breaking changes will bump `version` and be listed here.
 - `end_at` with both `in` and `out` used to change the clip's speed to fit. It now trims (or
   holds the last frame); add `fit: "speed"` for the old behaviour.
 - Transitions ease by default; add `ease: "linear"` for the old constant rate.

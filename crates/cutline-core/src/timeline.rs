@@ -982,6 +982,57 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
         check_sfx(s, p, ctx, "/auto/sfx_on_transitions", &mut d);
     }
 
+    for (i, e) in p.exports.iter().enumerate() {
+        let base = format!("/exports/{i}");
+        if e.r#loop == Some(true) && e.audio != Some(false) {
+            d.push(
+                Diagnostic::error(
+                    "E_FIELD_CONFLICT",
+                    format!("{base}/loop"),
+                    "a looping export dissolves its end into its start, which audio cannot follow",
+                )
+                .hint("add `audio: false` (loops are for silent autoplay), or remove `loop`"),
+            );
+        }
+        if let Some(m) = &e.max_bytes {
+            if m.bytes().is_none_or(|b| b < 10_000) {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/max_bytes"),
+                        "max_bytes must be a size of at least 10 KB",
+                    )
+                    .hint("e.g. \"8MB\", \"900KB\" or a number of bytes"),
+                );
+            }
+        }
+        if let Some([a, b]) = e.range {
+            let (fa, fb) = (a.frames(fps, body_len), b.frames(fps, body_len));
+            if fa < 0 || fb > body_len || fb - fa < 2 {
+                d.push(
+                    Diagnostic::error(
+                        "E_TIME_OUT_OF_RANGE",
+                        format!("{base}/range"),
+                        format!(
+                            "range {:.3}–{:.3}s must lie inside the edit (0–{:.3}s) and run forwards",
+                            fps.frames_to_secs(fa),
+                            fps.frames_to_secs(fb),
+                            fps.frames_to_secs(body_len)
+                        ),
+                    )
+                    .hint("range is [from, to] in seconds on the edit, or cues: [\"cue:export\", \"cue:done\"]"),
+                );
+            }
+        }
+        if e.poster.is_some_and(|t| t.frames(fps, body_len) > body_len) {
+            d.push(Diagnostic::error(
+                "E_TIME_OUT_OF_RANGE",
+                format!("{base}/poster"),
+                "poster time is after the edit ends",
+            ));
+        }
+    }
+
     let tl = (ok && !clips.is_empty()).then(|| {
         layers.sort_by_key(|l| (l.z, l.index));
         Timeline { fps, target: spec, total_frames: total, origin, body_end, clips, transitions, layers }

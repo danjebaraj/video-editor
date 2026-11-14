@@ -283,7 +283,9 @@ fn anchor_starts(
 /// Project variant for one export (target/fps/size override).
 pub fn for_export(p: &Project, e: &Export) -> Project {
     let mut q = p.clone();
-    q.target = e.target;
+    if let Some(t) = e.target {
+        q.target = t;
+    }
     if e.fps.is_some() {
         q.fps = e.fps;
     }
@@ -299,14 +301,36 @@ pub fn for_export(p: &Project, e: &Export) -> Project {
     q
 }
 
+/// Delivery choices of an export, resolved against its timeline.
+pub fn delivery(e: &Export, tl: &Timeline) -> crate::Delivery {
+    let body = tl.body_end - tl.origin;
+    let range = e.range.map(|[a, b]| {
+        let f = |t: cutline_core::time::TimeValue| (tl.origin + t.frames(tl.fps, body)).clamp(0, tl.total_frames);
+        (f(a), f(b))
+    });
+    let n = range.map(|(a, b)| b - a).unwrap_or(tl.total_frames);
+    // half a second of dissolve, less for very short pieces
+    let loop_frames = if e.r#loop == Some(true) { tl.fps.secs_to_frames(0.5).min(n / 4).max(1) } else { 0 };
+    crate::Delivery {
+        format: e.format.unwrap_or_default(),
+        no_audio: e.audio == Some(false),
+        range,
+        loop_frames,
+        max_bytes: e.max_bytes.as_ref().and_then(|m| m.bytes()),
+        crf: e.crf,
+    }
+}
+
 pub fn export_name(e: &Export) -> String {
-    e.name.clone().unwrap_or_else(|| cutline_core::target::target_str(e.target).to_string())
+    e.name.clone().unwrap_or_else(|| {
+        e.target.map(|t| cutline_core::target::target_str(t).to_string()).unwrap_or_else(|| "main".into())
+    })
 }
 
 /// The exports to render (project.exports or one implicit export of the project target).
 pub fn exports(p: &Project) -> Vec<(Option<String>, Export)> {
     if p.exports.is_empty() {
-        vec![(None, Export { target: p.target, ..Default::default() })]
+        vec![(None, Export::default())]
     } else if p.exports.len() == 1 {
         vec![(None, p.exports[0].clone())]
     } else {
@@ -321,6 +345,8 @@ pub struct Prepared {
     pub timeline: Timeline,
     pub diags: Vec<Diagnostic>,
     pub extras: PlanExtras,
+    /// The export this was prepared for.
+    pub export: Export,
 }
 
 /// Resolve one export and compute the plan extras.
@@ -345,9 +371,35 @@ pub fn prepare_for(
         bail!(LoadError::Invalid(diags));
     }
     let tl = tl.context("timeline did not resolve")?;
-    let extras = crate::extras::compute_for(l, &p, &tl, draft, stills)?;
+    let mut extras = crate::extras::compute_for(l, &p, &tl, draft, stills)?;
+    // captions only as files (or not at all): keep them out of the picture
+    if !matches!(e.captions.unwrap_or_default(), cutline_core::model::CaptionDelivery::Burn) {
+        extras.ass_docs.retain(|(name, _)| name != "captions.ass");
+        extras.text_boxes.retain(|b| b.kind != "caption");
+    }
+    if let Some(max) = e.max_bytes.as_ref().and_then(|m| m.bytes()) {
+        let d = delivery(e, &tl);
+        let kbps = crate::video_kbps_for(max, d.frames(tl.total_frames), tl.fps.as_f64(), &d);
+        let floor = (tl.target.width * tl.target.height) as f64 / 2_000.0; // ≈ 1 Mb/s at 1080p
+        if kbps < floor {
+            extras.warnings.push(
+                Diagnostic::warning(
+                    "W_MAX_BYTES_TIGHT",
+                    "/exports",
+                    format!(
+                        "export `{}`: {} bytes leaves about {kbps:.0} kb/s of video at {}×{}; expect visible compression",
+                        export_name.clone().unwrap_or_else(|| self::export_name(e)),
+                        max,
+                        tl.target.width,
+                        tl.target.height
+                    ),
+                )
+                .hint("raise max_bytes, shorten the export with `range`, use a smaller `target`, or `format: \"webm\"`"),
+            );
+        }
+    }
     diags.extend(extras.warnings.clone());
-    Ok(Prepared { export_name, project: p, timeline: tl, diags, extras })
+    Ok(Prepared { export_name, project: p, timeline: tl, diags, extras, export: e.clone() })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -356,6 +408,13 @@ pub struct RenderOutcome {
     pub output: PathBuf,
     pub plan_summary: serde_json::Value,
     pub exec: ExecReport,
+}
+
+/// Render options for a prepared export: the caller's, plus the export's delivery choices.
+pub fn options_for(pr: &Prepared, opts: &RenderOptions) -> RenderOptions {
+    let mut o = opts.clone();
+    o.delivery = delivery(&pr.export, &pr.timeline);
+    o
 }
 
 pub fn plan_for(l: &Loaded, pr: &Prepared, opts: &RenderOptions) -> Result<Plan> {

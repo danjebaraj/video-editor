@@ -17,7 +17,7 @@ const TIMELINE_FIELDS: &[(&str, &str)] =
     &[("main", "end_at"), ("layers", "start"), ("layers", "end"), ("layers", "at"), ("markers", "at")];
 /// Every time-valued field name (cue references anywhere else are an error).
 pub(crate) const TIME_FIELDS: &[&str] =
-    &["in", "out", "duration", "start", "end", "at", "end_at", "src_in", "src_out", "reveal"];
+    &["in", "out", "duration", "start", "end", "at", "end_at", "src_in", "src_out", "reveal", "range", "poster"];
 
 /// A resolved cue (reported by `cutline cues`).
 #[derive(Debug, Clone, serde::Serialize)]
@@ -116,6 +116,12 @@ pub fn resolve_with(
 
 pub(crate) fn is_timeline_field(ptr: &str) -> bool {
     let parts: Vec<&str> = ptr.trim_start_matches('/').split('/').collect();
+    // `/exports/N/range/K` and `/exports/N/poster`: a cut-out of the edit and its poster frame
+    match parts.as_slice() {
+        ["exports", n, "range", k] => return n.parse::<usize>().is_ok() && k.parse::<usize>().is_ok(),
+        ["exports", n, "poster"] => return n.parse::<usize>().is_ok(),
+        _ => {}
+    }
     // `/layers/N/params/reveal/K`: the reveal times of a feature_list
     if let ["layers", n, "params", "reveal", k] = parts.as_slice() {
         return n.parse::<usize>().is_ok() && k.parse::<usize>().is_ok();
@@ -419,6 +425,8 @@ mod tests {
         assert!(is_timeline_field("/layers/0/start"));
         assert!(is_timeline_field("/markers/2/at"));
         assert!(is_timeline_field("/layers/1/params/reveal/2"));
+        assert!(is_timeline_field("/exports/0/range/1"));
+        assert!(is_timeline_field("/exports/2/poster"));
         assert!(!is_timeline_field("/main/3/in"));
         assert!(!is_timeline_field("/layers/0/src_in"));
     }

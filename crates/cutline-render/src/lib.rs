@@ -63,6 +63,45 @@ pub struct RenderOptions {
     pub out: Option<PathBuf>,
     /// Skip loudness normalization (preview).
     pub skip_loudness: bool,
+    /// Per-export delivery choices (format, audio, cut-out, loop, size cap).
+    pub delivery: Delivery,
+}
+
+/// How one export is delivered. The default is a full-length MP4 with audio.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Delivery {
+    pub format: cutline_core::model::ExportFormat,
+    pub no_audio: bool,
+    /// Frames `[from, to)` of the timeline to export.
+    pub range: Option<(i64, i64)>,
+    /// Frames of dissolve from the end back into the start (0 = no loop).
+    pub loop_frames: i64,
+    pub max_bytes: Option<u64>,
+    pub crf: Option<u32>,
+}
+
+impl Delivery {
+    /// Frames in the delivered file, given the timeline's.
+    pub fn frames(&self, total: i64) -> i64 {
+        let n = self.range.map(|(a, b)| b - a).unwrap_or(total);
+        n - self.loop_frames
+    }
+}
+
+/// kb/s of audio in a deliverable.
+pub fn audio_kbps(d: &Delivery) -> f64 {
+    match (d.no_audio, d.format) {
+        (true, _) => 0.0,
+        (false, cutline_core::model::ExportFormat::Mp4) => 320.0,
+        (false, cutline_core::model::ExportFormat::Webm) => 160.0,
+    }
+}
+
+/// Video bitrate (kb/s) that keeps `frames` at `fps` under `max_bytes`, leaving room for the
+/// audio and the container.
+pub fn video_kbps_for(max_bytes: u64, frames: i64, fps: f64, d: &Delivery) -> f64 {
+    let secs = (frames as f64 / fps).max(0.04);
+    (max_bytes as f64 * 8.0 * 0.955 / 1000.0 / secs - audio_kbps(d)).max(20.0)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +133,8 @@ pub struct Plan {
     pub output: PathBuf,
     pub duration: f64,
     pub frames: i64,
+    /// Delivery choices for this export.
+    pub delivery: Delivery,
     #[serde(skip)]
     pub timeline: Timeline,
 }
@@ -180,7 +221,7 @@ pub fn build_plan(
         None => {
             let suffix = export_name.map(|e| format!("-{e}")).unwrap_or_default();
             let draft = if opts.draft { "-draft" } else { "" };
-            project_dir.join("out").join(format!("{name}{suffix}{draft}.mp4"))
+            project_dir.join("out").join(format!("{name}{suffix}{draft}.{}", opts.delivery.format.ext()))
         }
     };
     let (pre_jobs, final_job) =
@@ -198,8 +239,9 @@ pub fn build_plan(
         audio,
         final_job,
         output,
-        duration: tl.duration(),
-        frames: tl.total_frames,
+        duration: tl.secs(opts.delivery.frames(tl.total_frames)),
+        frames: opts.delivery.frames(tl.total_frames),
+        delivery: opts.delivery.clone(),
         timeline: tl.clone(),
     })
 }
@@ -302,7 +344,34 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
     let gop_secs = if tl.target.screencast { 10.0 } else { 2.0 };
     let gop = ((g.fps.as_f64() * gop_secs).round() as i64).max(1).to_string();
     let mut v: Vec<String> = vec![];
-    let hw = if opts.draft || opts.hw { draft_hw_encoder(tc) } else { None };
+    let d = &opts.delivery;
+    let frames = d.frames(tl.total_frames);
+    let capped = d.max_bytes.map(|m| video_kbps_for(m, frames, g.fps.as_f64(), d));
+    if d.format == cutline_core::model::ExportFormat::Webm {
+        // VP9 + Opus: constant quality, or a bitrate solved from the size cap
+        v.extend(["-c:v", "libvpx-vp9", "-row-mt", "1", "-deadline", "good"].map(String::from));
+        v.extend(["-cpu-used", if opts.draft { "5" } else { "2" }].map(String::from));
+        match capped {
+            Some(k) => v.extend(size_cap_args(k)),
+            None => {
+                // VP9's CRF scale runs 0–63; 18 on the x264 scale is about 28 here
+                let crf = d.crf.unwrap_or(if opts.draft { 40 } else { tl.target.crf + 10 });
+                v.extend(["-crf".to_string(), crf.to_string(), "-b:v".to_string(), "0".to_string()]);
+            }
+        }
+        v.extend(["-g", &gop, "-pix_fmt", "yuv420p", "-r", &g.fps.ff(), "-fps_mode", "cfr"].map(String::from));
+        v.extend(
+            ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
+                .map(String::from),
+        );
+        if !d.no_audio {
+            v.extend(["-c:a", "libopus", "-b:a", "160k", "-ar", "48000", "-ac", "2"].map(String::from));
+        }
+        v.extend(["-map_metadata", "-1"].map(String::from));
+        return v;
+    }
+    // a size cap needs the software encoder's rate control
+    let hw = if (opts.draft || opts.hw) && capped.is_none() { draft_hw_encoder(tc) } else { None };
     let uses_hw = hw.is_some();
     match hw {
         Some(enc) => {
@@ -316,6 +385,8 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
         None => {
             let (preset, crf) = if opts.draft {
                 ("veryfast", 23)
+            } else if let Some(c) = d.crf {
+                ("slow", c)
             } else if tl.target.screencast {
                 // text and UI edges need more bits than camera footage
                 ("slow", tl.target.crf.saturating_sub(2))
@@ -328,25 +399,12 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
                 // flat areas and hard edges: stronger deblocking, more reference frames
                 v.extend(["-tune", "animation"].map(String::from));
             }
-            v.extend(
-                [
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    preset,
-                    "-crf",
-                    &crf.to_string(),
-                    "-profile:v",
-                    profile,
-                    "-level:v",
-                    level,
-                    "-bf",
-                    "2",
-                    "-g",
-                    &gop,
-                ]
-                .map(String::from),
-            );
+            v.extend(["-c:v", "libx264", "-preset", preset].map(String::from));
+            match capped {
+                Some(k) => v.extend(size_cap_args(k)),
+                None => v.extend(["-crf".to_string(), crf.to_string()]),
+            }
+            v.extend(["-profile:v", profile, "-level:v", level, "-bf", "2", "-g", &gop].map(String::from));
             v.extend(["-x264-params", "scenecut=40"].map(String::from));
         }
     }
@@ -356,9 +414,24 @@ pub fn encoder_args(tl: &Timeline, g: &Geometry, opts: &RenderOptions, tc: &Tool
         ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"]
             .map(String::from),
     );
-    v.extend(audio_plan::AUDIO_ENCODE_ARGS.map(String::from));
+    if !d.no_audio {
+        v.extend(audio_plan::AUDIO_ENCODE_ARGS.map(String::from));
+    }
     v.extend(["-movflags", "+faststart", "-map_metadata", "-1"].map(String::from));
     v
+}
+
+/// Rate-control args for a target video bitrate (kb/s).
+fn size_cap_args(kbps: f64) -> Vec<String> {
+    let k = kbps.round().max(20.0) as i64;
+    vec![
+        "-b:v".into(),
+        format!("{k}k"),
+        "-maxrate".into(),
+        format!("{}k", (k as f64 * 1.35).round() as i64),
+        "-bufsize".into(),
+        format!("{}k", k * 2),
+    ]
 }
 
 fn draft_hw_encoder(tc: &Toolchain) -> Option<String> {
@@ -423,8 +496,31 @@ fn final_job(
     let mut next_input = mezz.len();
     let ov = overlay::apply(tl, g, full, &mut lines, &mut cur, &mut next_input, extras, p, media, work)?;
     j.args(ov.input_args.clone());
+    let d = &opts.delivery;
+    let out_frames = d.frames(tl.total_frames);
+    // a cut-out takes the same span of the mix (the wav is sample-accurate to seek)
+    if let Some((a, b)) = d.range {
+        j.args(["-ss".to_string(), escape::f(tl.secs(a)), "-t".to_string(), escape::f(tl.secs(b - a))]);
+    }
     j.args(["-i".to_string(), wav.to_string_lossy().to_string()]);
     let audio_idx = next_input;
+    if let Some((a, b)) = d.range {
+        lines.push(format!("[{cur}]trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS[vrange]"));
+        cur = "vrange".into();
+    }
+    if d.loop_frames > 0 {
+        // seamless loop: drop the first D, and dissolve the last D into that first D, so the
+        // last frame leads straight into the new first frame
+        let n = d.range.map(|(a, b)| b - a).unwrap_or(tl.total_frames);
+        let (lf, dsecs) = (d.loop_frames, tl.secs(d.loop_frames));
+        lines.push(format!("[{cur}]split=3[lpa][lpb][lpc]"));
+        lines.push(format!("[lpa]trim=start_frame={lf}:end_frame={},setpts=PTS-STARTPTS[lpmid]", n - lf));
+        lines.push(format!("[lpb]trim=start_frame={},setpts=PTS-STARTPTS[lptail]", n - lf));
+        lines.push(format!("[lpc]trim=end_frame={lf},setpts=PTS-STARTPTS[lphead]"));
+        lines.push(format!("[lptail][lphead]xfade=transition=fade:duration={}:offset=0[lpx]", escape::f(dsecs)));
+        lines.push("[lpmid][lpx]concat=n=2:v=1:a=0[vloop]".to_string());
+        cur = "vloop".into();
+    }
     // stamp color properties on the frames: newer ffmpeg lets (unspecified) frame properties
     // override the -color_* output options after overlays
     lines.push(format!(
@@ -434,10 +530,13 @@ fn final_job(
     let script = work.join("final.filter");
     let text = lines.join(";\n") + "\n";
     j.args(tc.filter_complex_file_args(&script));
-    j.args(["-map".to_string(), "[vout]".to_string(), "-map".to_string(), format!("{audio_idx}:a")]);
+    j.args(["-map".to_string(), "[vout]".to_string()]);
+    if !d.no_audio {
+        j.args(["-map".to_string(), format!("{audio_idx}:a")]);
+    }
     j.args(encoder_args(tl, g, opts, tc));
-    j.args(["-frames:v".to_string(), tl.total_frames.to_string()]);
-    j.args(["-t".to_string(), escape::f(tl.duration())]);
+    j.args(["-frames:v".to_string(), out_frames.to_string()]);
+    j.args(["-t".to_string(), escape::f(tl.secs(out_frames))]);
     j.arg(output.to_string_lossy().to_string());
     j.scripts.push((script, text));
     j.scripts.extend(ov.scripts);
@@ -533,6 +632,30 @@ pub fn execute(tc: &Toolchain, plan: &Plan, opts: &RenderOptions) -> Result<Exec
 
     let t = Instant::now();
     plan.final_job.run(tc)?;
+    // a size cap is a promise: when the first encode lands over it, encode again lower
+    if let Some(max) = plan.delivery.max_bytes {
+        let mut job = plan.final_job.clone();
+        for _ in 0..3 {
+            let size = std::fs::metadata(&plan.output).map(|m| m.len()).unwrap_or(0);
+            if size <= max {
+                break;
+            }
+            let Some(i) = job.args.iter().position(|a| a == "-b:v") else { break };
+            let cur: f64 = job.args[i + 1].trim_end_matches('k').parse().unwrap_or(0.0);
+            let audio = audio_kbps(&plan.delivery);
+            // scale the video's share of the file, with a little margin
+            let secs = plan.duration.max(0.04);
+            let over_kbps = (size - max) as f64 * 8.0 / 1000.0 / secs;
+            let next = ((cur - over_kbps) * 0.96).min(cur * 0.9).max(16.0);
+            tracing::info!(size, max, cur, next, audio, "over the size cap; encoding again");
+            for (k, v) in size_cap_args(next).chunks(2).map(|c| (c[0].clone(), c[1].clone())) {
+                if let Some(p) = job.args.iter().position(|a| *a == k) {
+                    job.args[p + 1] = v;
+                }
+            }
+            job.run(tc)?;
+        }
+    }
     rep.timings.push(StageTiming { stage: "encode".into(), seconds: t.elapsed().as_secs_f64() });
     Ok(rep)
 }

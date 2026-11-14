@@ -51,16 +51,17 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
         .arg(file)
         .args([
             "-filter_complex",
-            "[0:v]scale=320:-2,blackdetect=d=0.3:pix_th=0.08,freezedetect=n=-55dB:d=1.0[vo];\
-             [0:a]ebur128=peak=true:framelog=quiet,silencedetect=n=-70dB:d=1.5[ao]",
+            if ctx.no_audio {
+                "[0:v]scale=320:-2,blackdetect=d=0.3:pix_th=0.08,freezedetect=n=-55dB:d=1.0[vo]"
+            } else {
+                "[0:v]scale=320:-2,blackdetect=d=0.3:pix_th=0.08,freezedetect=n=-55dB:d=1.0[vo];\
+                 [0:a]ebur128=peak=true:framelog=quiet,silencedetect=n=-70dB:d=1.5[ao]"
+            },
             "-map",
             "[vo]",
-            "-map",
-            "[ao]",
-            "-f",
-            "null",
-            "-",
         ])
+        .args(if ctx.no_audio { vec![] } else { vec!["-map", "[ao]"] })
+        .args(["-f", "null", "-"])
         .output()?;
     let log = String::from_utf8_lossy(&out.stderr).to_string();
     anyhow::ensure!(
@@ -71,7 +72,7 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
     let dur = ctx.expected_duration.unwrap_or(0.0);
 
     // loudness
-    if let Some(l) = cutline_media::probe::parse_ebur128_summary(&log) {
+    if let Some(l) = cutline_media::probe::parse_ebur128_summary(&log).filter(|_| !ctx.no_audio) {
         if l.integrated_lufs <= -69.0 {
             b.add(
                 "loudness",
@@ -103,27 +104,65 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
         );
     }
 
-    // clipping: sample peaks ≥ −0.1 dBFS
-    let clip = count_clipping(tc, file)?;
-    b.add("clipping", Sev::Warn, clip == 0, format!("{clip} samples ≥ −0.1 dBFS"), json!(clip), json!(0));
+    if !ctx.no_audio {
+        // clipping: sample peaks ≥ −0.1 dBFS
+        let clip = count_clipping(tc, file)?;
+        b.add("clipping", Sev::Warn, clip == 0, format!("{clip} samples ≥ −0.1 dBFS"), json!(clip), json!(0));
 
-    // silence
-    let sil: Vec<(f64, f64)> = spans(&log, "silence_start:", "silence_end:")
-        .into_iter()
-        .filter(|s| !overlaps(*s, &ctx.intended_silence))
-        .collect();
-    b.add(
-        "silence",
-        Sev::Warn,
-        sil.is_empty(),
-        if sil.is_empty() {
-            "no digital silence > 1.5 s".to_string()
-        } else {
-            format!("{} silent spans > 1.5 s", sil.len())
-        },
-        json!(sil),
-        json!([]),
-    );
+        // silence
+        let sil: Vec<(f64, f64)> = spans(&log, "silence_start:", "silence_end:")
+            .into_iter()
+            .filter(|s| !overlaps(*s, &ctx.intended_silence))
+            .collect();
+        b.add(
+            "silence",
+            Sev::Warn,
+            sil.is_empty(),
+            if sil.is_empty() {
+                "no digital silence > 1.5 s".to_string()
+            } else {
+                format!("{} silent spans > 1.5 s", sil.len())
+            },
+            json!(sil),
+            json!([]),
+        );
+    } else if !ctx.muted_speech.is_empty() {
+        // watched without sound: what is said must be on screen
+        let texts: Vec<(f64, f64)> = ctx.caption_boxes.iter().map(|c| (c.start, c.end)).collect();
+        let unread: Vec<(f64, f64)> = ctx
+            .muted_speech
+            .iter()
+            .filter(|s| s.1 - s.0 >= 2.0)
+            .filter(|s| !texts.iter().any(|t| t.0 < s.1 && t.1 > s.0))
+            .cloned()
+            .collect();
+        b.add(
+            "muted",
+            Sev::Warn,
+            unread.is_empty(),
+            if unread.is_empty() {
+                "narration is on screen as captions or text".to_string()
+            } else {
+                format!(
+                    "{} stretch(es) of narration with no caption or text on screen; this export has no audio",
+                    unread.len()
+                )
+            },
+            json!(unread),
+            json!("captions burned in (`captions: \"burn\"`) or text on screen wherever someone speaks"),
+        );
+    }
+    if ctx.looped {
+        let seam = loop_seam(tc, file, dur).unwrap_or(1.0);
+        b.add(
+            "loop_seam",
+            Sev::Warn,
+            seam < 0.06,
+            format!("last frame differs from the first by {:.1} % (a seamless loop is under 6 %)", seam * 100.0),
+            json!(seam),
+            json!({"max": 0.06}),
+        );
+    }
 
     // black frames
     let black: Vec<(f64, f64)> = black_spans(&log).into_iter().filter(|s| !overlaps(*s, &ctx.intended_black)).collect();
@@ -230,6 +269,30 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
         );
     }
     Ok(())
+}
+
+/// Mean absolute luma difference (0–1) between the first and the last frame.
+fn loop_seam(tc: &Toolchain, file: &Path, dur: f64) -> Result<f64> {
+    let grab = |seek: Option<f64>, one: bool| -> Result<Vec<u8>> {
+        let mut c = Command::new(&tc.ffmpeg);
+        c.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
+        if let Some(t) = seek {
+            c.args(["-ss", &format!("{t:.3}")]);
+        }
+        c.arg("-i").arg(file);
+        if one {
+            c.args(["-frames:v", "1"]);
+        }
+        let out = c.args(["-vf", "scale=96:54,format=gray", "-f", "rawvideo", "-"]).output()?;
+        anyhow::ensure!(out.status.success() && out.stdout.len() >= 96 * 54, "frame grab failed");
+        Ok(out.stdout)
+    };
+    let first = grab(None, true)?;
+    // decode the tail and keep its last frame
+    let tail = grab(Some((dur - 0.5).max(0.0)), false)?;
+    let n = 96 * 54;
+    let last = &tail[tail.len() - n..];
+    Ok(first[..n].iter().zip(last).map(|(a, b)| (*a as f64 - *b as f64).abs()).sum::<f64>() / n as f64 / 255.0)
 }
 
 fn count_clipping(tc: &Toolchain, file: &Path) -> Result<u64> {

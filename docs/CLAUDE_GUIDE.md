@@ -77,6 +77,11 @@ Segments are cached: changing captions, text or music does not re-render clips.
   `compare` for before/after, and `cta_link` to close (headline, URL, QR code). Put full-frame
   cards over a `path: "color:brand"` clip; `feature_list` and `stat` default to a scrim so
   they can sit over the product.
+- Deliver per channel from the one edit with `exports`: the full video, a `portrait_4x5` cut
+  for LinkedIn, a silent looping hero for the website (`audio: false, loop: true, max_bytes`,
+  usually a `range` of the best 10 seconds), `format: "webm"` where the site wants it. Silent
+  exports must read without sound: keep captions burned in and fix every `muted` QA warning.
+  Each export gets a `.vtt` and a `.poster.jpg` for the embed.
 - Tone: no punch-in cadence, no emoji, no `bold_pop`. Plain cuts between screens, one fade from
   the title and into the end card. Keep captions on: most business video is watched muted.
 
