@@ -509,6 +509,19 @@ enum SelfTest {
         doc.inspectorTab = .project
         await sleep(0.3)
         await snapshot(wc2.window, "project")
+        // Light appearance (spec §17: full light and dark mode).
+        NSApp.appearance = NSAppearance(named: .aqua)
+        doc.inspectorTab = .validation
+        await sleep(0.8)
+        await snapshot(wc2.window, "light-validation")
+        doc.showPreview = true
+        await sleep(1.5)
+        await snapshot(web: doc.preview.webView, "light-preview")
+        doc.showPreview = false
+        doc.inspectorTab = .run
+        await sleep(0.8)
+        await snapshot(wc2.window, "light-run")
+        NSApp.appearance = nil
         doc.save()
     }
 

@@ -124,7 +124,7 @@ struct RunStatusChip: View {
                     Text(runs.isPreparing ? "Validating…" : runs.statusLine).lineLimit(1)
                     if runs.isRunning {
                         Text(Fmt.elapsed(runs.elapsed)).monospacedDigit().foregroundStyle(.secondary)
-                        if let c = runs.claudeUSD { Text((runs.costIsEstimate ? "≈" : "") + Fmt.money(c)).monospacedDigit().foregroundStyle(.secondary) }
+                        if let c = runs.claudeUSD { Text(Fmt.money(c)).monospacedDigit().foregroundStyle(.secondary).help(runs.costIsEstimate ? "Estimated from token counts while the run is in progress" : "Reported by Claude Code") }
                     }
                 }
                 .font(.callout)
@@ -299,19 +299,19 @@ struct ReviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "sparkles").foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Claude changed the spec").font(.headline)
-                    Text("\(pending.hunks.count) change\(pending.hunks.count == 1 ? "" : "s") · \(pending.accepted) accepted · \(pending.undecided) to review")
-                        .font(.caption).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    reviewTitle
+                    Spacer()
+                    reviewButtons
                 }
-                Spacer()
-                Button("Reject All") { review.rejectAll() }
-                Button("Accept All") { review.acceptAll() }.keyboardShortcut(.defaultAction)
-                Button("Done") { review.finish() }.help("Apply the accepted changes and keep the old text for the rest")
+                VStack(alignment: .leading, spacing: 8) {
+                    reviewTitle
+                    HStack(spacing: 8) { reviewButtons }
+                }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(.bar)
             Divider()
             ScrollView {
@@ -326,6 +326,24 @@ struct ReviewView: View {
         .background(Color(nsColor: .textBackgroundColor))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Review Claude's changes")
+    }
+
+    private var reviewTitle: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles").foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Claude changed the spec").font(.headline).lineLimit(1)
+                Text("\(pending.hunks.count) change\(pending.hunks.count == 1 ? "" : "s") · \(pending.accepted) accepted · \(pending.undecided) to review")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .fixedSize()
+        }
+    }
+
+    @ViewBuilder private var reviewButtons: some View {
+        Button("Reject All") { review.rejectAll() }
+        Button("Accept All") { review.acceptAll() }.keyboardShortcut(.defaultAction)
+        Button("Done") { review.finish() }.help("Apply the accepted changes and keep the old text for the rest")
     }
 }
 

@@ -60,6 +60,19 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo build --release -p cutline-cli --features onnx
 
+  # Syncfusion Video Studio (ui/spec.md S0): the Swift shell builds against the Rust core.
+  video-studio-macos:
+    runs-on: macos-latest
+    # The app targets the current macOS SDK; hosted runners may lag behind it.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install xcodegen
+      - name: Build the core, the bindings and the app
+        run: apps/macos/build.sh debug
+
   deny:
     runs-on: ubuntu-latest
     steps:

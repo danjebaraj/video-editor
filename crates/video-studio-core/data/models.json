@@ -1,16 +1,76 @@
 {
   "version": 1,
   "updated": "2026-11-14",
-  "note": "Shipped model list. A newer copy at <library>/models.json replaces it (Settings › Claude › Refresh). Prices are USD per million tokens and only feed the approximate pre-run estimate.",
+  "note": "Shipped model list. A newer copy at <library>/models.json replaces it (Settings › Claude › Refresh). Prices are Anthropic first-party API rates in USD per million tokens (2026-11) and only feed the approximate pre-run estimate; the run itself reports the real cost.",
   "families": [
-    {"id": "fable", "name": "Fable", "alias": "fable", "tier": "top", "price": {"input": 25.0, "output": 125.0},
-     "versions": [{"id": "claude-fable-5-2", "name": "Fable 5.2"}]},
-    {"id": "opus", "name": "Opus", "alias": "opus", "tier": "high", "price": {"input": 5.0, "output": 25.0},
-     "versions": [{"id": "claude-opus-5-5", "name": "Opus 5.5"}]},
-    {"id": "sonnet", "name": "Sonnet", "alias": "sonnet", "tier": "balanced", "price": {"input": 3.0, "output": 15.0},
-     "versions": [{"id": "claude-sonnet-5-5", "name": "Sonnet 5.5"}]},
-    {"id": "haiku", "name": "Haiku", "alias": "haiku", "tier": "fast", "price": {"input": 1.0, "output": 5.0},
-     "versions": [{"id": "claude-haiku-5-5", "name": "Haiku 5.5"}]}
+    {
+      "id": "fable",
+      "name": "Fable",
+      "alias": "fable",
+      "tier": "top",
+      "price": {
+        "input": 8.0,
+        "output": 40.0
+      },
+      "versions": [
+        {
+          "id": "claude-fable-5-2",
+          "name": "Fable 5.2"
+        }
+      ]
+    },
+    {
+      "id": "opus",
+      "name": "Opus",
+      "alias": "opus",
+      "tier": "high",
+      "price": {
+        "input": 4.0,
+        "output": 20.0
+      },
+      "versions": [
+        {
+          "id": "claude-opus-5-5",
+          "name": "Opus 5.5"
+        }
+      ]
+    },
+    {
+      "id": "sonnet",
+      "name": "Sonnet",
+      "alias": "sonnet",
+      "tier": "balanced",
+      "price": {
+        "input": 2.0,
+        "output": 10.0
+      },
+      "versions": [
+        {
+          "id": "claude-sonnet-5-5",
+          "name": "Sonnet 5.5"
+        }
+      ]
+    },
+    {
+      "id": "haiku",
+      "name": "Haiku",
+      "alias": "haiku",
+      "tier": "fast",
+      "price": {
+        "input": 0.1,
+        "output": 0.5
+      },
+      "versions": [
+        {
+          "id": "claude-haiku-5-5",
+          "name": "Haiku 5.5"
+        }
+      ]
+    }
   ],
-  "defaults": {"assistant": "sonnet", "dry_run": "haiku", "production": "opus"}
+  "defaults": {
+    "assistant": "sonnet",
+    "dry_run": "haiku",
+    "production": "opus"
+  }
 }

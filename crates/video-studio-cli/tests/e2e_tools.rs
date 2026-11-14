@@ -2,6 +2,9 @@
 //! list / relink on a moved project, the ElevenLabs helper against a fake server, the hook, the
 //! spec assistant with per-hunk review, answering questions in a run, and Revise.
 
+// The fakes run commands through `sh`, as Claude Code does on macOS and Linux.
+#![cfg(unix)]
+
 mod common;
 
 use std::collections::BTreeMap;
@@ -658,4 +661,14 @@ fn a_question_times_out_onto_the_assumption_and_a_turn_limit_fails_the_run() {
     let outcome = start_run(&limited, &env, Arc::new(MemorySink::default())).unwrap().wait();
     assert_eq!(outcome.status, RunStatus::Failed);
     assert!(outcome.message.unwrap().contains("limit of 2 turns"));
+}
+
+#[test]
+fn the_committed_project_schema_is_current() {
+    let w = World::new();
+    let printed = stdout(&w.run(&["schema"]));
+    let committed = include_str!("../../../schema/cutproj.schema.json");
+    assert_eq!(printed.trim(), committed.trim(), "run `video-studio schema > schema/cutproj.schema.json`");
+    let v: Value = serde_json::from_str(committed).unwrap();
+    assert!(v["properties"]["media"].is_object() && v["properties"]["run_configs"].is_object());
 }

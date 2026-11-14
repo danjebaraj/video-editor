@@ -145,6 +145,8 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print the JSON Schema of the .cutproj project file
+    Schema,
     /// Pre-tool permission hook for Claude Code (reads the tool call on stdin)
     #[command(hide = true)]
     Hook {
@@ -239,6 +241,10 @@ fn main() {
         Command::New { project, name, intent, media } => cmd_new(&project, name.as_deref(), &intent, &media),
         Command::Eleven { command } => eleven_cmd::run(command, secrets().as_ref()),
         Command::Secret { action, json } => cmd_secret(&action, json),
+        Command::Schema => {
+            println!("{}", serde_json::to_string_pretty(&project::json_schema()).unwrap_or_default());
+            0
+        }
         Command::Hook { policy } => cmd_hook(&policy),
     };
     std::process::exit(code);

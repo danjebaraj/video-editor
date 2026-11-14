@@ -876,7 +876,7 @@ enum Fmt {
         return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, (t % 3600) / 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
     }
 
-    static func money(_ usd: Double) -> String { usd < 0.01 && usd > 0 ? "<$0.01" : String(format: "$%.2f", usd) }
+    static func money(_ usd: Double) -> String { usd < 0.01 && usd > 0 ? "under $0.01" : String(format: "$%.2f", usd) }
 
     private static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()

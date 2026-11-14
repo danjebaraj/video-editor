@@ -383,7 +383,7 @@ struct LiveRunView: View {
             HStack {
                 Text("Claude").foregroundStyle(.secondary)
                 Spacer()
-                Text(runs.claudeUSD.map { (runs.costIsEstimate ? "≈ " : "") + Fmt.money($0) } ?? "—").monospacedDigit()
+                Text(runs.claudeUSD.map { (runs.costIsEstimate ? "about " : "") + Fmt.money($0) } ?? "—").monospacedDigit()
             }
             .help(runs.costIsEstimate ? "Estimated from token counts while the run is in progress; the final figure comes from Claude Code." : "Reported by Claude Code")
             if runs.kind != "dry_run" {
@@ -412,7 +412,7 @@ struct TranscriptView: View {
                 case "assistant":
                     Text(item.text).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 case "tool":
-                    Label(item.text, systemImage: item.text.hasSuffix("failed") ? "xmark.circle" : "wrench.and.screwdriver").font(.caption)
+                    Label { Text(Self.inline(item.text)) } icon: { Image(systemName: item.text.hasSuffix("failed") ? "xmark.circle" : "wrench.and.screwdriver") }.font(.caption)
                         .foregroundStyle(item.text.hasSuffix("failed") ? Color.red : Color.secondary).lineLimit(2).help(item.detail ?? "")
                 case "error":
                     Label(item.text, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red).textSelection(.enabled)
@@ -423,6 +423,11 @@ struct TranscriptView: View {
             if !streaming.isEmpty { Text(streaming).font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
         }
         .padding(.top, 6)
+    }
+
+    /// Inline Markdown (code spans in tool summaries).
+    static func inline(_ s: String) -> AttributedString {
+        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
     }
 }
 
@@ -592,7 +597,7 @@ struct OutputCard: View {
             }
             if file.exists {
                 if let player {
-                    VideoPlayer(player: player).aspectRatio(CGFloat(file.width) / CGFloat(max(1, file.height)), contentMode: .fit).frame(maxHeight: 280).clipShape(RoundedRectangle(cornerRadius: 6))
+                    VideoPlayer(player: player).aspectRatio(CGFloat(file.width) / CGFloat(max(1, file.height)), contentMode: .fit).frame(maxWidth: .infinity, maxHeight: file.height > file.width ? 240 : 200).clipShape(RoundedRectangle(cornerRadius: 6))
                         .accessibilityLabel("Player for \(file.output_name)")
                 }
                 Text([duration.map(Fmt.duration) ?? "", Fmt.bytes(file.bytes), (file.path as NSString).lastPathComponent].filter { !$0.isEmpty }.joined(separator: " · "))
@@ -600,7 +605,7 @@ struct OutputCard: View {
                 if let findings = file.qa_findings, !findings.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(findings, id: \.self) { f in
-                            Text("• \(f.check): \(f.message)").font(.caption).foregroundStyle(f.severity.hasPrefix("err") ? Color.red : Color.orange).fixedSize(horizontal: false, vertical: true)
+                            Text("• \(f.check): \(f.message)").font(.caption).foregroundStyle(f.severity.hasPrefix("err") ? Color.red : (f.severity.hasPrefix("warn") ? Color.orange : Color.secondary)).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }

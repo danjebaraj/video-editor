@@ -85,7 +85,7 @@ body { background: var(--bgColor-default, #fff); }
 }
 
 /* ---------- Media cards: ![label](media:<id>) ---------- */
-.media-card { display: inline-flex; flex-direction: column; width: 260px; max-width: 100%; margin: 6px 10px 6px 0; vertical-align: top; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 8px; overflow: hidden; background: var(--bgColor-muted, #f6f8fa); cursor: pointer; text-align: left; }
+.media-card { display: inline-flex; flex-direction: column; width: 260px; max-width: 100%; margin: 6px 10px 6px 0; vertical-align: top; border: 1px solid light-dark(#d0d7de, #3d444d); border-radius: 8px; overflow: hidden; background: light-dark(#f6f8fa, #161b22); color: light-dark(#1f2328, #e6edf3); cursor: pointer; text-align: left; }
 .media-card:focus-visible { outline: 2px solid #2f81f7; outline-offset: 1px; }
 .media-thumb { position: relative; display: block; aspect-ratio: 16 / 9; background: #1b1f24; overflow: hidden; }
 .media-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; background: #1b1f24; border-radius: 0; }
@@ -103,7 +103,7 @@ body { background: var(--bgColor-default, #fff); }
 .media-card.status-missing .media-thumb, .media-card.status-unknown .media-thumb { opacity: .55; }
 
 /* ---------- Structured spec blocks ---------- */
-.spec-block { margin: 0 0 16px; padding: 10px 14px 12px; border-left: 3px solid #2f81f7; border-radius: 0 6px 6px 0; background: var(--bgColor-muted, #f6f8fa); }
+.spec-block { margin: 0 0 16px; padding: 10px 14px 12px; border-left: 3px solid #2f81f7; border-radius: 0 6px 6px 0; background: light-dark(#f6f8fa, #161b22); color: light-dark(#1f2328, #e6edf3); }
 .spec-block-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; opacity: .65; margin-bottom: 4px; }
 .spec-block-body { white-space: pre-wrap; font-size: 15px; line-height: 1.5; }
 .spec-vo .spec-block-body { font-style: italic; }

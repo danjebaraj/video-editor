@@ -39,8 +39,7 @@ enum MainMenu {
 
         let recent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
         let recentMenu = NSMenu(title: "Open Recent")
-        recentMenu.perform(NSSelectorFromString("_setMenuName:"), with: "NSRecentDocumentsMenu")
-        recentMenu.addItem(item("Clear Menu", #selector(NSDocumentController.clearRecentDocuments(_:))))
+        recentMenu.delegate = RecentProjectsMenu.shared
         recent.submenu = recentMenu
         _ = add("File", [
             item("New Project…", #selector(AppDelegate.newProject(_:)), "n", target: app),
@@ -145,6 +144,37 @@ enum MainMenu {
         NSApp.windowsMenu = window
         _ = add("Help", [item("Syncfusion Video Studio Help", #selector(W.showHelp(_:)), "?")])
         return main
+    }
+}
+
+/// Fills File › Open Recent from the recent documents list each time it opens.
+@MainActor
+final class RecentProjectsMenu: NSObject, NSMenuDelegate {
+    static let shared = RecentProjectsMenu()
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let urls = NSDocumentController.shared.recentDocumentURLs.filter { $0.pathExtension == "cutproj" }
+        for url in urls {
+            let item = NSMenuItem(title: url.deletingPathExtension().lastPathComponent, action: #selector(open(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            item.toolTip = url.path
+            menu.addItem(item)
+        }
+        if urls.isEmpty {
+            let none = NSMenuItem(title: "No Recent Projects", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
+        menu.addItem(.separator())
+        let clear = NSMenuItem(title: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
+        clear.target = NSDocumentController.shared
+        menu.addItem(clear)
+    }
+
+    @objc private func open(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL { AppDelegate.shared.open(url) }
     }
 }
 

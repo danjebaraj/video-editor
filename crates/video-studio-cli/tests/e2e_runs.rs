@@ -2,6 +2,9 @@
 //! and a fake ElevenLabs server (ui/spec.md §20): validate → run → logs, JSON events, exit
 //! codes, the permission broker, the dry run's limits, and cancellation.
 
+// The fakes run commands through `sh`, as Claude Code does on macOS and Linux.
+#![cfg(unix)]
+
 mod common;
 
 use std::io::{BufRead, BufReader};

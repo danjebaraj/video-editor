@@ -437,7 +437,15 @@ impl Driver {
             }
             StreamEvent::ToolResult { tool_use_id, content, is_error } => {
                 let Some((name, stage)) = self.tools.remove(&tool_use_id) else { return };
-                if is_error {
+                if is_error && content.contains("blocked by Syncfusion Video Studio") {
+                    // Refused by the pre-tool hook: an answer Claude adapts to, not a failure.
+                    let reason = content
+                        .split("hook error:")
+                        .last()
+                        .unwrap_or(&content)
+                        .replace("This is blocked by Syncfusion Video Studio.", "");
+                    self.note("note", format!("Blocked: {}", reason.trim()));
+                } else if is_error {
                     if let (Some(s), Some(cur)) = (&stage, self.stage.as_mut()) {
                         if &cur.0 == s {
                             cur.3 = false;

@@ -829,7 +829,8 @@ pub fn probe_all(project: &mut Project, resolutions: &[Resolution], cutline: &Ut
         if item.probe.as_ref().map(|p| p.for_hash == hash && (p.error.is_none() || hash.is_none())).unwrap_or(false) {
             continue;
         }
-        let mut probe = match probe_file(Utf8Path::new(path), cutline, false) {
+        // Loudness needs a decode, so it is measured for audio files only (music, voice).
+        let mut probe = match probe_file(Utf8Path::new(path), cutline, item.kind == MediaKind::Audio) {
             Ok(p) => p,
             Err(e) => Probe { error: Some(e.to_string()), ..Probe::default() },
         };

@@ -83,7 +83,8 @@ impl FileRefs for ShellRefs {
 // MARK: Argument helpers
 
 fn arg<T: DeserializeOwned>(args: &Value, key: &str) -> R<T> {
-    serde_json::from_value(args.get(key).cloned().unwrap_or(Value::Null)).map_err(|e| bad(format!("argument \"{key}\": {e}")))
+    serde_json::from_value(args.get(key).cloned().unwrap_or(Value::Null))
+        .map_err(|e| bad(format!("argument \"{key}\": {e}")))
 }
 
 fn opt<T: DeserializeOwned>(args: &Value, key: &str) -> R<Option<T>> {
@@ -186,11 +187,15 @@ fn environment_arg(args: &Value, settings: &Settings) -> R<Environment> {
 
 // MARK: The dispatcher
 
-/// Runs one core operation. `args` and the result are JSON; see the match below for the
-/// operations and docs/video-studio/ffi.md for their arguments.
+/// Runs one core operation. `args` and the result are JSON; the match below is the
+/// list of operations, each reading its named arguments with `arg` / `opt`.
 #[uniffi::export]
 pub fn call(method: String, args: String) -> R<String> {
-    let args: Value = if args.trim().is_empty() { json!({}) } else { serde_json::from_str(&args).map_err(|e| bad(format!("arguments aren't JSON: {e}")))? };
+    let args: Value = if args.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(&args).map_err(|e| bad(format!("arguments aren't JSON: {e}")))?
+    };
     let lib = library();
     let refs = ShellRefs;
     match method.as_str() {
@@ -214,7 +219,11 @@ pub fn call(method: String, args: String) -> R<String> {
             out(Platforms::load(&lib))
         }
         "preset.duplicate" => {
-            let p = presets::duplicate_preset(&Platforms::load(&lib), &arg::<String>(&args, "id")?, &arg::<String>(&args, "name")?)?;
+            let p = presets::duplicate_preset(
+                &Platforms::load(&lib),
+                &arg::<String>(&args, "id")?,
+                &arg::<String>(&args, "name")?,
+            )?;
             presets::save_user_preset(&lib, &p)?;
             out(p)
         }
@@ -246,7 +255,8 @@ pub fn call(method: String, args: String) -> R<String> {
             let mut rc = RunConfig::new("Default");
             rc.production_model = settings.default_production_model.clone();
             rc.eleven_credit_cap = settings.eleven_default_credit_cap;
-            rc.quality = if settings.default_quality == "draft" { project::Quality::Draft } else { project::Quality::Final };
+            rc.quality =
+                if settings.default_quality == "draft" { project::Quality::Draft } else { project::Quality::Final };
             rc.web_access = settings.web_access_default;
             rc.outputs = p.output_configs.iter().map(|o| o.id.clone()).collect();
             p.run_configs.push(rc);
@@ -255,7 +265,9 @@ pub fn call(method: String, args: String) -> R<String> {
             }
             out(p)
         }
-        "project.from_template" => out(project::from_template(Utf8Path::new(&arg::<String>(&args, "path")?), &arg::<String>(&args, "name")?)?),
+        "project.from_template" => {
+            out(project::from_template(Utf8Path::new(&arg::<String>(&args, "path")?), &arg::<String>(&args, "name")?)?)
+        }
         "project.load" => out(Project::load(Utf8Path::new(&arg::<String>(&args, "path")?))?),
         "project.save" => {
             let mut p = project_arg(&args)?;
@@ -264,12 +276,23 @@ pub fn call(method: String, args: String) -> R<String> {
         }
         "project.save_as" => {
             let mut p = project_arg(&args)?;
-            project::save_as(&mut p, path_arg(&args, "old_path")?.as_deref(), Utf8Path::new(&arg::<String>(&args, "path")?))?;
+            project::save_as(
+                &mut p,
+                path_arg(&args, "old_path")?.as_deref(),
+                Utf8Path::new(&arg::<String>(&args, "path")?),
+            )?;
             out(p)
         }
         "project.duplicate" => {
-            let opts = DuplicateOptions { keep_runs: opt(&args, "keep_runs")?.unwrap_or(false), keep_sessions: opt(&args, "keep_sessions")?.unwrap_or(false) };
-            out(project::duplicate(Utf8Path::new(&arg::<String>(&args, "source")?), Utf8Path::new(&arg::<String>(&args, "destination")?), opts)?)
+            let opts = DuplicateOptions {
+                keep_runs: opt(&args, "keep_runs")?.unwrap_or(false),
+                keep_sessions: opt(&args, "keep_sessions")?.unwrap_or(false),
+            };
+            out(project::duplicate(
+                Utf8Path::new(&arg::<String>(&args, "source")?),
+                Utf8Path::new(&arg::<String>(&args, "destination")?),
+                opts,
+            )?)
         }
         "project.as_template" => out(project::as_template(&project_arg(&args)?, &arg::<String>(&args, "name")?)),
         "project.export_spec" => out(project::export_spec(&project_arg(&args)?, path_arg(&args, "path")?.as_deref())),
@@ -285,7 +308,9 @@ pub fn call(method: String, args: String) -> R<String> {
             let changed = p.merge_runs_from(&disk);
             out(json!({"project": p, "changed": changed}))
         }
-        "project.unused_pasted_images" => out(project::unused_sidecar_images(&project_arg(&args)?, Utf8Path::new(&arg::<String>(&args, "path")?))),
+        "project.unused_pasted_images" => {
+            out(project::unused_sidecar_images(&project_arg(&args)?, Utf8Path::new(&arg::<String>(&args, "path")?)))
+        }
         "project.schema" => out(project::json_schema()),
         "project.summary" => {
             let p = project_arg(&args)?;
@@ -297,12 +322,23 @@ pub fn call(method: String, args: String) -> R<String> {
                 Some(rc) => presets::resolve_run_outputs(&p, &rc, &platforms).unwrap_or_default(),
                 None => {
                     let mut taken = HashSet::new();
-                    p.output_configs.iter().filter_map(|c| presets::resolve_output(c, &platforms, &mut taken).ok()).collect()
+                    p.output_configs
+                        .iter()
+                        .filter_map(|c| presets::resolve_output(c, &platforms, &mut taken).ok())
+                        .collect()
                 }
             };
             let manifest = core::run::prepare::manifest(&p, &resolutions);
-            let read_paths: Vec<String> = resolutions.iter().filter_map(|r| r.path.as_ref()).filter_map(|p| Utf8Path::new(p).parent().map(|d| d.to_string())).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
-            out(json!({"summary": core::run::prompt::project_summary(&p, &outputs, &manifest), "read_paths": read_paths}))
+            let read_paths: Vec<String> = resolutions
+                .iter()
+                .filter_map(|r| r.path.as_ref())
+                .filter_map(|p| Utf8Path::new(p).parent().map(|d| d.to_string()))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            out(
+                json!({"summary": core::run::prompt::project_summary(&p, &outputs, &manifest), "read_paths": read_paths}),
+            )
         }
 
         // Media
@@ -315,7 +351,11 @@ pub fn call(method: String, args: String) -> R<String> {
             let mut errors: Vec<String> = Vec::new();
             for f in files {
                 let f = Utf8PathBuf::from(f);
-                let r = if f.is_dir() { media::add_folder(&mut p, path.as_deref(), &f, kinds.as_deref(), &refs) } else { media::add_media(&mut p, path.as_deref(), &f, &refs).map(|id| vec![id]) };
+                let r = if f.is_dir() {
+                    media::add_folder(&mut p, path.as_deref(), &f, kinds.as_deref(), &refs)
+                } else {
+                    media::add_media(&mut p, path.as_deref(), &f, &refs).map(|id| vec![id])
+                };
                 match r {
                     Ok(v) => ids.extend(v),
                     Err(e) => errors.push(e.to_string()),
@@ -345,9 +385,18 @@ pub fn call(method: String, args: String) -> R<String> {
         "media.relink" => {
             let mut p = project_arg(&args)?;
             let path = path_arg(&args, "path")?;
-            let fix = media::relink_item(&mut p, path.as_deref(), &arg::<String>(&args, "id")?, Utf8Path::new(&arg::<String>(&args, "file")?), &refs)?;
-            let candidates = fix.as_ref().map(|f| media::prefix_fix_candidates(&p, path.as_deref(), f, &refs)).unwrap_or_default();
-            out(json!({"project": p, "prefix_fix": fix, "candidates": candidates.iter().map(|c| json!({"id": c.0, "path": c.1})).collect::<Vec<_>>()}))
+            let fix = media::relink_item(
+                &mut p,
+                path.as_deref(),
+                &arg::<String>(&args, "id")?,
+                Utf8Path::new(&arg::<String>(&args, "file")?),
+                &refs,
+            )?;
+            let candidates =
+                fix.as_ref().map(|f| media::prefix_fix_candidates(&p, path.as_deref(), f, &refs)).unwrap_or_default();
+            out(
+                json!({"project": p, "prefix_fix": fix, "candidates": candidates.iter().map(|c| json!({"id": c.0, "path": c.1})).collect::<Vec<_>>()}),
+            )
         }
         "media.apply_prefix_fix" => {
             let mut p = project_arg(&args)?;
@@ -357,12 +406,23 @@ pub fn call(method: String, args: String) -> R<String> {
         }
         "media.search_folder" => {
             let mut p = project_arg(&args)?;
-            let relinked = media::search_folder(&mut p, path_arg(&args, "path")?.as_deref(), Utf8Path::new(&arg::<String>(&args, "folder")?), &refs)?;
+            let relinked = media::search_folder(
+                &mut p,
+                path_arg(&args, "path")?.as_deref(),
+                Utf8Path::new(&arg::<String>(&args, "folder")?),
+                &refs,
+            )?;
             out(json!({"project": p, "relinked": relinked}))
         }
         "media.accept_changed" => {
             let mut p = project_arg(&args)?;
-            media::accept_changed(&mut p, &arg::<String>(&args, "id")?, Utf8Path::new(&arg::<String>(&args, "file")?), path_arg(&args, "path")?.as_deref(), &refs)?;
+            media::accept_changed(
+                &mut p,
+                &arg::<String>(&args, "id")?,
+                Utf8Path::new(&arg::<String>(&args, "file")?),
+                path_arg(&args, "path")?.as_deref(),
+                &refs,
+            )?;
             out(p)
         }
 
@@ -372,13 +432,29 @@ pub fn call(method: String, args: String) -> R<String> {
             let p = project_arg(&args)?;
             let ids: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();
             let settings = Settings::load(&lib);
-            out(spec::lint(&p.spec, &spec::LintContext { media_ids: &ids, target_length_s: p.intent.target_length_s, words_per_minute: settings.words_per_minute }))
+            out(spec::lint(
+                &p.spec,
+                &spec::LintContext {
+                    media_ids: &ids,
+                    target_length_s: p.intent.target_length_s,
+                    words_per_minute: settings.words_per_minute,
+                },
+            ))
         }
-        "spec.templates" => out(spec::TEMPLATES.iter().map(|(id, title)| json!({"id": id, "title": title})).collect::<Vec<_>>()),
+        "spec.templates" => {
+            out(spec::TEMPLATES.iter().map(|(id, title)| json!({"id": id, "title": title})).collect::<Vec<_>>())
+        }
         "spec.template" => out(spec::template_for(&arg::<String>(&args, "id")?, &arg::<String>(&args, "name")?)),
-        "spec.slash_blocks" => out(spec::SLASH_BLOCKS.iter().map(|(command, title, snippet)| json!({"command": command, "title": title, "snippet": snippet})).collect::<Vec<_>>()),
+        "spec.slash_blocks" => out(spec::SLASH_BLOCKS
+            .iter()
+            .map(|(command, title, snippet)| json!({"command": command, "title": title, "snippet": snippet}))
+            .collect::<Vec<_>>()),
         "spec.diff" => out(assistant::diff_hunks(&arg::<String>(&args, "old")?, &arg::<String>(&args, "new")?)),
-        "spec.apply_hunks" => out(assistant::apply_hunks(&arg::<String>(&args, "old")?, &arg::<Vec<assistant::Hunk>>(&args, "hunks")?, &arg::<Vec<bool>>(&args, "accepted")?)),
+        "spec.apply_hunks" => out(assistant::apply_hunks(
+            &arg::<String>(&args, "old")?,
+            &arg::<Vec<assistant::Hunk>>(&args, "hunks")?,
+            &arg::<Vec<bool>>(&args, "accepted")?,
+        )),
 
         // Brands
         "brand.list" => out(brand::list(&lib)),
@@ -394,10 +470,17 @@ pub fn call(method: String, args: String) -> R<String> {
         }
         "brand.ensure_default" => out(brand::ensure_default(&lib)?),
         "brand.export" => {
-            brand::export_cutbrand(&arg::<BrandPreset>(&args, "brand")?, Utf8Path::new(&arg::<String>(&args, "destination")?))?;
+            brand::export_cutbrand(
+                &arg::<BrandPreset>(&args, "brand")?,
+                Utf8Path::new(&arg::<String>(&args, "destination")?),
+            )?;
             out(true)
         }
-        "brand.import" => out(brand::import_cutbrand(&lib, Utf8Path::new(&arg::<String>(&args, "file")?), opt(&args, "replace")?.unwrap_or(false))?),
+        "brand.import" => out(brand::import_cutbrand(
+            &lib,
+            Utf8Path::new(&arg::<String>(&args, "file")?),
+            opt(&args, "replace")?.unwrap_or(false),
+        )?),
         "brand.is_newer" => out(brand::library_is_newer(&lib, &arg::<BrandRef>(&args, "brand")?)),
         "brand.asset" => out(AssetRef::new(Utf8Path::new(&arg::<String>(&args, "path")?))),
 
@@ -421,7 +504,8 @@ pub fn call(method: String, args: String) -> R<String> {
         "outputs.root" => {
             let p = project_arg(&args)?;
             let settings = Settings::load(&lib);
-            let rc = p.run_config(&arg::<String>(&args, "run_config")?).cloned().ok_or_else(|| bad("no such run config"))?;
+            let rc =
+                p.run_config(&arg::<String>(&args, "run_config")?).cloned().ok_or_else(|| bad("no such run config"))?;
             out(rc.output_root(&p.name, Some(&settings.default_output_folder)).to_string())
         }
 
@@ -439,8 +523,24 @@ pub fn call(method: String, args: String) -> R<String> {
             if let Some(c) = &env.cutline {
                 media::probe_all(&mut p, &resolutions, Utf8Path::new(&c.path));
             }
-            let shell_env = ShellEnv { env, eleven_key_present: opt(&args, "eleven_key_present")?.unwrap_or(false), eleven_remaining: opt(&args, "eleven_remaining")? };
-            let mut report = validation::validate(&ValidateInput { project: &p, project_path: path.as_deref(), run_config: rc.as_ref(), kind, settings: &settings, platforms: &platforms, models: &models, library: &lib, resolutions: &resolutions, env: &shell_env, output_override: None });
+            let shell_env = ShellEnv {
+                env,
+                eleven_key_present: opt(&args, "eleven_key_present")?.unwrap_or(false),
+                eleven_remaining: opt(&args, "eleven_remaining")?,
+            };
+            let mut report = validation::validate(&ValidateInput {
+                project: &p,
+                project_path: path.as_deref(),
+                run_config: rc.as_ref(),
+                kind,
+                settings: &settings,
+                platforms: &platforms,
+                models: &models,
+                library: &lib,
+                resolutions: &resolutions,
+                env: &shell_env,
+                output_override: None,
+            });
             if let Some(r) = opt::<ReadinessReport>(&args, "readiness")? {
                 report.add_dry_run(&r);
             }
@@ -451,16 +551,24 @@ pub fn call(method: String, args: String) -> R<String> {
 
         // Runs and logs
         "run.results" => out(core::run::collect::load_results(Utf8Path::new(&arg::<String>(&args, "folder")?))),
-        "logs.export" => out(logs::export_logs(Utf8Path::new(&arg::<String>(&args, "folder")?), Utf8Path::new(&arg::<String>(&args, "destination")?), opt(&args, "redact")?.unwrap_or(false))?),
+        "logs.export" => out(logs::export_logs(
+            Utf8Path::new(&arg::<String>(&args, "folder")?),
+            Utf8Path::new(&arg::<String>(&args, "destination")?),
+            opt(&args, "redact")?.unwrap_or(false),
+        )?),
         "logs.issue_report" => out(logs::issue_report(Utf8Path::new(&arg::<String>(&args, "folder")?))),
         "storage.info" => out(logs::storage_info(&lib, &arg::<Vec<String>>(&args, "run_folders")?)),
-        "storage.cleanup" => out(logs::cleanup_runs(&lib, &arg::<Vec<String>>(&args, "run_folders")?, arg(&args, "days")?)),
+        "storage.cleanup" => {
+            out(logs::cleanup_runs(&lib, &arg::<Vec<String>>(&args, "run_folders")?, arg(&args, "days")?))
+        }
         "storage.clear_eleven_cache" => {
             core::eleven::clear_cache(&core::eleven::cache_dir(&lib))?;
             out(true)
         }
         "assistant.gather_info_prompt" => out(core::run::prompt::GATHER_INFO_PROMPT),
-        "assistant.sessions_dir" => out(assistant::sessions_dir(&lib, &arg::<String>(&args, "project_id")?).to_string()),
+        "assistant.sessions_dir" => {
+            out(assistant::sessions_dir(&lib, &arg::<String>(&args, "project_id")?).to_string())
+        }
         other => Err(bad(format!("unknown operation \"{other}\""))),
     }
 }
@@ -584,9 +692,19 @@ impl AssistantTurn {
 pub fn start_assistant(request_json: String, listener: Box<dyn EventListener>) -> R<Arc<AssistantTurn>> {
     let request: AssistantRequest = serde_json::from_str(&request_json).map_err(|e| bad(format!("request: {e}")))?;
     let settings = Settings::load(&library());
-    let claude = locate::find_claude(&settings.claude_path).ok_or_else(|| CoreError::Failed { code: "environment".into(), message: "Claude Code isn't installed.".into() })?;
+    let claude = locate::find_claude(&settings.claude_path).ok_or_else(|| CoreError::Failed {
+        code: "environment".into(),
+        message: "Claude Code isn't installed.".into(),
+    })?;
     if !claude.supported {
-        return Err(CoreError::Failed { code: "environment".into(), message: format!("Claude Code {} is too old; this app needs {} or later.", claude.version, locate::min_version_text()) });
+        return Err(CoreError::Failed {
+            code: "environment".into(),
+            message: format!(
+                "Claude Code {} is too old; this app needs {} or later.",
+                claude.version,
+                locate::min_version_text()
+            ),
+        });
     }
     let handle = assistant::start(&request, &claude, Arc::new(ChatSink(listener)))?;
     Ok(Arc::new(AssistantTurn { handle }))
@@ -597,7 +715,8 @@ mod tests {
     use super::*;
 
     fn c(method: &str, args: Value) -> Value {
-        serde_json::from_str(&call(method.into(), args.to_string()).unwrap_or_else(|e| panic!("{method}: {e}"))).unwrap()
+        serde_json::from_str(&call(method.into(), args.to_string()).unwrap_or_else(|e| panic!("{method}: {e}")))
+            .unwrap()
     }
 
     #[test]
@@ -628,7 +747,10 @@ mod tests {
         assert_eq!(outs[0]["width"], 1920);
         // hunks
         let hunks = c("spec.diff", json!({"old": "a\nb\n", "new": "a\nc\n"}));
-        assert_eq!(c("spec.apply_hunks", json!({"old": "a\nb\n", "hunks": hunks, "accepted": [true]})), json!("a\nc\n"));
+        assert_eq!(
+            c("spec.apply_hunks", json!({"old": "a\nb\n", "hunks": hunks, "accepted": [true]})),
+            json!("a\nc\n")
+        );
         // brands and presets live in the library
         let b = c("brand.ensure_default", json!({}));
         assert_eq!(c("brand.list", json!({})).as_array().unwrap().len(), 1);
@@ -639,15 +761,27 @@ mod tests {
         s["words_per_minute"] = json!(170);
         assert_eq!(c("settings.save", json!({"settings": s}))["words_per_minute"], 170);
         // validation with a supplied environment (no tools are run)
-        let env = json!({"claude": null, "signed_in": null, "cutline": null, "doctor": null, "min_claude_version": "2.1.0"});
-        let v = c("validate", json!({"project": added["project"], "path": path, "run_config": "Default", "environment": env}));
-        let rules: Vec<&str> = v["report"]["issues"].as_array().unwrap().iter().map(|i| i["rule"].as_str().unwrap()).collect();
-        assert!(rules.contains(&"claude_missing") && rules.contains(&"cutline_missing") && rules.contains(&"spec_placeholder"), "{rules:?}");
+        let env =
+            json!({"claude": null, "signed_in": null, "cutline": null, "doctor": null, "min_claude_version": "2.1.0"});
+        let v = c(
+            "validate",
+            json!({"project": added["project"], "path": path, "run_config": "Default", "environment": env}),
+        );
+        let rules: Vec<&str> =
+            v["report"]["issues"].as_array().unwrap().iter().map(|i| i["rule"].as_str().unwrap()).collect();
+        assert!(
+            rules.contains(&"claude_missing")
+                && rules.contains(&"cutline_missing")
+                && rules.contains(&"spec_placeholder"),
+            "{rules:?}"
+        );
         // errors carry a code
         match call("project.load".into(), json!({"path": root.join("nope.cutproj")}).to_string()) {
             Err(CoreError::Failed { code, .. }) => assert_eq!(code, "io"),
             other => panic!("{other:?}"),
         }
-        assert!(matches!(call("no.such".into(), "{}".into()), Err(CoreError::Failed { code, .. }) if code == "bad_request"));
+        assert!(
+            matches!(call("no.such".into(), "{}".into()), Err(CoreError::Failed { code, .. }) if code == "bad_request")
+        );
     }
 }
