@@ -523,6 +523,15 @@ pub fn apply(
         let (x0, y0) = position_exprs(Some(&pos), safe, "top_right");
         push_overlay(lines, cur, "wm", &x0, &y0, wm.start, wm.end);
     }
+    // annotations (highlight, spotlight, arrow, keys, cursor): drawn in Rust, composited here
+    for (i, an) in extras.annot.iter().enumerate() {
+        let idx = *next_input;
+        *next_input += 1;
+        o.input_args.extend(["-i".to_string(), an.path.to_string_lossy().to_string()]);
+        let lab = format!("an{i}");
+        lines.push(format!("[{idx}:v]fps={},format=yuva444p,setpts=PTS-STARTPTS+{}/TB[{lab}]", fps.ff(), f(an.start)));
+        push_overlay(lines, cur, &lab, "0", "0", an.start, an.end);
+    }
     // template images (emoji pops)
     for (i, im) in extras.extra_images.iter().enumerate() {
         let idx = *next_input;

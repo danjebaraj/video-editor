@@ -1,5 +1,6 @@
 //! Timeline → render plan → ffmpeg commands/filter scripts; segment renderer; encoder profiles.
 
+pub mod annot;
 pub mod assemble;
 pub mod audio_plan;
 pub mod auto;
@@ -227,6 +228,10 @@ pub struct PlanExtras {
     pub srt: String,
     /// Non-fatal findings from extras (e.g. W_REFRAME_NO_FACES).
     pub warnings: Vec<cutline_core::Diagnostic>,
+    /// Rendered annotation runs (highlight, spotlight, arrow, keys, cursor).
+    pub annot: Vec<annot::AnnotRender>,
+    /// Where each clip's picture sits in the output frame (clips inside a screen frame).
+    pub content_rects: annot::ContentRects,
     /// Brand logo drawn as a watermark.
     pub watermark: Option<WatermarkSpec>,
     /// Reframe crop paths per clip id (for the review pack).

@@ -203,6 +203,14 @@
         "scale_in"
       ]
     },
+    "AnnotEnter": {
+      "type": "string",
+      "enum": [
+        "draw",
+        "fade",
+        "none"
+      ]
+    },
     "Asset": {
       "type": "object",
       "properties": {
@@ -874,6 +882,34 @@
         "phrase"
       ]
     },
+    "CursorKey": {
+      "type": "object",
+      "properties": {
+        "click": {
+          "description": "A click happens when the pointer arrives here.",
+          "type": "boolean"
+        },
+        "t": {
+          "description": "Seconds after the layer starts.",
+          "type": "number",
+          "format": "double"
+        },
+        "x": {
+          "type": "number",
+          "format": "double"
+        },
+        "y": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "t",
+        "x",
+        "y"
+      ]
+    },
     "Duck": {
       "type": "object",
       "properties": {
@@ -1411,6 +1447,14 @@
         {
           "type": "string"
         }
+      ]
+    },
+    "HighlightStyle": {
+      "type": "string",
+      "enum": [
+        "outline",
+        "fill",
+        "underline"
       ]
     },
     "JumpCuts": {
@@ -2698,6 +2742,501 @@
           "required": [
             "type",
             "rect"
+          ]
+        },
+        {
+          "description": "Outline, fill or underline a region to show where to look.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "color": {
+              "description": "`brand` (the accent, default) or a color.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enter": {
+              "description": "draw (default: the stroke draws itself) | fade | none",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotEnter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "follow": {
+              "description": "Move with the zoom of the clip underneath (default true).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "radius": {
+              "description": "Corner radius in output px (default 8 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "description": "Region as fractions of the frame: `{x, y, w, h}`.",
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "style": {
+              "description": "outline (default) | fill | underline",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/HighlightStyle"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "highlight"
+            },
+            "width": {
+              "description": "Stroke width in output px (default 4 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          },
+          "required": [
+            "type",
+            "rect"
+          ]
+        },
+        {
+          "description": "Dim everything except a region. Spotlights on screen together share one dim layer.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dim": {
+              "description": "How dark the rest gets, 0–1 (default 0.6).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "feather": {
+              "description": "Soft edge in output px (default 12 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "follow": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "radius": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "rect": {
+              "$ref": "#/$defs/Rect"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "spotlight"
+            }
+          },
+          "required": [
+            "type",
+            "rect"
+          ]
+        },
+        {
+          "description": "Arrow from one point to another (fractions of the frame), with an optional label at\nits tail.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "follow": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "from": {
+              "$ref": "#/$defs/Point"
+            },
+            "label": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "size": {
+              "description": "Label size in output px (default 34 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "to": {
+              "$ref": "#/$defs/Point"
+            },
+            "type": {
+              "type": "string",
+              "const": "arrow"
+            },
+            "width": {
+              "description": "Shaft width in output px (default 6 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          },
+          "required": [
+            "type",
+            "from",
+            "to"
+          ]
+        },
+        {
+          "description": "Keycap badges for a shortcut: `keys: [\"cmd\", \"K\"]`.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "position": {
+              "description": "Default `bottom`.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "size": {
+              "description": "Keycap height in output px (default 64 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "keys"
+            }
+          },
+          "required": [
+            "type",
+            "keys"
+          ]
+        },
+        {
+          "description": "A drawn mouse pointer moving along `path`, with a ripple on clicks. Use it over\nrecordings made without a cursor.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "click_ripple": {
+              "description": "Ripple on clicks (default true).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "color": {
+              "description": "Ripple color: `brand` (default) or a color.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "follow": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "path": {
+              "description": "Keys: `t` seconds after the layer starts, `x`/`y` fractions of the frame.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CursorKey"
+              }
+            },
+            "size": {
+              "description": "Pointer size multiplier (default 1 = 28 px tall at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "cursor"
+            }
+          },
+          "required": [
+            "type",
+            "path"
           ]
         },
         {

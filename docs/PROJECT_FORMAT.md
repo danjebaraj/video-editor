@@ -173,6 +173,27 @@ others until the end. Visual layers take: `position` (preset `center`, `top`, `b
 | `sfx` | `asset` (or brand alias), `at` or `anchor`+`offset`, `gain_db`, `pick_from` |
 | `mask` | `rect` `{x, y, w, h}` (fractions of the frame), `mode` (`blur` default, `pixelate`, `fill`), `color` (fill, default `#000000`), `strength` (default 1), `text` (replacement text, Inter), `text_color` (`#9AA0A6`), `text_size` (px at full size; default 60 % of the rect height). Hides part of the frame over the footage and overlays, under text and captions; until the end by default. Use `fill` for secrets: blurred or pixelated text can sometimes be recovered |
 
+### Annotations
+
+Layers that show where to look. They are drawn over the footage, overlays, masks and the
+watermark, and under text and captions. Coordinates are fractions of the frame (the same as
+`mask` and `zoom_to`, so one rect serves a `zoom_to` and its `highlight`). Default length 3 s.
+
+| `type` | Fields (defaults) |
+|---|---|
+| `highlight` | `rect`, `style` (`outline` · `fill` · `underline`), `color` (`brand` accent), `width` 4 px, `radius` 8 px, `enter` (`draw`: the stroke draws itself · `fade` · `none`) |
+| `spotlight` | `rect`, `dim` 0.6 (how dark the rest gets), `feather` 12 px, `radius` 8 px. Spotlights on screen together share one dim layer |
+| `arrow` | `from` `{x, y}`, `to` `{x, y}`, `label` (text behind the tail), `color`, `width` 6 px, `size` 34 px (label) |
+| `keys` | `keys` e.g. `["cmd", "K"]` (cmd, shift, alt, ctrl, enter, tab, esc, space, arrows become keycap symbols), `position` (`bottom`), `size` 64 px |
+| `cursor` | `path` `[{t, x, y, click}]` (`t` = seconds after the layer starts; the pointer eases between keys and ripples on `click: true`), `size` 1, `click_ripple` true, `color` (ripple). Ends 0.6 s after the last key by default |
+
+Pixel sizes are for a 1080p-class output and scale with drafts. `highlight`, `spotlight`,
+`arrow` and `cursor` **follow the zoom** of the clip underneath (`zoom_to`, `punch_in`, `zoom`,
+`ken_burns`): the rect is written for the unzoomed frame and stays on its target while the
+picture zooms. With `anchor` the clip is the anchor clip; otherwise the clip on screen. Set
+`follow: false` for screen coordinates. A rect or point outside the frame is
+`E_RECT_OUT_OF_FRAME`. `cutline review` writes `annotations/*.jpg`, a frame of each.
+
 Text templates: `hook_title`, `lower_third`, `callout`, `step_counter`, `big_number`, `quote`,
 `cta_subscribe`, `end_card`, `emoji_pop`, and HTML variants `hook_title_html`,
 `lower_third_html`, `end_card_html`. Common params: `color`, `accent`, `font`, `size`,

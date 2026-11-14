@@ -85,6 +85,11 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - Point at UI with `{type: "zoom_to", rect: {x, y, w, h}, start, end}` instead of working out
   zoom scales and focus points. Zooms are sub-pixel smooth and use the recording's full
   resolution, so do not pre-crop or pre-scale footage outside cutline.
+- Show where to look. Pair a `zoom_to` with a `highlight` on the same `rect` (it follows the
+  zoom), use `spotlight` when the rest of the screen distracts, an `arrow` with a short `label`
+  for "new here", `keys` when the narration names a shortcut, and a `cursor` layer over
+  recordings made without a pointer. One device at a time: a highlight or a spotlight, not both.
+  Time them with cues (`start: "cue:export"`), and check `review/annotations/`.
 - **Keep recordings at 1×.** `end_at` trims a clip to its slot; it never changes the speed. If
   `W_FIT_HOLD` says a clip runs out of footage, give it more footage (earlier `in`, later
   `out`), cut sooner, or accept the held last frame when the screen is still anyway. Use

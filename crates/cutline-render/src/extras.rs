@@ -45,6 +45,8 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
     html_layers(l, p, tl, &brand, &mut extras, draft, stills)?;
     captions(l, p, tl, &brand, &mut extras)?;
     extras.warnings.extend(crate::auto::script_warnings(l, p));
+    let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
+    let g = if draft { full.draft() } else { full };
     for c in &tl.clips {
         let mut x = ClipExtras {
             pad_color: c
@@ -74,13 +76,12 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         ) {
             x.source_override = Some(html_clip(l, p, tl, c, draft, stills)?);
         }
-        let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
-        let g = if draft { full.draft() } else { full };
         if let Some(path) = crate::reframe::apply(l, p, tl, &g, c, &mut x, &mut extras.warnings)? {
             extras.crop_paths.insert(c.id.clone(), path);
         }
         extras.clip.insert(c.id.clone(), x);
     }
+    annotations(l, tl, &g, &brand, &mut extras)?;
     Ok(extras)
 }
 
@@ -118,6 +119,25 @@ fn watermark(
         start: (o + wm.from.unwrap_or(0.0)).min(e),
         end: wm.to.map(|t| (o + t).min(e)).unwrap_or(e),
     })
+}
+
+/// Rasterize annotation layers into cached alpha videos.
+fn annotations(l: &Loaded, tl: &Timeline, g: &crate::Geometry, brand: &Brand, extras: &mut PlanExtras) -> Result<()> {
+    if !tl.layers.iter().any(|x| x.layer.is_annotation()) {
+        return Ok(());
+    }
+    let k = g.scale_to(tl.target.width);
+    let (sx, sy, sw, sh) = tl.target.safe_rect();
+    let font = cutline_text::FontDb::bundled().ok().and_then(|db| db.get("Inter", false).map(|f| f.font.clone()));
+    let st = crate::annot::Style {
+        accent: crate::overlay::rgb_of(&brand.colors.accent),
+        safe: (sx * k, sy * k, sw * k, sh * k),
+        k,
+        font,
+    };
+    let cache = crate::cutline_dir(&l.dir).join("cache").join("annot");
+    extras.annot = crate::annot::render(cutline_deps::toolchain()?, tl, g, &extras.content_rects, &st, &cache)?;
+    Ok(())
 }
 
 pub fn frame_of(tl: &Timeline) -> cutline_text::templates::Frame {

@@ -238,7 +238,7 @@ pub fn static_gaps(pr: &Prepared, min: f64) -> Vec<(f64, f64)> {
 pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
     let tc = cutline_deps::toolchain()?;
     std::fs::create_dir_all(out_dir)?;
-    for sub in ["cuts", "captions", "reframe"] {
+    for sub in ["cuts", "captions", "reframe", "annotations"] {
         let d = out_dir.join(sub);
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d)?;
@@ -343,6 +343,26 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
         stroke_rect(&mut f, sc(b.x), sc(b.y), sc(b.w), sc(b.h), 2, [255, 200, 0]);
         painter.label(&mut f, 8, 8, 16.0, &format!("{}  \"{}\"", format_tc(t), b.text), [255, 255, 255]);
         let p = out_dir.join("captions").join(format!("caption_{:02}.jpg", k + 1));
+        save_jpg(&fit(&f, MAX_SIDE), &p)?;
+        images.push(p);
+    }
+
+    // ---- annotations: a frame of each with it on screen (≤ 8)
+    let annots: Vec<_> = tl.layers.iter().filter(|x| x.layer.is_annotation()).collect();
+    for (k, a) in pick_evenly(annots, 8).iter().enumerate() {
+        // past the enter animation, before the exit
+        let (s, e) = (tl.secs(a.start), tl.secs(a.end));
+        let t = (s + 0.6 * (e - s)).min(e - 0.25).max(s);
+        let mut f = grab(tc, &src, t)?;
+        painter.label(
+            &mut f,
+            8,
+            8,
+            16.0,
+            &format!("layer {} {}  {}–{}", a.index, a.layer.kind(), format_tc(s), format_tc(e)),
+            [255, 255, 255],
+        );
+        let p = out_dir.join("annotations").join(format!("annotation_{:02}_{}.jpg", k + 1, a.layer.kind()));
         save_jpg(&fit(&f, MAX_SIDE), &p)?;
         images.push(p);
     }
@@ -473,7 +493,7 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
             md.push_str(&format!("- `{}` {}: {}\n", d.code, d.path, d.message));
         }
     }
-    md.push_str("\n## Files\n\n- contact_sheet.jpg, cuts/, captions/, reframe/, audio.png, timeline.txt, qa.json, preview_540p.mp4\n");
+    md.push_str("\n## Files\n\n- contact_sheet.jpg, cuts/, captions/, annotations/, reframe/, audio.png, timeline.txt, qa.json, preview_540p.mp4\n");
     let sp = out_dir.join("summary.md");
     std::fs::write(&sp, md)?;
     files.push(sp);

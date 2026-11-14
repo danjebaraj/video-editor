@@ -889,6 +889,100 @@ pub enum Layer {
         #[serde(flatten)]
         at: Placement,
     },
+    /// Outline, fill or underline a region to show where to look.
+    Highlight {
+        /// Region as fractions of the frame: `{x, y, w, h}`.
+        rect: Rect,
+        /// outline (default) | fill | underline
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        style: Option<HighlightStyle>,
+        /// `brand` (the accent, default) or a color.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        /// Stroke width in output px (default 4 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<f64>,
+        /// Corner radius in output px (default 8 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<f64>,
+        /// draw (default: the stroke draws itself) | fade | none
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enter: Option<AnnotEnter>,
+        /// Move with the zoom of the clip underneath (default true).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Dim everything except a region. Spotlights on screen together share one dim layer.
+    Spotlight {
+        rect: Rect,
+        /// How dark the rest gets, 0–1 (default 0.6).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dim: Option<f64>,
+        /// Soft edge in output px (default 12 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feather: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radius: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Arrow from one point to another (fractions of the frame), with an optional label at
+    /// its tail.
+    Arrow {
+        from: Point,
+        to: Point,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        /// Shaft width in output px (default 6 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<f64>,
+        /// Label size in output px (default 34 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// Keycap badges for a shortcut: `keys: ["cmd", "K"]`.
+    Keys {
+        keys: Vec<String>,
+        /// Default `bottom`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<Position>,
+        /// Keycap height in output px (default 64 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// A drawn mouse pointer moving along `path`, with a ripple on clicks. Use it over
+    /// recordings made without a cursor.
+    Cursor {
+        /// Keys: `t` seconds after the layer starts, `x`/`y` fractions of the frame.
+        path: Vec<CursorKey>,
+        /// Pointer size multiplier (default 1 = 28 px tall at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        /// Ripple on clicks (default true).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        click_ripple: Option<bool>,
+        /// Ripple color: `brand` (default) or a color.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generated_by: Option<String>,
+        #[serde(flatten)]
+        at: Placement,
+    },
     /// One-shot sound effect at `at` (or anchored).
     Sfx {
         /// Asset id, brand SFX alias, or a list to pick from deterministically.
@@ -920,6 +1014,11 @@ impl Layer {
             Layer::Audio { .. } => "audio",
             Layer::Mask { .. } => "mask",
             Layer::Sfx { .. } => "sfx",
+            Layer::Highlight { .. } => "highlight",
+            Layer::Spotlight { .. } => "spotlight",
+            Layer::Arrow { .. } => "arrow",
+            Layer::Keys { .. } => "keys",
+            Layer::Cursor { .. } => "cursor",
         }
     }
     pub fn placement(&self) -> Option<&Placement> {
@@ -931,6 +1030,11 @@ impl Layer {
             | Layer::Html { at, .. }
             | Layer::ProgressBar { at, .. }
             | Layer::Mask { at, .. }
+            | Layer::Highlight { at, .. }
+            | Layer::Spotlight { at, .. }
+            | Layer::Arrow { at, .. }
+            | Layer::Keys { at, .. }
+            | Layer::Cursor { at, .. }
             | Layer::Audio { at, .. } => Some(at),
             Layer::Sfx { .. } => None,
         }
@@ -945,6 +1049,17 @@ impl Layer {
             _ => None,
         }
     }
+    /// highlight / spotlight / arrow / keys / cursor: drawn together in the annotation pass.
+    pub fn is_annotation(&self) -> bool {
+        matches!(
+            self,
+            Layer::Highlight { .. }
+                | Layer::Spotlight { .. }
+                | Layer::Arrow { .. }
+                | Layer::Keys { .. }
+                | Layer::Cursor { .. }
+        )
+    }
     pub fn asset(&self) -> Option<&str> {
         match self {
             Layer::Video { asset, .. }
@@ -956,6 +1071,36 @@ impl Layer {
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HighlightStyle {
+    #[default]
+    Outline,
+    Fill,
+    Underline,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotEnter {
+    #[default]
+    Draw,
+    Fade,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CursorKey {
+    /// Seconds after the layer starts.
+    pub t: f64,
+    pub x: f64,
+    pub y: f64,
+    /// A click happens when the pointer arrives here.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub click: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]

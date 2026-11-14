@@ -774,6 +774,7 @@ dependencies = [
 name = "cutline-render"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "anyhow",
  "cutline-audio",
  "cutline-core",

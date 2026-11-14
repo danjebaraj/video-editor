@@ -7,6 +7,7 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ab_glyph = "0.2.32"
 anyhow = "1.0.104"
 cutline-audio = { version = "0.1.0", path = "../cutline-audio" }
 cutline-core = { version = "0.1.0", path = "../cutline-core" }

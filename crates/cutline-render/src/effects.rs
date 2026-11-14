@@ -224,6 +224,25 @@ pub fn max_zoom(c: &TClip, dur: f64) -> f64 {
         .fold(1.0, f64::max)
 }
 
+/// The zoom at clip-local time `t`: scale, and the left/top of the visible window as fractions
+/// of the frame. Mirrors `zoom_chain` (without shake), so overlays can follow the picture.
+pub fn zoom_at(c: &TClip, dur: f64, t: f64) -> (f64, f64, f64) {
+    let (terms, focus, _, kb) = zoom_terms(c, dur);
+    if terms.is_empty() {
+        return (1.0, 0.0, 0.0);
+    }
+    let s = terms.iter().map(|x| x.eval(t)).product::<f64>().max(1e-6);
+    let (fx, fy) = match kb {
+        Some(((x0, y0), (x1, y1), ez)) => {
+            let u = ease(ez, t / dur.max(1e-6));
+            (x0 + (x1 - x0) * u, y0 + (y1 - y0) * u)
+        }
+        None => focus,
+    };
+    let win = |f: f64| ((s - 1.0) * f / s).clamp(0.0, (1.0 - 1.0 / s).max(0.0));
+    (s, win(fx), win(fy))
+}
+
 /// Zoom/pan/shake chain with sub-pixel motion.
 ///
 /// The frame is resampled by `perspective` (cubic), whose source rectangle is evaluated per

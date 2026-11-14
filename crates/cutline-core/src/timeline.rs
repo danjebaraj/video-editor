@@ -732,6 +732,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/text_size"), "text_size must be positive"));
             }
         }
+        check_annotation(l, &base, &mut d);
         if let Some(v) = l.visual() {
             if let Some(o) = v.opacity {
                 if !(0.0..=1.0).contains(&o) {
@@ -807,7 +808,15 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     _ => None,
                 };
                 let default_end = match l {
-                    Layer::Text { .. } => s + fps.secs_to_frames(3.0),
+                    Layer::Text { .. }
+                    | Layer::Highlight { .. }
+                    | Layer::Spotlight { .. }
+                    | Layer::Arrow { .. }
+                    | Layer::Keys { .. } => s + fps.secs_to_frames(3.0),
+                    // a little after the pointer arrives at its last key
+                    Layer::Cursor { path, .. } => {
+                        s + fps.secs_to_frames(path.iter().map(|k| k.t).fold(0.0, f64::max) + 0.6)
+                    }
                     _ => match src_len {
                         Some(sl) => s + fps.secs_to_frames(sl),
                         None => body_end,
@@ -955,6 +964,92 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
         Timeline { fps, target: spec, total_frames: total, origin, body_end, clips, transitions, layers }
     });
     (tl, d)
+}
+
+/// A rect in fractions of the frame, inside it.
+pub fn rect_in_frame(r: &Rect) -> bool {
+    let inside = |v: f64| (0.0..=1.0).contains(&v);
+    inside(r.x) && inside(r.y) && r.w > 0.0 && r.h > 0.0 && r.x + r.w <= 1.0 + 1e-9 && r.y + r.h <= 1.0 + 1e-9
+}
+
+fn check_annotation(l: &Layer, base: &str, d: &mut Vec<Diagnostic>) {
+    let bad_rect = |r: &Rect, d: &mut Vec<Diagnostic>| {
+        if !rect_in_frame(r) {
+            d.push(
+                Diagnostic::error(
+                    "E_RECT_OUT_OF_FRAME",
+                    format!("{base}/rect"),
+                    "rect must lie inside the frame: x, y, w, h are fractions (0–1) with x+w ≤ 1 and y+h ≤ 1",
+                )
+                .hint("e.g. {x: 0.2, y: 0.44, w: 0.3, h: 0.08}; divide pixel values by the frame width/height"),
+            );
+        }
+    };
+    let bad_point = |p: &Point, field: &str, d: &mut Vec<Diagnostic>| {
+        if !((0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y)) {
+            d.push(Diagnostic::error(
+                "E_RECT_OUT_OF_FRAME",
+                format!("{base}/{field}"),
+                "point must lie inside the frame (x and y are fractions, 0–1)",
+            ));
+        }
+    };
+    let positive = |v: &Option<f64>, field: &str, d: &mut Vec<Diagnostic>| {
+        if v.is_some_and(|v| v.is_nan() || v < 0.0) {
+            d.push(Diagnostic::error(
+                "E_BAD_VALUE",
+                format!("{base}/{field}"),
+                format!("{field} must not be negative"),
+            ));
+        }
+    };
+    match l {
+        Layer::Highlight { rect, width, radius, .. } => {
+            bad_rect(rect, d);
+            positive(width, "width", d);
+            positive(radius, "radius", d);
+        }
+        Layer::Spotlight { rect, dim, feather, radius, .. } => {
+            bad_rect(rect, d);
+            positive(feather, "feather", d);
+            positive(radius, "radius", d);
+            if dim.is_some_and(|v| !(0.0..=1.0).contains(&v)) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/dim"), "dim must be within 0–1"));
+            }
+        }
+        Layer::Arrow { from, to, width, size, .. } => {
+            bad_point(from, "from", d);
+            bad_point(to, "to", d);
+            positive(width, "width", d);
+            positive(size, "size", d);
+        }
+        Layer::Keys { keys, size, .. } => {
+            if keys.is_empty() || keys.iter().any(|k| k.trim().is_empty()) {
+                d.push(
+                    Diagnostic::error("E_BAD_VALUE", format!("{base}/keys"), "keys needs at least one key name")
+                        .hint("e.g. [\"cmd\", \"K\"]"),
+                );
+            }
+            positive(size, "size", d);
+        }
+        Layer::Cursor { path, size, .. } => {
+            if path.is_empty() {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/path"), "cursor path needs at least one key"));
+            }
+            for (i, k) in path.iter().enumerate() {
+                bad_point(&Point { x: k.x, y: k.y }, &format!("path/{i}"), d);
+                if k.t < 0.0 || (i > 0 && k.t < path[i - 1].t) {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/path/{i}/t"),
+                        "cursor key times must not be negative and must increase",
+                    ));
+                }
+            }
+            positive(size, "size", d);
+        }
+        _ => {}
+    }
 }
 
 fn check_sfx(s: &str, p: &Project, ctx: &Context, path: &str, d: &mut Vec<Diagnostic>) {
