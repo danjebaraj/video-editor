@@ -401,9 +401,56 @@
       },
       "additionalProperties": false
     },
+    "AutoCursor": {
+      "type": "object",
+      "properties": {
+        "click_ripple": {
+          "type": "boolean",
+          "default": true
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "keys": {
+          "description": "Show a `keys` badge for shortcuts and Enter/Escape/Tab presses (default true).",
+          "type": "boolean",
+          "default": true
+        },
+        "size": {
+          "description": "Pointer size multiplier (default 1.4).",
+          "type": "number",
+          "format": "double",
+          "default": 1.4
+        }
+      },
+      "additionalProperties": false
+    },
     "AutoDirectives": {
       "type": "object",
       "properties": {
+        "cursor": {
+          "description": "Browser recordings: draw the mouse pointer (with click ripples) and shortcut badges.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AutoCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fast_forward_idle": {
+          "description": "Play stretches where little changes on screen and nobody speaks at a higher speed.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FastForwardIdle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "jump_cuts": {
           "anyOf": [
             {
@@ -446,6 +493,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/SnapToBeats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "zoom_on_clicks": {
+          "description": "Browser recordings: zoom in on each click and follow from one click to the next.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ZoomOnClicks"
             },
             {
               "type": "null"
@@ -762,7 +820,7 @@
           "type": "boolean"
         },
         "speed": {
-          "description": "Constant speed factor 0.25–4.",
+          "description": "Constant speed factor 0.25–8.",
           "type": [
             "number",
             "null"
@@ -1555,6 +1613,52 @@
         "mp4",
         "webm"
       ]
+    },
+    "FastForwardIdle": {
+      "type": "object",
+      "properties": {
+        "activity": {
+          "description": "Share of the picture that may change per tenth of a second and still count as idle\n(default 0.006: typing, a spinner or a blinking caret).",
+          "type": "number",
+          "format": "double",
+          "default": 0.006
+        },
+        "applies_to": {
+          "description": "Asset ids (default: every video clip asset).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "badge": {
+          "description": "Show a small speed badge (\"4×\") while fast-forwarding (default true).",
+          "type": "boolean",
+          "default": true
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "keep": {
+          "description": "Seconds kept at normal speed at each end of an idle stretch (default 0.4).",
+          "type": "number",
+          "format": "double",
+          "default": 0.4
+        },
+        "min_idle": {
+          "description": "Shortest idle stretch worth speeding up, in seconds (default 2.5).",
+          "type": "number",
+          "format": "double",
+          "default": 2.5
+        },
+        "speed": {
+          "description": "Playback speed of idle stretches (default 4; up to 8).",
+          "type": "number",
+          "format": "double",
+          "default": 4.0
+        }
+      },
+      "additionalProperties": false
     },
     "Fit": {
       "type": "string",
@@ -3276,6 +3380,12 @@
                 }
               ]
             },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "keys": {
               "type": "array",
               "items": {
@@ -3328,6 +3438,94 @@
           "required": [
             "type",
             "keys"
+          ]
+        },
+        {
+          "description": "A small pill with a short text, e.g. the speed while fast-forwarding (\"4×\").",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "generated_by": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "position": {
+              "description": "Default `top_right`.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "size": {
+              "description": "Text size in output px (default 30 at 1080p).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "badge"
+            }
+          },
+          "required": [
+            "type",
+            "text"
           ]
         },
         {
@@ -4120,6 +4318,47 @@
       "required": [
         "transition"
       ]
+    },
+    "ZoomOnClicks": {
+      "type": "object",
+      "properties": {
+        "duration": {
+          "description": "Zoom in/out time (default 0.6).",
+          "type": "number",
+          "format": "double",
+          "default": 0.6
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "hold": {
+          "description": "Seconds the zoom stays after the last click of a group (default 1.2).",
+          "type": "number",
+          "format": "double",
+          "default": 1.2
+        },
+        "max_scale": {
+          "description": "Strongest zoom (default 2; 1.2–3).",
+          "type": "number",
+          "format": "double",
+          "default": 2.0
+        },
+        "merge_within": {
+          "description": "Clicks closer together than this many seconds share one zoom (default 2.5).",
+          "type": "number",
+          "format": "double",
+          "default": 2.5
+        },
+        "steps": {
+          "description": "Only these step names (default: every click and typed field).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

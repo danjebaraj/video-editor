@@ -9,6 +9,7 @@ pub mod browser;
 pub mod cards;
 pub mod cues;
 pub mod custom_transitions;
+pub mod demo_auto;
 pub mod effects;
 pub mod escape;
 pub mod extras;

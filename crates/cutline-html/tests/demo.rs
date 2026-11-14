@@ -57,6 +57,7 @@ fn records_a_session_with_steps_cursor_and_rects() {
         "{wait: 0.4},
          {click: \"button:has-text('Export')\", name: 'export'},
          {type: {into: '#email', text: 'ada@example.com', delay: 20}, name: 'email'},
+         {wait: 'text=ada@example.com', timeout: 2},
          {press: 'Enter'},
          {scroll: {to: 'text=Invoices', duration: 0.5}, name: 'invoices'}",
     );

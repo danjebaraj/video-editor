@@ -338,7 +338,7 @@ pub struct Clip {
     /// `speed` plays exactly `in`..`out` at whatever speed fills the slot (frame-blended).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<EndFit>,
-    /// Constant speed factor 0.25–4.
+    /// Constant speed factor 0.25–8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<f64>,
     /// Keyframed speed curve (overrides `speed`).
@@ -1035,6 +1035,22 @@ pub enum Layer {
         /// Keycap height in output px (default 64 at 1080p).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         size: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generated_by: Option<String>,
+        #[serde(flatten)]
+        at: Placement,
+    },
+    /// A small pill with a short text, e.g. the speed while fast-forwarding ("4×").
+    Badge {
+        text: String,
+        /// Default `top_right`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<Position>,
+        /// Text size in output px (default 30 at 1080p).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generated_by: Option<String>,
         #[serde(flatten)]
         at: Placement,
     },
@@ -1095,6 +1111,7 @@ impl Layer {
             Layer::Arrow { .. } => "arrow",
             Layer::Keys { .. } => "keys",
             Layer::Cursor { .. } => "cursor",
+            Layer::Badge { .. } => "badge",
         }
     }
     pub fn placement(&self) -> Option<&Placement> {
@@ -1111,6 +1128,26 @@ impl Layer {
             | Layer::Arrow { at, .. }
             | Layer::Keys { at, .. }
             | Layer::Cursor { at, .. }
+            | Layer::Badge { at, .. }
+            | Layer::Audio { at, .. } => Some(at),
+            Layer::Sfx { .. } => None,
+        }
+    }
+    pub fn placement_mut(&mut self) -> Option<&mut Placement> {
+        match self {
+            Layer::Text { at, .. }
+            | Layer::Video { at, .. }
+            | Layer::Broll { at, .. }
+            | Layer::Image { at, .. }
+            | Layer::Html { at, .. }
+            | Layer::ProgressBar { at, .. }
+            | Layer::Mask { at, .. }
+            | Layer::Highlight { at, .. }
+            | Layer::Spotlight { at, .. }
+            | Layer::Arrow { at, .. }
+            | Layer::Keys { at, .. }
+            | Layer::Cursor { at, .. }
+            | Layer::Badge { at, .. }
             | Layer::Audio { at, .. } => Some(at),
             Layer::Sfx { .. } => None,
         }
@@ -1138,6 +1175,7 @@ impl Layer {
                 | Layer::Arrow { .. }
                 | Layer::Keys { .. }
                 | Layer::Cursor { .. }
+                | Layer::Badge { .. }
         )
     }
     pub fn asset(&self) -> Option<&str> {
@@ -1356,6 +1394,102 @@ pub struct AutoDirectives {
     /// Move cuts onto the music's beats (fitting each clip with `end_at`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snap_to_beats: Option<SnapToBeats>,
+    /// Browser recordings: zoom in on each click and follow from one click to the next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_on_clicks: Option<ZoomOnClicks>,
+    /// Browser recordings: draw the mouse pointer (with click ripples) and shortcut badges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<AutoCursor>,
+    /// Play stretches where little changes on screen and nobody speaks at a higher speed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_forward_idle: Option<FastForwardIdle>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ZoomOnClicks {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Strongest zoom (default 2; 1.2–3).
+    #[serde(default = "zoc_scale")]
+    pub max_scale: f64,
+    /// Clicks closer together than this many seconds share one zoom (default 2.5).
+    #[serde(default = "zoc_merge")]
+    pub merge_within: f64,
+    /// Seconds the zoom stays after the last click of a group (default 1.2).
+    #[serde(default = "zoc_hold")]
+    pub hold: f64,
+    /// Zoom in/out time (default 0.6).
+    #[serde(default = "zoom_to_dur")]
+    pub duration: f64,
+    /// Only these step names (default: every click and typed field).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<String>,
+}
+fn zoc_scale() -> f64 {
+    2.0
+}
+fn zoc_merge() -> f64 {
+    2.5
+}
+fn zoc_hold() -> f64 {
+    1.2
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AutoCursor {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Pointer size multiplier (default 1.4).
+    #[serde(default = "cursor_size")]
+    pub size: f64,
+    #[serde(default = "yes")]
+    pub click_ripple: bool,
+    /// Show a `keys` badge for shortcuts and Enter/Escape/Tab presses (default true).
+    #[serde(default = "yes")]
+    pub keys: bool,
+}
+fn cursor_size() -> f64 {
+    1.4
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FastForwardIdle {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Shortest idle stretch worth speeding up, in seconds (default 2.5).
+    #[serde(default = "ffi_min")]
+    pub min_idle: f64,
+    /// Playback speed of idle stretches (default 4; up to 8).
+    #[serde(default = "ffi_speed")]
+    pub speed: f64,
+    /// Seconds kept at normal speed at each end of an idle stretch (default 0.4).
+    #[serde(default = "ffi_keep")]
+    pub keep: f64,
+    /// Share of the picture that may change per tenth of a second and still count as idle
+    /// (default 0.006: typing, a spinner or a blinking caret).
+    #[serde(default = "ffi_activity")]
+    pub activity: f64,
+    /// Show a small speed badge ("4×") while fast-forwarding (default true).
+    #[serde(default = "yes")]
+    pub badge: bool,
+    /// Asset ids (default: every video clip asset).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applies_to: Vec<String>,
+}
+fn ffi_min() -> f64 {
+    2.5
+}
+fn ffi_speed() -> f64 {
+    4.0
+}
+fn ffi_keep() -> f64 {
+    0.4
+}
+fn ffi_activity() -> f64 {
+    0.006
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]

@@ -516,6 +516,21 @@ pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], st: &Style
                     x += kw + gap;
                 }
             }
+            Layer::Badge { text, position, size, .. } => {
+                let Some(font) = st.font.as_ref() else { continue };
+                let fs = (size.unwrap_or(30.0) * k).max(6.0);
+                let tw = text_width(font, fs, text);
+                let (bw, bh) = (tw + 0.9 * fs, 1.7 * fs);
+                let (cx, cy) = position_center(position.as_ref(), st.safe, (w, h), (bw, bh), "top_right");
+                let alpha = fade_env(t, len, FADE, FADE);
+                let (x0, y0) = (cx - bw / 2.0, cy - bh / 2.0);
+                cv.shape((x0, y0, x0 + bw, y0 + bh), [16, 18, 24], 0.82 * alpha, |px, py| {
+                    aa(sd_rrect(px, py, x0, y0, bw, bh, bh / 2.0))
+                });
+                let sf = font.as_scaled(PxScale::from(fs as f32));
+                let baseline = cy + (sf.ascent() as f64 + sf.descent() as f64) / 2.0;
+                cv.text(font, fs, x0 + 0.45 * fs, baseline, text, [255, 255, 255], alpha);
+            }
             Layer::Cursor { path, size, click_ripple, color, follow, .. } => {
                 let (map, content) = ctx(lay, *follow);
                 let ((fx, fy), click) = cursor_at(path, t);

@@ -434,6 +434,9 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
         }
         q.main = new_main;
     }
+    if let Some(ff) = auto.fast_forward_idle.clone().filter(|f| f.enabled) {
+        crate::demo_auto::fast_forward_idle(l, &mut q, &ff, brand, &mut notes)?;
+    }
     if let Some(sfx) = &auto.sfx_on_transitions {
         for m in &mut q.main {
             if let MainItem::Transition(t) = m {
@@ -488,6 +491,12 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
                 }
             }
         }
+    }
+    if let Some(z) = auto.zoom_on_clicks.clone().filter(|z| z.enabled) {
+        crate::demo_auto::zoom_on_clicks(l, &mut q, &z, &mut notes);
+    }
+    if let Some(c) = auto.cursor.clone().filter(|c| c.enabled) {
+        crate::demo_auto::cursor(l, &mut q, &c, &mut notes);
     }
     if let Some(sb) = auto.snap_to_beats.clone().filter(|s| s.enabled) {
         snap_to_beats(l, &mut q, &sb, &mut notes)?;
@@ -653,7 +662,7 @@ fn snap_to_beats(
     Ok(())
 }
 
-fn effect_at(e: &Effect) -> Option<f64> {
+pub(crate) fn effect_at(e: &Effect) -> Option<f64> {
     match e {
         Effect::PunchIn { at, .. }
         | Effect::Shake { at, .. }
@@ -665,7 +674,7 @@ fn effect_at(e: &Effect) -> Option<f64> {
     }
 }
 
-fn with_at(e: &Effect, v: f64) -> Effect {
+pub(crate) fn with_at(e: &Effect, v: f64) -> Effect {
     let mut e = e.clone();
     match &mut e {
         Effect::PunchIn { at, .. }

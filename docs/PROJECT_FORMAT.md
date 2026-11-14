@@ -149,7 +149,7 @@ target with the viewport's aspect ratio) rather than a cropping `reframe`.
 | `duration` | — | stills; or `in` + duration·speed |
 | `end_at` | — | timeline time of the cut to the next clip (the middle of the outgoing transition): `"cue:…"`, `"bar:…"` or seconds. The clip plays at its `speed` (default 1) and is fitted by trimming: footage past the cut is dropped (`out` is then only a limit); footage that ends early holds its last frame and warns `W_FIT_HOLD`. Stills get the duration. Not with `duration` or `speed_ramp`. Jump cuts and filler removal skip fitted clips |
 | `fit` | `trim` | with `end_at` + `in` + `out`: `speed` plays exactly `in`..`out` at whatever speed (0.25–4) fills the slot |
-| `speed` | 1 | 0.25–4; audio pitch preserved (`atempo`). Any speed other than 1 (also `speed_ramp`, `fit: "speed"`) blends neighbouring frames so motion stays even; text and cursors soften a little while they move, so keep screen recordings at 1 where you can |
+| `speed` | 1 | 0.25–8; audio pitch preserved (`atempo`). Any speed other than 1 (also `speed_ramp`, `fit: "speed"`) blends neighbouring frames so motion stays even; text and cursors soften a little while they move, so keep screen recordings at 1 where you can |
 | `speed_ramp` | — | `[{t, speed}]`, source-relative `t` |
 | `reverse` | false | ≤ 10 s clips |
 | `reframe` | `default_reframe` | see Reframe |
@@ -230,6 +230,11 @@ or `.cube` path) + `intensity` (0–1), `exposure` (stops), `contrast`, `saturat
 | `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0, `duration` 0.6, `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`) |
 | `ken_burns` | `from_scale` 1, `to_scale` 1.15, `from`/`to` {x,y}, `ease` |
 
+A clip can zoom to several places in turn: each `zoom_to` (and each `punch_in` / `zoom` with a
+`focus`) takes over the view from its start, panning from the previous one. Give a `zoom_to` an
+`end` to zoom out before the next, or chain `{type: "zoom", from: 1, to: 1, start, end, focus}`
+to pan while staying zoomed.
+
 Zooms (`punch_in`, `zoom`, `zoom_to`, `ken_burns`, `shake`) and reframe moves (`track_face`,
 `manual` keys) move in fractions of a pixel, so slow moves glide. When the source has at least 1.4× the target's pixels and the zoom reaches 1.15×,
 the zoom is taken from the source's detail (2× supersampling) rather than from the downscaled frame.
@@ -279,6 +284,7 @@ watermark, and under text and captions. Coordinates are fractions of the frame (
 | `spotlight` | `rect`, `dim` 0.6 (how dark the rest gets), `feather` 12 px, `radius` 8 px. Spotlights on screen together share one dim layer |
 | `arrow` | `from` `{x, y}`, `to` `{x, y}`, `label` (text behind the tail), `color`, `width` 6 px, `size` 34 px (label) |
 | `keys` | `keys` e.g. `["cmd", "K"]` (cmd, shift, alt, ctrl, enter, tab, esc, space, arrows become keycap symbols), `position` (`bottom`), `size` 64 px |
+| `badge` | `text` (a few characters, e.g. `"4×"`), `position` (`top_right`), `size` 30 px: a small dark pill |
 | `cursor` | `path` `[{t, x, y, click}]` (`t` = seconds after the layer starts; the pointer eases between keys and ripples on `click: true`), `size` 1, `click_ripple` true, `color` (ripple). Ends 0.6 s after the last key by default |
 
 Pixel sizes are for a 1080p-class output and scale with drafts. `highlight`, `spotlight`,
@@ -362,6 +368,10 @@ narration bed.
 | `punch_ins` | `every` 4.0, `scale` [1.08, 1.15], `skip_if_other_motion` true, `duration` 0.25 |
 | `sfx_on_transitions` | SFX asset/alias for transitions without one |
 | `snap_to_beats` | `enabled` true, `asset` (default: the only music-role audio layer), `max_shift` 0.15 s, `downbeat_reach` 0.35 s. Each cut moves onto the music (in order, so later cuts see the ripple) by fitting the outgoing clip with `end_at`: onto the first beat of a bar when one is within `downbeat_reach` and the bars are clear, otherwise onto the nearest beat within `max_shift`. Cuts farther away, clips with a `speed_ramp`, and moves that would run a clip out of footage stay put. `cutline expand` lists every move; `cutline beats` shows tempo, bars and beats on the timeline |
+
+| `fast_forward_idle` | `enabled` true, `min_idle` 2.5 s, `speed` 4 (1.5–8), `keep` 0.4 s, `activity` 0.006, `badge` true, `applies_to` (all video clip assets). Stretches of a recording where almost nothing changes on screen (loading, long typing, a spinner) and nobody speaks play at `speed`, with a small "4×" `badge` layer; `keep` seconds at each end stay at normal speed. The clip is split into pieces (`rec`, `rec~2`, …); layers anchored to it stay on the same moment of the footage. Clips with `end_at`, a `speed` or a `speed_ramp` are left alone |
+| `zoom_on_clicks` | `enabled` true, `max_scale` 2, `merge_within` 2.5 s, `hold` 1.2 s, `duration` 0.6 s, `steps` (all). Browser recordings: zooms in on each clicked or typed-in element as the pointer sets off, pans to the next one when it follows closely (one scale for the run, so it is a pan and not a pump), and zooms out `hold` seconds after the last. Clicks close in time and place share one framing. Clips that already have a zoom are left alone |
+| `cursor` | `enabled` true, `size` 1.4, `click_ripple` true, `keys` true. Browser recordings: adds a `cursor` layer per clip with the recorded pointer path and clicks, and a `keys` badge for shortcuts and Enter / Escape / Tab |
 
 Generated items carry `generated_by`; `cutline expand` shows them. Jump-cut pieces keep the first
 piece's id (`talk`, `talk~2`, …).

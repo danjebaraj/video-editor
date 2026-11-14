@@ -680,6 +680,8 @@ async fn drive(browser: &Browser, script: &DemoScript, script_dir: &Path, work: 
     let page = browser.new_page("about:blank").await?;
     let (w, h) = (script.viewport.w, script.viewport.h);
     page.execute(SetDeviceMetricsOverrideParams::new(w as i64, h as i64, script.viewport.scale, false)).await?;
+    // a headless page has no window focus; without this, typed text goes nowhere
+    page.execute(chromiumoxide::cdp::browser_protocol::emulation::SetFocusEmulationEnabledParams::new(true)).await?;
     if let Some(theme) = &script.theme {
         let f = MediaFeature::new("prefers-color-scheme", theme.as_str());
         page.execute(SetEmulatedMediaParams { media: None, features: Some(vec![f]) }).await?;

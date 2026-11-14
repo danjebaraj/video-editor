@@ -95,6 +95,11 @@ Segments are cached: changing captions, text or music does not re-render clips.
   rect follow; nothing is measured by hand. Start each script with a `wait` for the page's key
   element, keep `scale: 2`, give credentials as `$ENV_VAR`, and list third-party origins the
   page needs in `allow`. `cutline record project.json5` records again on demand.
+- With a browser recording, start from `auto: {cursor: {}, zoom_on_clicks: {}}`: the pointer
+  is drawn from the recording (with click ripples and shortcut badges) and the view follows
+  the clicks. Add `fast_forward_idle: {}` for loading and long typing. Read `cutline expand` to
+  see what they made, then override by hand only where needed (a clip with its own zoom is
+  left alone).
 - Record terminal footage from VHS tapes: use the `.tape` file itself as the asset path and cutline
   records it (and re-records only when the tape changes; run `cutline record project.json5` when
   the screen shows live data you want fresh). End each tape by quitting the program

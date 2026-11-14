@@ -353,11 +353,11 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     continue;
                 }
                 let mut speed = c.speed.unwrap_or(1.0);
-                if !(0.25..=4.0).contains(&speed) {
+                if !(0.25..=8.0).contains(&speed) {
                     d.push(Diagnostic::error(
                         "E_SPEED_RANGE",
                         format!("{base}/speed"),
-                        format!("speed {speed} outside 0.25–4"),
+                        format!("speed {speed} outside 0.25–8"),
                     ));
                 }
                 for (k, sk) in c.speed_ramp.iter().enumerate() {
@@ -835,6 +835,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     | Layer::Highlight { .. }
                     | Layer::Spotlight { .. }
                     | Layer::Arrow { .. }
+                    | Layer::Badge { .. }
                     | Layer::Keys { .. } => s + fps.secs_to_frames(3.0),
                     // a little after the pointer arrives at its last key
                     Layer::Cursor { path, .. } => {
@@ -975,6 +976,45 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     "/auto/snap_to_beats/asset",
                     format!("unknown asset `{a}`"),
                 ));
+            }
+        }
+    }
+    if let Some(a) = &p.auto {
+        if let Some(z) = &a.zoom_on_clicks {
+            if !(1.2..=3.0).contains(&z.max_scale) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    "/auto/zoom_on_clicks/max_scale",
+                    "max_scale must be within 1.2–3",
+                ));
+            }
+            if !(0.1..=3.0).contains(&z.duration) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    "/auto/zoom_on_clicks/duration",
+                    "duration must be within 0.1–3 s",
+                ));
+            }
+        }
+        if let Some(ff) = &a.fast_forward_idle {
+            if !(1.5..=8.0).contains(&ff.speed) {
+                d.push(Diagnostic::error("E_BAD_VALUE", "/auto/fast_forward_idle/speed", "speed must be within 1.5–8"));
+            }
+            if !(0.5..=600.0).contains(&ff.min_idle) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    "/auto/fast_forward_idle/min_idle",
+                    "min_idle must be at least 0.5 s",
+                ));
+            }
+            for id in &ff.applies_to {
+                if !p.assets.contains_key(id) {
+                    d.push(Diagnostic::error(
+                        "E_UNKNOWN_ASSET",
+                        "/auto/fast_forward_idle/applies_to",
+                        format!("unknown asset `{id}`"),
+                    ));
+                }
             }
         }
     }
