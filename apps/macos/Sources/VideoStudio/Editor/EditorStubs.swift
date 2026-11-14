@@ -33,6 +33,29 @@ extension EditorController {
         return true
     }
 
+    /// After undo or redo the change can span the whole text, so the block scan and the colours
+    /// are rebuilt from scratch.
+    func observeUndo() {
+        let center = NotificationCenter.default
+        for name in [NSNotification.Name.NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated {
+                    guard let self, (note.object as? UndoManager) === self.textView.undoManager else { return }
+                    self.refreshAfterWholeTextChange()
+                }
+            }
+        }
+    }
+
+    func refreshAfterWholeTextChange() {
+        rescan()
+        let full = NSRange(location: 0, length: nsText.length)
+        textView.textStorage?.setAttributes(highlighter.baseAttributes, range: full)
+        resetHighlighting()
+        scheduleIslandScan(now: true)
+        document.textDidChange()
+    }
+
     /// Puts the selection's context in the Claude panel's composer.
     func askAboutSelection() {
         document.inspectorTab = .claude

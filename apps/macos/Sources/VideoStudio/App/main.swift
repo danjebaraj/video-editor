@@ -1,5 +1,9 @@
 import AppKit
 
+#if DEBUG
+SelfTest.prepareEnvironment()
+#endif
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()

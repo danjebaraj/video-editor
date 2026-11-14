@@ -58,6 +58,35 @@ struct InspectorView: View {
     }
 }
 
+/// A label and its control on one row, with labels in an aligned column. (`LabeledContent`
+/// only aligns inside a `Form`; inspectors and the library use plain stacks.)
+struct Field<Content: View>: View {
+    var label: String
+    @ViewBuilder var content: Content
+    @Environment(\.fieldLabelWidth) private var width
+
+    init(_ label: String, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if !label.isEmpty { Text(label).frame(width: width, alignment: .leading).fixedSize(horizontal: false, vertical: true) }
+            content
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct FieldLabelWidthKey: EnvironmentKey { static let defaultValue: CGFloat = 132 }
+extension EnvironmentValues {
+    var fieldLabelWidth: CGFloat {
+        get { self[FieldLabelWidthKey.self] }
+        set { self[FieldLabelWidthKey.self] = newValue }
+    }
+}
+
 /// A titled group in an inspector form.
 struct InspectorSection<Content: View>: View {
     var title: String
@@ -106,7 +135,7 @@ struct ProjectInspector: View {
                     if document.project.intent.kind == "other" { TextField("Describe the intent", text: text(\.other)) }
                     TextField("Audience", text: text(\.audience), prompt: Text("Who is this for?"))
                     TextField("Tone", text: text(\.tone), prompt: Text("Confident, friendly, technical, playful…"))
-                    LabeledContent("Target length") {
+                    Field("Target length") {
                         HStack(spacing: 4) {
                             TextField("", value: Binding(get: { document.project.intent.target_length_s }, set: { v in document.update { $0.intent.target_length_s = (v ?? 0) > 0 ? v : nil } }), format: .number)
                                 .frame(width: 64).multilineTextAlignment(.trailing)
@@ -334,22 +363,22 @@ struct RunConfigEditor: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         InspectorSection(title: "Limits") {
-            LabeledContent("ElevenLabs credit cap") {
+            Field("ElevenLabs credit cap") {
                 TextField("", value: bind(\.eleven_credit_cap), format: .number).frame(width: 90).multilineTextAlignment(.trailing)
                     .accessibilityLabel("ElevenLabs credit cap")
             }
-            LabeledContent("Claude spend limit") {
+            Field("Claude spend limit") {
                 HStack(spacing: 3) {
                     Text("$").foregroundStyle(.secondary)
                     TextField("none", value: Binding(get: { rc.max_spend_usd }, set: { v in document.updateRunConfig(rc.id) { $0.max_spend_usd = (v ?? 0) > 0 ? v : nil } }), format: .number)
                         .frame(width: 76).multilineTextAlignment(.trailing).accessibilityLabel("Claude spend limit in dollars")
                 }
             }
-            LabeledContent("Turn limit") {
+            Field("Turn limit") {
                 TextField("none", value: Binding(get: { rc.max_turns }, set: { v in document.updateRunConfig(rc.id) { $0.max_turns = (v ?? 0) > 0 ? v : nil } }), format: .number)
                     .frame(width: 90).multilineTextAlignment(.trailing).accessibilityLabel("Turn limit")
             }
-            LabeledContent("Question timeout") {
+            Field("Question timeout") {
                 HStack(spacing: 4) {
                     TextField("wait", value: Binding(get: { rc.question_timeout_s }, set: { v in document.updateRunConfig(rc.id) { $0.question_timeout_s = (v ?? 0) > 0 ? v : nil } }), format: .number)
                         .frame(width: 64).multilineTextAlignment(.trailing).accessibilityLabel("Question timeout in seconds")

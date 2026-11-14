@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = ProjectWindowController(document: doc)
         controllers.append(wc)
         wc.showWindow(nil)
-        NSDocumentController.shared.noteNewRecentDocumentURL(doc.fileURL)
+        if ProcessInfo.processInfo.environment["VS_SELFTEST"] == nil { NSDocumentController.shared.noteNewRecentDocumentURL(doc.fileURL) }
         welcomeWindow?.close()
         // Missing media is listed in the Relink sheet as the project opens (spec §6.3).
         doc.resolveMedia(showRelink: true)

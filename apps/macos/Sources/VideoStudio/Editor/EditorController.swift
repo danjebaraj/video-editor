@@ -464,6 +464,12 @@ final class EditorController: NSObject, NSTextViewDelegate, NSTextStorageDelegat
         scrollToLine(max(0, line - 1), alignTop: true, select: true)
     }
 
+    /// Forgets which lines are coloured and colours the visible ones again.
+    func resetHighlighting() {
+        highlightedLines = []
+        highlightVisible()
+    }
+
     func invalidateImageCache() {
         imageExistsCache = [:]
         highlightedLines = []

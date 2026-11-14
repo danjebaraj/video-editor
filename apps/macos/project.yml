@@ -40,6 +40,10 @@ targets:
       - path: Resources/Assets.xcassets
     dependencies:
       - target: MarkdownCore
+      - sdk: AVKit.framework
+      - sdk: AVFoundation.framework
+      - sdk: WebKit.framework
+      - sdk: Quartz.framework
     preBuildScripts:
       - name: Build the Rust core and its Swift bindings
         script: |

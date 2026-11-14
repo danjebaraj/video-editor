@@ -15,7 +15,7 @@ struct ModelPicker: View {
     }
 
     var body: some View {
-        LabeledContent(title) {
+        Field(title) {
             Menu {
                 ForEach(app.models.families) { family in
                     Menu(family.name) {

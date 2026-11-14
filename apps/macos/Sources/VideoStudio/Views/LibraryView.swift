@@ -156,7 +156,7 @@ struct BrandEditor: View {
                     Picker("Watermark position", selection: $brand.watermark.position) {
                         Text("Top left").tag("top_left"); Text("Top right").tag("top_right"); Text("Bottom left").tag("bottom_left"); Text("Bottom right").tag("bottom_right")
                     }
-                    LabeledContent("Watermark opacity") {
+                    Field("Watermark opacity") {
                         HStack {
                             Slider(value: $brand.watermark.opacity, in: 0.1...1).frame(width: 160).accessibilityLabel("Watermark opacity")
                             Text("\(Int(brand.watermark.opacity * 100))%").monospacedDigit().frame(width: 40, alignment: .trailing)
@@ -209,6 +209,7 @@ struct BrandEditor: View {
                 }
             }
             .textFieldStyle(.roundedBorder)
+            .environment(\.fieldLabelWidth, 170)
             .padding(20)
             .frame(maxWidth: 640, alignment: .leading)
         }
@@ -239,7 +240,7 @@ struct BrandEditor: View {
     }
 
     private func asset(_ label: String, _ keyPath: WritableKeyPath<BrandPreset, AssetRef?>, types: [UTType]) -> some View {
-        LabeledContent(label) {
+        Field(label) {
             HStack(spacing: 6) {
                 if let a = brand[keyPath: keyPath] {
                     let exists = FileManager.default.fileExists(atPath: (a.path as NSString).expandingTildeInPath)
@@ -255,7 +256,7 @@ struct BrandEditor: View {
     }
 
     private func color(_ label: String, _ keyPath: WritableKeyPath<BrandPreset, String>) -> some View {
-        LabeledContent(label) {
+        Field(label) {
             HStack(spacing: 8) {
                 ColorPicker("", selection: Binding(get: { Color(hex: brand[keyPath: keyPath]) ?? .gray }, set: { brand[keyPath: keyPath] = $0.hexString }), supportsOpacity: false).labelsHidden()
                     .accessibilityLabel("\(label) color")
@@ -266,7 +267,7 @@ struct BrandEditor: View {
     }
 
     private func font(_ label: String, _ keyPath: WritableKeyPath<BrandPreset, FontRef>) -> some View {
-        LabeledContent(label) {
+        Field(label) {
             HStack(spacing: 6) {
                 TextField("Installed family name", text: Binding(get: { brand[keyPath: keyPath].family ?? "" }, set: { brand[keyPath: keyPath].family = $0.isEmpty ? nil : $0 })).frame(width: 190)
                 if let f = brand[keyPath: keyPath].file {

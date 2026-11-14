@@ -509,6 +509,8 @@
         runMermaid(root, id).then(() => {
           if (typeof p.scrollLine === 'number') MD.scrollToLine(p.scrollLine, false);
         });
+      } else {
+        post({ type: 'rendered' });
       }
       return { ms: performance.now() - t0, mermaid: !!hasMermaid };
     },

@@ -73,7 +73,11 @@ final class ProjectDocument: ObservableObject, Identifiable {
     /// Warnings acknowledged for the next run (issue IDs).
     @Published var acknowledged: Set<String> = []
 
-    private(set) lazy var editor = EditorController(document: self, text: project.spec)
+    private(set) lazy var editor: EditorController = {
+        let e = EditorController(document: self, text: project.spec)
+        e.observeUndo()
+        return e
+    }()
     private(set) lazy var preview = PreviewController(document: self)
     private(set) lazy var runs = RunController(document: self)
     private(set) lazy var assistant = AssistantModel(document: self)
@@ -362,8 +366,14 @@ final class ProjectDocument: ObservableObject, Identifiable {
         let path = fileURL.path
         Task {
             guard let r: MediaResolveResult = try? await Core.async("media.resolve", ["project": Core.arg(snapshot), "path": path]) else { return }
+            // Media changed while this was running (a relink, an add): the answer is about an
+            // older list, so ask again rather than apply it.
+            guard self.project.media == snapshot.media else {
+                self.resolveMedia(showRelink: showRelink)
+                return
+            }
             self.resolutions = r.resolutions
-            if r.dirty { self.mergeMedia(from: r.project) }
+            if r.dirty { self.update { $0.media = r.project.media } }
             if showRelink, !self.missingMedia.isEmpty { self.showRelinkSheet = true }
             if self.showPreview { self.preview.scheduleRender() }
             self.editor.mediaChanged()
@@ -371,16 +381,18 @@ final class ProjectDocument: ObservableObject, Identifiable {
             guard needsProbe, AppState.shared.cutlineAvailable else { return }
             let current = self.project
             if let probed: ProbeResult = try? await Core.async("media.probe", ["project": Core.arg(current), "resolutions": Core.arg(r.resolutions)]), probed.changed {
-                self.mergeMedia(from: probed.project)
+                self.mergeProbes(from: probed.project)
             }
         }
     }
 
-    /// Takes media changes computed from a snapshot without losing edits made meanwhile.
-    private func mergeMedia(from other: Project) {
+    /// Takes probe results computed from a snapshot. Only the probe is copied, and only for items
+    /// that still point at the same file, so edits made meanwhile are never overwritten.
+    private func mergeProbes(from other: Project) {
         update { p in
             for item in other.media {
-                if let i = p.media.firstIndex(where: { $0.id == item.id }) { p.media[i] = item }
+                guard let i = p.media.firstIndex(where: { $0.id == item.id }), p.media[i].paths.absolute == item.paths.absolute, p.media[i].fingerprint == item.fingerprint else { continue }
+                p.media[i].probe = item.probe
             }
         }
     }
@@ -464,7 +476,7 @@ final class ProjectDocument: ObservableObject, Identifiable {
         report = r.report
         resolutions = r.resolutions
         // Probe results are a cache worth keeping.
-        mergeMedia(from: r.project)
+        mergeProbes(from: r.project)
         // Acknowledgements only hold for issues that are still there.
         acknowledged = acknowledged.intersection(r.report.issues.map(\.id))
         return r.report

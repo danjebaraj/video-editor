@@ -226,7 +226,7 @@ struct CenterView: View {
             }
             Spacer()
             if status.busyCount > 0 { ProgressView().controlSize(.mini) }
-            Text("\(status.words) words · about \(Fmt.duration(Double(status.words) / Double(max(1, AppState.shared.settings.words_per_minute)) * 60)) spoken")
+            Text("\(status.words) words · \(Fmt.duration(Double(status.words) / Double(max(1, AppState.shared.settings.words_per_minute)) * 60))").lineLimit(1).fixedSize()
                 .help(status.isSelection ? "The selection" : "The whole spec, read aloud at \(AppState.shared.settings.words_per_minute) words per minute")
             Text("Ln \(status.line), Col \(status.column)").monospacedDigit()
             Text(document.isDirty ? "Edited" : "Saved").foregroundStyle(document.isDirty ? Color.orange : Color.secondary)
