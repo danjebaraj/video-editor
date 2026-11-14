@@ -63,7 +63,7 @@ Errors: `E_BEAT_REF`.
 
 | Field | Default | Notes |
 |---|---|---|
-| `path` | required | `"color:#RRGGBB"` or `"color:brand"`: a plain still of that color. Image sequences use a printf pattern: `frames/%05d.png`. A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video. Editing the tape re-records it; `cutline record project.json5 [--asset id]` records again on demand (fresh clocks, process lists) |
+| `path` | required | `"color:#RRGGBB"` or `"color:brand"`: a plain still of that color. Image sequences use a printf pattern: `frames/%05d.png`. A `.demo.json5` script is recorded in headless Chrome (see [Browser recordings](#browser-recordings-demojson5-assets)). A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video. Editing the tape re-records it; `cutline record project.json5 [--asset id]` records again on demand (fresh clocks, process lists) |
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |
@@ -76,6 +76,68 @@ Errors: `E_BEAT_REF`.
 | `synthetic` | false | marks AI-generated media in `credits.txt` |
 
 WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
+
+### Browser recordings (`.demo.json5` assets)
+
+An asset whose path ends in `.demo.json5` is a script that drives a page in headless Chrome
+while the screen is recorded. Like a `.tape`, it is recorded when the project loads, cached by
+the script (and, for a local page, the files beside it), and recorded again by
+`cutline record project.json5 [--asset id]`.
+
+```json5
+// rec/export.demo.json5
+{
+  viewport: {w: 1600, h: 1000, scale: 2},       // CSS px; scale 2 records 3200×2000 for zooms
+  url: "http://localhost:3000",                 // or a local page: "app/index.html"
+  theme: "light",                               // prefers-color-scheme
+  locale: "en",                                 // browser language
+  allow: ["cdn.example.com"],                   // other origins the page may load from
+  steps: [
+    {goto: "/dashboard"},
+    {wait: "text=Revenue"},                     // a selector, or seconds: {wait: 1.2}
+    {click: "button:has-text('Export')", name: "export"},
+    {type: {into: "#email", text: "ada@example.com", delay: 60}, name: "email"},
+    {press: "Enter"},                           // or a chord: "Meta+K"
+    {scroll: {to: "#invoices", duration: 0.8}}, // or {by: 600}
+    {hover: ".tooltip-target"},
+  ],
+}
+```
+
+| Script field | Default | Notes |
+|---|---|---|
+| `viewport` | required | `w`, `h` in CSS pixels, `scale` 2 (device pixel ratio) |
+| `url` | — | base address for relative `goto` paths. The page is opened before recording starts, so there are no blank frames |
+| `allow` | `[]` | origins or hosts besides the base address's. **Every other request is blocked** (`W_DEMO_BLOCKED` lists them) |
+| `settle` | 0.6 | seconds to stay after each action and at the end; a step's `after` overrides it |
+| `fps` | 30 | frame rate of the recording |
+| step `name` | — | makes the step usable from the edit |
+| step `timeout` | 10 | seconds to wait for the element; then `E_DEMO_STEP_FAILED` names the step and selector |
+
+Selectors are CSS, plus `text=Revenue` (the innermost visible element containing the text) and
+`button:has-text('Export')`. Elements off screen are scrolled into view first. Text starting
+with `$` is read from that environment variable (`text: "$DEMO_PASSWORD"`), so credentials are
+never in the script, the cache or the sidecar.
+
+Capture is in real time (animations and loading play as they happen), resampled to a constant
+frame rate. Headless Chrome draws no mouse pointer: the recording comes with an **events
+sidecar** (pointer path, clicks, key presses and the rectangle of every element a step
+touched), and the edit draws the pointer (`auto: {cursor: {}}`).
+
+**Editing by step.** Named steps replace hand-measured times and rects:
+
+| Where | Form | Becomes |
+|---|---|---|
+| clip `in` / `out` | `"step:export"`, `"step:export-0.5"` | the moment the step acted (± seconds), in the recording |
+| `zoom_to` effect | `step: "export"` | `rect` of the element; `start` when the pointer sets off |
+| `punch_in` effect | `step: "export"` | `focus` on the element; `at` the click |
+| `highlight` / `spotlight` layer | `step: "export"` | `rect`, anchored to the clip, from when the pointer sets off until a second after the step |
+| `mask` layer | `step: "email"` | `rect`, anchored to the clip (its timing is yours) |
+
+`cutline expand` shows the resulting numbers. Errors: `E_UNKNOWN_STEP` (the hint lists the
+names), `E_STEP_NO_RECT` (the step touched no element), `E_STEP_NOT_A_RECORDING`,
+`E_STEP_NOT_ALLOWED`. Rects are fractions of the viewport, so give the clip a `frame` (or a
+target with the viewport's aspect ratio) rather than a cropping `reframe`.
 
 ## Clip (`main` item)
 

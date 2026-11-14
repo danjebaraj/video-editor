@@ -87,6 +87,14 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ## Screen recordings
 
+- Record web apps from a script, not by hand: write a `.demo.json5` (viewport, `url`, steps:
+  `goto`, `wait`, `click`, `type`, `press`, `scroll`, `hover`), use it as the asset path, and
+  name the steps that matter. Then edit by name: `in: "step:export-1"`,
+  `{type: "zoom_to", step: "export"}`, `{type: "highlight", step: "export"}`,
+  `{type: "mask", step: "email", mode: "fill"}`. When the UI changes, the recording and every
+  rect follow; nothing is measured by hand. Start each script with a `wait` for the page's key
+  element, keep `scale: 2`, give credentials as `$ENV_VAR`, and list third-party origins the
+  page needs in `allow`. `cutline record project.json5` records again on demand.
 - Record terminal footage from VHS tapes: use the `.tape` file itself as the asset path and cutline
   records it (and re-records only when the tape changes; run `cutline record project.json5` when
   the screen shows live data you want fresh). End each tape by quitting the program

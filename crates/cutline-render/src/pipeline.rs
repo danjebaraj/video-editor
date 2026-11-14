@@ -20,6 +20,8 @@ pub struct Loaded {
     pub timeline: Option<Timeline>,
     /// Cue references resolved while loading (see `cues`).
     pub cues: Vec<crate::cues::ResolvedCue>,
+    /// Events of the browser recordings among the assets (see `browser`), by asset id.
+    pub demos: crate::browser::Demos,
 }
 
 #[derive(Debug)]
@@ -70,6 +72,12 @@ pub fn parse_file_with_cues(
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
     let mut v = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let dir = path.parent().unwrap_or(Path::new("."));
+    // browser recordings already made are used; none is made here
+    let (mut demo_notes, demos) = crate::browser::prepare(&mut v, dir, false);
+    demo_notes.extend(crate::browser::resolve_steps(&mut v, &demos));
+    if has_errors(&demo_notes) {
+        return Err(LoadError::Invalid(demo_notes));
+    }
     let beat_notes = crate::beatrefs::resolve(&mut v, dir);
     if has_errors(&beat_notes) {
         return Err(LoadError::Invalid(beat_notes));
@@ -102,6 +110,13 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
     let mut v0 = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let tc = cutline_deps::toolchain().map_err(LoadError::Tool)?;
+    // browser recordings (`.demo.json5` assets) become cached videos, and references to their
+    // named steps become numbers and rects
+    let (mut demo_notes, demos) = crate::browser::prepare(&mut v0, &dir, true);
+    demo_notes.extend(crate::browser::resolve_steps(&mut v0, &demos));
+    if has_errors(&demo_notes) {
+        return Err(LoadError::Invalid(demo_notes));
+    }
     // `bar:`/`beat:` times become seconds first (they depend only on the music layer)
     let beat_notes = crate::beatrefs::resolve(&mut v0, &dir);
     if has_errors(&beat_notes) {
@@ -162,7 +177,8 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         if anchored.is_empty() || settled {
             diags.extend(notes);
             diags.extend(beat_notes);
-            return Ok(Loaded { path, dir, project, media: media.unwrap(), diags, timeline, cues });
+            diags.extend(demo_notes);
+            return Ok(Loaded { path, dir, project, media: media.unwrap(), diags, timeline, cues, demos });
         }
         last_anchor = anchored.first().map(|a| a.layer);
         starts = next;

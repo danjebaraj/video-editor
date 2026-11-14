@@ -6,6 +6,8 @@
 //! Network is sandboxed: only `file://` URLs under the allowed directories load; everything
 //! else fails with `BlockedByClient` (recorded for tests).
 
+pub mod demo;
+
 use anyhow::{bail, Context, Result};
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::dom::Rgba;
@@ -60,7 +62,7 @@ pub fn chrome() -> Option<PathBuf> {
     cutline_deps::paths::find_chrome()
 }
 
-fn file_url(p: &Path) -> String {
+pub(crate) fn file_url(p: &Path) -> String {
     let s = p.to_string_lossy().replace('\\', "/");
     let s = if s.starts_with('/') { s } else { format!("/{s}") };
     let mut out = String::from("file://");
@@ -73,7 +75,7 @@ fn file_url(p: &Path) -> String {
     out
 }
 
-fn url_to_path(u: &str) -> Option<PathBuf> {
+pub(crate) fn url_to_path(u: &str) -> Option<PathBuf> {
     let rest = u.strip_prefix("file://")?;
     let rest = rest.split(['?', '#']).next().unwrap_or(rest);
     let mut bytes = vec![];

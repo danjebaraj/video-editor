@@ -644,7 +644,23 @@ pub fn beats(path: &Path, asset: Option<&str>) -> CmdResult {
 }
 
 pub fn record(path: &Path, asset: Option<&str>) -> CmdResult {
-    let done = cutline_render::terminal::rerecord(path, asset).map_err(CliError::tool)?;
+    // browser recordings and terminal tapes; a project may have either or both
+    let mut done = cutline_render::browser::rerecord(path, asset).map_err(CliError::tool)?;
+    match cutline_render::terminal::rerecord(path, asset) {
+        Ok(t) => done.extend(t),
+        Err(e) if done.is_empty() => {
+            let msg = format!("{e:#}");
+            return Err(if msg.contains("no `.tape` asset") || msg.contains("has no `.tape` assets") {
+                CliError::usage(anyhow::anyhow!(
+                    "nothing to record: the project has no `.tape` or `.demo.json5` asset{}",
+                    asset.map(|a| format!(" named `{a}`")).unwrap_or_default()
+                ))
+            } else {
+                CliError::tool(e)
+            });
+        }
+        Err(_) => {}
+    }
     let h: Vec<String> = done.iter().map(|(id, p)| format!("✔ {id}: recorded {}", p.display())).collect();
     let j: Vec<_> = done.iter().map(|(id, p)| json!({"asset": id, "recording": p})).collect();
     Ok(Output::ok(json!({"recorded": j}), h.join("\n")))
