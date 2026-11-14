@@ -255,6 +255,58 @@ fn e32_reverse_too_long() {
     expect(r#"main: [{id: "c1", clip: "a", reverse: true}]"#, "E_REVERSE_TOO_LONG", "/main/0/reverse");
 }
 #[test]
+fn e33_rect_reframe() {
+    let clip = |rf: &str| format!(r#"main: [{{id: "c1", clip: "a", out: 2, reframe: {rf}}}]"#);
+    expect(&clip(r#"{mode: "rect"}"#), "E_MISSING_FIELD", "/main/0/reframe/rect");
+    // outside 0–1, past the edge, and no size
+    for rect in ["{x: 1.2, y: 0, w: 0.1, h: 0.1}", "{x: 0.8, y: 0, w: 0.4, h: 0.5}", "{x: 0.2, y: 0.2, w: 0, h: 0.5}"] {
+        expect(&clip(&format!(r#"{{mode: "rect", rect: {rect}}}"#)), "E_RECT_OUT_OF_FRAME", "/main/0/reframe/rect");
+    }
+    let rect = "rect: {x: 0.5, y: 0.1, w: 0.3, h: 0.8}";
+    expect(&clip(&format!(r#"{{mode: "rect", {rect}, padding: 0.6}}"#)), "E_BAD_VALUE", "/main/0/reframe/padding");
+    expect(&clip(&format!(r#"{{mode: "cover", {rect}}}"#)), "E_FIELD_CONFLICT", "/main/0/reframe/rect");
+    expect(&format!(r#"default_reframe: {{mode: "rect"}}, {OK_MAIN}"#), "E_MISSING_FIELD", "/default_reframe/rect");
+    let got = check(&clip(&format!(r#"{{mode: "rect", {rect}, padding: 0}}"#)));
+    assert!(got.is_empty(), "{got:?}");
+}
+
+#[test]
+fn rect_reframe_places_the_source_so_rects_keep_their_meaning() {
+    let rect = "{x: 0.5, y: 0.1, w: 0.25, h: 0.8}";
+    let text = format!(
+        "{{ version: 1, {ASSETS}, target: 'shorts',
+            main: [{{id: 'c1', clip: 'a', out: 2, reframe: {{mode: 'rect', rect: {rect}, padding: 0}}}},
+                   {{id: 'c2', clip: 'a', out: 2}}],
+            layers: [{{type: 'highlight', rect: {rect}, anchor: 'c1'}}] }}"
+    );
+    let p = cutline_core::parse::parse_project(&text).unwrap();
+    let (tl, d) = resolve(&p, &lookup(), &Context::default());
+    assert!(d.is_empty(), "{d:?}");
+    let tl = tl.unwrap();
+    assert!(tl.clips[1].content.is_none(), "other modes keep frame coordinates");
+    // 1920×1080 source, 9:16 target: the rect is 480×864 px, and 864 px tall is 486 px wide
+    let ct = tl.clips[0].content.expect("the source's place in the output");
+    let on_screen = |v: f64, start: f64, size: f64| start + v * size;
+    let (x0, x1) = (on_screen(0.5, ct.x, ct.w), on_screen(0.75, ct.x, ct.w));
+    let (y0, y1) = (on_screen(0.1, ct.y, ct.h), on_screen(0.9, ct.y, ct.h));
+    assert!(y0.abs() < 1e-9 && (y1 - 1.0).abs() < 1e-9, "the rect fills the height: {y0}..{y1}");
+    assert!(x0 > 0.0 && x0 < 0.02 && x1 < 1.0 && x1 > 0.98, "and nearly the width: {x0}..{x1}");
+    assert!(ct.x < -1.0 && ct.w > 3.9, "the source runs past the frame: {ct:?}");
+}
+
+#[test]
+fn zoom_to_duration_zero_is_an_instant_zoom() {
+    let fx = |d: &str| {
+        format!(
+            r#"main: [{{id: "c1", clip: "a", out: 2, effects: [{{type: "zoom_to", rect: {{x: 0.2, y: 0.2, w: 0.5, h: 0.5}}, start: 0.5, duration: {d}, end: 1.0}}]}}]"#
+        )
+    };
+    let got = check(&fx("0"));
+    assert!(got.is_empty(), "{got:?}");
+    expect(&fx("-0.1"), "E_BAD_VALUE", "/main/0/effects/0/duration");
+}
+
+#[test]
 fn w01_shorts_over_limit() {
     let mut m = lookup();
     m.0.insert("long".into(), vid(400.0));

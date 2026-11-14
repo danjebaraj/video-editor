@@ -179,6 +179,9 @@ pub fn ramp_duration(src_len: f64, keys: &[SpeedKey]) -> f64 {
 /// Resolve + validate. Returns the timeline (if resolvable) and all diagnostics.
 pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Timeline>, Vec<Diagnostic>) {
     let mut d: Vec<Diagnostic> = vec![];
+    if let Some(r) = &p.default_reframe {
+        check_reframe(r, "/default_reframe", &mut d);
+    }
 
     // ---- assets
     let mut facts: BTreeMap<String, MediaFacts> = BTreeMap::new();
@@ -624,18 +627,30 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     clip.out = Some(TimeValue::Seconds(crate::time::round6(src_out)));
                 }
                 // screen frame: the clip's own, else the project default for recordings
+                // (a clip with its own `reframe` is cropped instead of taking the default frame)
                 let frame = c
                     .frame
                     .clone()
-                    .or_else(|| p.default_frame.clone().filter(|_| kind == AssetKind::Video && !c.is_bumper()))
+                    .or_else(|| {
+                        p.default_frame
+                            .clone()
+                            .filter(|_| kind == AssetKind::Video && !c.is_bumper() && c.reframe.is_none())
+                    })
                     .filter(|f| f.style != FrameStyle::Off);
                 if let Some(fr) = &frame {
                     check_frame(fr, c, p, &facts, &format!("{base}/frame"), &mut d);
                 }
-                let content = frame.as_ref().map(|fr| {
-                    let src = f.map(|f| (f.width, f.height)).filter(|s| s.0 > 0 && s.1 > 0).unwrap_or((16, 9));
-                    crate::frame::layout(fr, src, (spec.width, spec.height)).content_rect((spec.width, spec.height))
-                });
+                let src_size = f.map(|f| (f.width, f.height)).filter(|s| s.0 > 0 && s.1 > 0);
+                let content = match &frame {
+                    Some(fr) => Some(
+                        crate::frame::layout(fr, src_size.unwrap_or((16, 9)), (spec.width, spec.height))
+                            .content_rect((spec.width, spec.height)),
+                    ),
+                    // a rect reframe: the source runs past the frame where it is cropped
+                    None => rect_crop(p, c, kind, src_size, (spec.width, spec.height))
+                        .zip(src_size)
+                        .map(|(rc, s)| rc.content(s)),
+                };
                 clips.push(TClip {
                     content,
                     frame,
@@ -1422,8 +1437,11 @@ fn check_effect(e: &Effect, clip_secs: f64, base: &str, d: &mut Vec<Diagnostic>)
                     );
                 }
             }
-            if duration.is_nan() || *duration <= 0.0 {
-                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/duration"), "duration must be positive"));
+            if !duration.is_finite() || *duration < 0.0 {
+                d.push(
+                    Diagnostic::error("E_BAD_VALUE", format!("{base}/duration"), "duration must be 0 or more")
+                        .hint("seconds the zoom takes; 0 zooms at once"),
+                );
             }
             if padding.is_some_and(|p| !(0.0..=0.4).contains(&p)) {
                 d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/padding"), "padding must be within 0–0.4"));
@@ -1485,7 +1503,65 @@ fn check_color(c: &ColorGrade, ctx: &Context, base: &str, d: &mut Vec<Diagnostic
     }
 }
 
+/// The crop of a clip whose reframe in effect is `mode: "rect"` (its own, or
+/// `default_reframe` for video clips that are not brand bumpers). `None` for other modes,
+/// for clips without a usable rect or picture size, and for HTML/SVG/Lottie clips.
+pub fn rect_crop(
+    p: &Project,
+    c: &Clip,
+    kind: AssetKind,
+    src: Option<(u32, u32)>,
+    out: (u32, u32),
+) -> Option<crate::model::RectCrop> {
+    let rf = match &c.reframe {
+        Some(r) => r,
+        None => p.default_reframe.as_ref().filter(|_| kind == AssetKind::Video && !c.is_bumper())?,
+    };
+    if rf.mode != ReframeMode::Rect || !matches!(kind, AssetKind::Video | AssetKind::Image | AssetKind::ImageSequence) {
+        return None;
+    }
+    let rect = rf.rect.as_ref().filter(|r| rect_in_frame(r))?;
+    let src = src.filter(|s| s.0 >= 2 && s.1 >= 2)?;
+    if out.0 == 0 || out.1 == 0 {
+        return None;
+    }
+    Some(crate::model::rect_reframe(rect, rf.padding.unwrap_or(0.03), src, out.0 as f64 / out.1 as f64))
+}
+
 fn check_reframe(r: &Reframe, base: &str, d: &mut Vec<Diagnostic>) {
+    if r.mode == ReframeMode::Rect {
+        match &r.rect {
+            None => d.push(
+                Diagnostic::error("E_MISSING_FIELD", format!("{base}/rect"), "rect reframe needs a `rect`")
+                    .hint("the part of the source to show, in fractions of it: e.g. {x: 0.55, y: 0.1, w: 0.4, h: 0.5}"),
+            ),
+            Some(rect) if !rect_in_frame(rect) => d.push(
+                Diagnostic::error(
+                    "E_RECT_OUT_OF_FRAME",
+                    format!("{base}/rect"),
+                    "reframe rect must lie inside the source: x, y, w, h are fractions (0–1) with w and h above 0, x+w ≤ 1 and y+h ≤ 1",
+                )
+                .hint("e.g. {x: 0.55, y: 0.1, w: 0.4, h: 0.5}; divide pixel values by the source width/height"),
+            ),
+            Some(_) => {}
+        }
+        if r.padding.is_some_and(|p| !(0.0..=0.4).contains(&p)) {
+            d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/padding"), "padding must be within 0–0.4"));
+        }
+    } else {
+        for (field, set) in [("rect", r.rect.is_some()), ("padding", r.padding.is_some())] {
+            if set {
+                d.push(
+                    Diagnostic::error(
+                        "E_FIELD_CONFLICT",
+                        format!("{base}/{field}"),
+                        format!("`{field}` belongs to the `rect` reframe mode"),
+                    )
+                    .hint("set mode: \"rect\", or remove the field"),
+                );
+            }
+        }
+    }
     if r.mode == ReframeMode::Manual && r.keys.is_empty() {
         d.push(Diagnostic::error("E_MISSING_FIELD", format!("{base}/keys"), "manual reframe needs at least one key"));
     }

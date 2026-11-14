@@ -50,6 +50,31 @@ pub struct ClipExtras {
     pub chroma444: bool,
     /// Screen frame: the chrome picture and where the recording goes (see `frame`).
     pub frame: Option<crate::frame::FramePlan>,
+    /// `reframe: {mode: "rect"}`: the crop of the source and where it lands in the frame.
+    pub rect_crop: Option<cutline_core::model::RectCrop>,
+}
+
+/// Geometry chain of a rect reframe: crop the source, scale it to its place in the `g` frame
+/// and, when the crop does not fill the frame, pad with `pad_color`.
+pub fn rect_chain(
+    rc: &cutline_core::model::RectCrop,
+    g: &Geometry,
+    inp: &str,
+    out: &str,
+    pad_color: &str,
+    cin: &str,
+) -> String {
+    let (cx, cy, cw, ch) = rc.crop;
+    let (w, h) = (g.width, g.height);
+    let cs = format!("{cin}:out_color_matrix=bt709:out_range=tv");
+    let even = |v: f64, max: u32| (((v / 2.0).round() * 2.0).max(2.0) as u32).min(max);
+    let (pw, ph) = (even(rc.place.w * w as f64, w), even(rc.place.h * h as f64, h));
+    let crop = format!("[{inp}]crop={cw}:{ch}:{cx}:{cy},scale={pw}:{ph}:flags=lanczos:{cs},setsar=1");
+    if pw == w && ph == h {
+        return format!("{crop}[{out}]");
+    }
+    let (px, py) = ((rc.place.x * w as f64).round() as u32, (rc.place.y * h as f64).round() as u32);
+    format!("{crop},pad={w}:{h}:{}:{}:color={pad_color}[{out}]", px.min(w - pw), py.min(h - ph))
 }
 
 fn atempo_chain(speed: f64) -> Vec<String> {
@@ -255,7 +280,10 @@ pub fn build(
             ));
         }
         (Some(go), None) => v.push(go.replace("{in}", "vn").replace("{out}", "vg").replace("{cin}", &color_in(m))),
-        (None, None) => v.push(geometry_chain(mode, sw, sh, &zg, "vn", "vg", &extras.pad_color, &color_in(m))),
+        (None, None) => match &extras.rect_crop {
+            Some(rc) => v.push(rect_chain(rc, &zg, "vn", "vg", &extras.pad_color, &color_in(m))),
+            None => v.push(geometry_chain(mode, sw, sh, &zg, "vn", "vg", &extras.pad_color, &color_in(m))),
+        },
     }
     let mut vlab = "vg".to_string();
     if let Some(cg) = &c.clip.color {

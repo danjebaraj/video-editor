@@ -70,10 +70,9 @@ fn in_and_out_trim_at_normal_speed_by_default() {
 #[test]
 fn short_footage_holds_its_last_frame_with_a_warning() {
     // 1 s of footage in a 5 s slot (explicit out), and a 6 s asset asked for 7 s (no out)
-    for (main, out) in [
-        ("{id: 'x', clip: 'a', in: 0, out: 1, end_at: 5}", 1.0),
-        ("{id: 'x', clip: 'b', in: 2, end_at: 7}", 6.0),
-    ] {
+    for (main, out) in
+        [("{id: 'x', clip: 'a', in: 0, out: 1, end_at: 5}", 1.0), ("{id: 'x', clip: 'b', in: 2, end_at: 7}", 6.0)]
+    {
         let (tl, d) = run_all(main);
         assert!(d.iter().all(|x| !x.is_error()), "{d:?}");
         assert!(d.iter().any(|x| x.code == "W_FIT_HOLD" && x.path == "/main/0/end_at"), "{main}: {d:?}");

@@ -291,8 +291,7 @@ fn check_reframe(d: &Path) -> Result<Outcome> {
     let truth = |t: f64| (x0 + (x1 - x0) * t / dur + fcx * fw) / 1920.0;
     let settle = path.fps as usize;
     let err = (settle..path.len()).map(|i| (path.center_x(i) - truth(i as f64 / path.fps)).abs()).fold(0.0, f64::max);
-    let speed =
-        path.x.windows(2).map(|w| (w[1] as f64 - w[0] as f64).abs() * path.fps / path.src_w as f64).fold(0.0, f64::max);
+    let speed = path.x.windows(2).map(|w| (w[1] - w[0]).abs() * path.fps / path.src_w as f64).fold(0.0, f64::max);
     let ok = err <= 0.08 && speed <= 0.5 + 2.0 * path.fps / path.src_w as f64;
     Ok(Outcome::check(
         ok,

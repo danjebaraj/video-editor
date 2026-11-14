@@ -1235,7 +1235,7 @@
           ]
         },
         {
-          "description": "Zoom so `rect` (fractions of the frame) fills the view, starting at `start`\n(clip-relative) over `duration`; zoom back out from `end` if set.",
+          "description": "Zoom so `rect` (fractions of the frame) fills the view, starting at `start`\n(clip-relative) over `duration` (0 = at once); zoom back out from `end` if set.",
           "type": "object",
           "properties": {
             "duration": {
@@ -4442,10 +4442,29 @@
           "default": "cover"
         },
         "pad_color": {
-          "description": "fit_pad color (default brand background).",
+          "description": "fit_pad color (default brand background); also fills the bars of a `rect` reframe\nwhose rect is larger than any crop of the target's aspect ratio.",
           "type": [
             "string",
             "null"
+          ]
+        },
+        "padding": {
+          "description": "`rect` mode: margin around the rect as a fraction of the source (default 0.03).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "rect": {
+          "description": "`rect` mode: the part of the source to show, in fractions of the source (the same\nfractions `zoom_to` and annotations use).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rect"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "regions": {
@@ -4532,6 +4551,11 @@
           "description": "Keyframed crop rectangle.",
           "type": "string",
           "const": "manual"
+        },
+        {
+          "description": "The crop of the target's aspect ratio around `rect` (fractions of the source).",
+          "type": "string",
+          "const": "rect"
         },
         {
           "description": "Two regions stacked vertically.",

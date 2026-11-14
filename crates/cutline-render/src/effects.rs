@@ -97,6 +97,9 @@ fn u_expr(t: &str, a: f64, d: f64) -> String {
 
 // ---------------------------------------------------------------- zoom model
 
+/// Length given to a zoom with `duration: 0`, ending exactly at its start time.
+const INSTANT: f64 = 1e-4;
+
 /// One multiplicative scale contribution over time.
 #[derive(Debug, Clone)]
 pub enum ScaleTerm {
@@ -198,6 +201,8 @@ pub fn zoom_terms(
 ) -> (Vec<ScaleTerm>, Vec<FocusKey>, Vec<Shake>, Option<((f64, f64), (f64, f64), Ease)>) {
     let mut terms = vec![];
     let mut focus: Vec<FocusKey> = vec![];
+    // per focus key: the time its zoom has arrived (the scale then decides the view's size)
+    let mut arrive: Vec<f64> = vec![];
     let mut shakes = vec![];
     let mut kb = None;
     for e in &c.clip.effects {
@@ -209,6 +214,7 @@ pub fn zoom_terms(
                 }
                 if let Some(p) = fo {
                     focus.push(FocusKey { a: *at, d: *duration, ease: *ez, x: p.x, y: p.y });
+                    arrive.push(at + duration);
                 }
             }
             Effect::Zoom { from, to, start, end, ease: ez, focus: fo } => {
@@ -216,6 +222,7 @@ pub fn zoom_terms(
                 terms.push(ScaleTerm::Ramp { a: *start, d: e2 - start, from: *from, to: *to, ease: *ez });
                 if let Some(p) = fo {
                     focus.push(FocusKey { a: *start, d: (e2 - start).min(0.6), ease: *ez, x: p.x, y: p.y });
+                    arrive.push(e2);
                 }
             }
             Effect::ZoomTo { rect, start, duration, ease: ez, padding, end } => {
@@ -231,11 +238,15 @@ pub fn zoom_terms(
                 };
                 let (s, p) = cutline_core::model::zoom_to_params(&placed, padding.unwrap_or(0.03), 3.0);
                 if s > 1.0 {
-                    terms.push(ScaleTerm::Ramp { a: *start, d: *duration, from: 1.0, to: s, ease: *ez });
+                    // `duration: 0` is an instant zoom: complete on the frame at `start`
+                    let (a, d) = if *duration > INSTANT { (*start, *duration) } else { (start - INSTANT, INSTANT) };
+                    terms.push(ScaleTerm::Ramp { a, d, from: 1.0, to: s, ease: *ez });
                     if let Some(e) = end {
-                        terms.push(ScaleTerm::Release { a: *e, d: *duration, to: s, ease: *ez });
+                        let a = if *duration > INSTANT { *e } else { e - INSTANT };
+                        terms.push(ScaleTerm::Release { a, d, to: s, ease: *ez });
                     }
-                    focus.push(FocusKey { a: *start, d: *duration, ease: *ez, x: p.x, y: p.y });
+                    focus.push(FocusKey { a, d, ease: *ez, x: p.x, y: p.y });
+                    arrive.push(a + d);
                 }
             }
             Effect::KenBurns { from_scale, to_scale, from, to, ease: ez } => {
@@ -249,6 +260,17 @@ pub fn zoom_terms(
                 shakes.push(Shake { a: *at, d: *duration, amp_x: *intensity, amp_y: *intensity * 0.7 });
             }
             _ => {}
+        }
+    }
+    // A clip drawn inside a screen frame (or cropped by a rect reframe) has its picture in only
+    // part of the frame: keep each zoomed view on the picture instead of the background beside
+    // it. The view is judged at the scale the zoom arrives at; a focus is the fixed point of
+    // its zoom, so the way in and out stays a straight push.
+    if let Some(ct) = &c.content {
+        for (k, t) in focus.iter_mut().zip(&arrive) {
+            let s = terms.iter().map(|x| x.eval(*t)).product::<f64>();
+            let p = cutline_core::model::clamp_zoom_focus(s, cutline_core::model::Point { x: k.x, y: k.y }, ct);
+            (k.x, k.y) = (p.x, p.y);
         }
     }
     // several zooms on one clip: each has its own focus, and the view pans from one to the next

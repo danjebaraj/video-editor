@@ -195,9 +195,8 @@ fn fine_onsets(samples: &[f32]) -> (Vec<f64>, f64) {
     for i in 2..n {
         on[i] = (e[i] - e[i - 2]).max(0.0);
     }
-    let sm: Vec<f64> = (0..n)
-        .map(|i| 0.25 * on[i.saturating_sub(1)] + 0.5 * on[i] + 0.25 * on[(i + 1).min(n - 1)])
-        .collect();
+    let sm: Vec<f64> =
+        (0..n).map(|i| 0.25 * on[i.saturating_sub(1)] + 0.5 * on[i] + 0.25 * on[(i + 1).min(n - 1)]).collect();
     (sm, H as f64 / RATE as f64)
 }
 

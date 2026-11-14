@@ -28,8 +28,10 @@ pub fn join_video(tl: &Timeline, g: &Geometry) -> (Vec<String>, String) {
                 let base = flush(&mut run, &mut lines, &mut fresh, cur.take());
                 let out = fresh("x");
                 let offset = g.fps.frames_to_secs(len_frames - t.frames);
-                let ease =
-                    t.transition.ease.unwrap_or_else(|| cutline_core::catalog::default_transition_ease(&t.transition.kind));
+                let ease = t
+                    .transition
+                    .ease
+                    .unwrap_or_else(|| cutline_core::catalog::default_transition_ease(&t.transition.kind));
                 if ease == Ease::Linear {
                     lines.push(transitions::pair(&base, &inp, &t.transition, t.frames, offset, g, &out));
                 } else {

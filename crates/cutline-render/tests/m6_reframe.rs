@@ -89,8 +89,7 @@ fn check_path(path: &cutline_reframe::CropPath, max_speed: f64) {
     let flips = dx.windows(2).filter(|w| w[0].signum() != w[1].signum()).count();
     let per_s = flips as f64 / (n as f64 / fps);
     assert!(per_s <= 2.0, "{flips} direction changes ({per_s:.2}/s)");
-    let maxv =
-        path.x.windows(2).map(|w| (w[1] as f64 - w[0] as f64).abs() * fps / path.src_w as f64).fold(0.0, f64::max);
+    let maxv = path.x.windows(2).map(|w| (w[1] - w[0]).abs() * fps / path.src_w as f64).fold(0.0, f64::max);
     assert!(maxv <= max_speed + 2.0 * fps / path.src_w as f64, "pan speed {maxv:.3} widths/s > {max_speed}");
 }
 

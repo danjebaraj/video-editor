@@ -338,7 +338,8 @@ fn slow_zoom_glides_without_ticking() {
     let d = tempfile::tempdir().unwrap();
     // detailed still: soft diagonal texture so any sub-pixel move changes pixel values
     let mut c = tc.ffmpeg_cmd();
-    c.args(["-f", "lavfi", "-i", "testsrc2=s=640x360:d=1,gblur=sigma=1.2", "-frames:v", "1"]).arg(d.path().join("s.png"));
+    c.args(["-f", "lavfi", "-i", "testsrc2=s=640x360:d=1,gblur=sigma=1.2", "-frames:v", "1"])
+        .arg(d.path().join("s.png"));
     gen::run(c).unwrap();
     let pp = d.path().join("p.json5");
     std::fs::write(
@@ -368,5 +369,9 @@ fn slow_zoom_glides_without_ticking() {
     // on most frames of a move this slow (0.14 px per frame)
     let still = diffs.iter().filter(|x| **x < 0.2 * median).count();
     let jumps = diffs.iter().filter(|x| **x > 4.0 * median).count();
-    assert!(still <= 3 && jumps <= 3, "uneven zoom: {still} stalled and {jumps} jumping steps of {}: {diffs:.2?}", diffs.len());
+    assert!(
+        still <= 3 && jumps <= 3,
+        "uneven zoom: {still} stalled and {jumps} jumping steps of {}: {diffs:.2?}",
+        diffs.len()
+    );
 }

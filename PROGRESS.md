@@ -235,3 +235,15 @@ Deviations from the spec:
   start of the edit, after the intro.
 - An export without `target` now uses the project's target (was `shorts`); clip `speed` may go
   up to 8 (was 4); a clip's zooms each keep their own focus (the last one used to win).
+
+## Zoom clamp, literal keycaps, rect reframe (2026-11-14)
+
+Found while making a product demo (see `docs/decisions.md`, same date).
+
+| Change | Tests |
+|---|---|
+| Zoomed views stay on a framed recording (`clamp_zoom_focus`); `zoom_to` `duration: 0` | `cutline-core/tests/zoom_to.rs`, `cutline-render/tests/frames.rs` |
+| `keys` layer entries are literal, not `@strings` | `cutline-render` `select` unit test, `cutline-render/tests/annotations.rs` |
+| `reframe: {mode: "rect"}` with annotations in source fractions | `cutline-core/tests/zoom_to.rs`, `invalid_projects.rs` (e33), `cutline-render/tests/rect_reframe.rs` |
+
+Not done: annotation mapping for `manual` reframe (its crop moves; see decisions).

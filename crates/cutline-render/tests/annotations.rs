@@ -130,6 +130,34 @@ fn annotation_rects_must_be_inside_the_frame() {
     assert!(has("E_BAD_VALUE", "/layers/3/path/1/t"), "{:?}", l.diags);
 }
 
+#[test]
+fn keys_starting_with_an_at_sign_are_keycap_text_not_string_keys() {
+    let Some(_) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let pp = project(
+        d.path(),
+        "{id: 'c', clip: 'bg', duration: 2}",
+        "{type: 'keys', keys: ['@t:3,3', 'tab']}, {type: 'keys', keys: ['@@', '@@x'], start: 1}",
+    );
+    let l = pipeline::load(&pp).unwrap();
+    assert!(l.diags.is_empty(), "{:?}", l.diags);
+    let caps: Vec<&Vec<String>> = l
+        .project
+        .layers
+        .iter()
+        .filter_map(|l| match l {
+            cutline_core::model::Layer::Keys { keys, .. } => Some(keys),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(caps[0], &["@t:3,3", "tab"]);
+    assert_eq!(caps[1], &["@", "@x"], "the old \"@@\" escape still gives one @");
+    // other text fields still look their strings up
+    let pp = project(d.path(), "{id: 'c', clip: 'bg', duration: 2}", "{type: 'badge', text: '@nope'}");
+    let e = format!("{:?}", pipeline::load(&pp).err().expect("an unknown string is an error"));
+    assert!(e.contains("E_UNKNOWN_STRING") && e.contains("/layers/0/text"), "{e}");
+}
+
 fn timeline(layers: &str) -> Timeline {
     let mut m = StaticLookup::default();
     m.0.insert(

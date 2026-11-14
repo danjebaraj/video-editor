@@ -54,6 +54,7 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - Keep everything inside the safe zone (top 10 %, bottom 22 %, right 16 % reserved by the UI).
 - Reframe 16:9 footage with `reframe: {mode: "track_face"}` (needs the face model; falls back to
   `fit_blur` with a warning), or `fit_blur` / `cover` / `manual` keys / `split` for two people.
+  Screen recordings: `reframe: {mode: "rect", rect: {…}}` (see Screen recordings).
 
 ## Long-form defaults (`long_1080p`, `long_4k`)
 
@@ -122,10 +123,21 @@ Segments are cached: changing captions, text or music does not re-render clips.
   recording in a window on the brand background (`window` for desktop apps, `phone` / `tablet`
   for mobile recordings). It reads as a product shot instead of a raw capture, and it is the
   right way to show a 16:9 recording in a vertical video (prefer it to `fit_blur`). Rects for
-  `zoom_to` and annotations stay relative to the recording.
+  `zoom_to` and annotations stay relative to the recording, and a zoom near the recording's
+  edge stops at that edge instead of showing the background.
+- **Vertical cut-downs of a screen recording: `reframe: {mode: "rect", rect: {x, y, w, h}}`.**
+  When the whole window would be too small to read in a Short, give each clip the part of the
+  screen that matters, in the same source fractions `zoom_to` uses; cutline finds the 9:16 crop
+  around it (clamped inside the recording, bars only if the rect is too wide). Reuse the rects
+  of the 16:9 edit unchanged: a `highlight`, `spotlight`, `arrow`, `cursor` or `zoom_to` on a
+  `rect` clip is mapped through the crop, so it still lands on its target. Do not guess
+  `manual` keys for this: with `manual` (and `cover`) annotation rects count against the output
+  frame and have to be worked out again. Pick tall rects (a sidebar, a form, a chat column);
+  check `review/reframe/*.jpg`.
 - Show where to look. Pair a `zoom_to` with a `highlight` on the same `rect` (it follows the
   zoom), use `spotlight` when the rest of the screen distracts, an `arrow` with a short `label`
-  for "new here", `keys` when the narration names a shortcut, and a `cursor` layer over
+  for "new here", `keys` when the narration names a shortcut (keycaps are literal text:
+  `["@t:3,3", "tab"]` needs no escaping), and a `cursor` layer over
   recordings made without a pointer. One device at a time: a highlight or a spotlight, not both.
   Time them with cues (`start: "cue:export"`), and check `review/annotations/`.
 - **Keep recordings at 1×.** `end_at` trims a clip to its slot; it never changes the speed. If
@@ -218,6 +230,8 @@ Segments are cached: changing captions, text or music does not re-render clips.
 | `E_EFFECT_OUT_OF_RANGE` | effect `at` is clip-relative (seconds from the clip's start on the timeline) |
 | `W_SHORTS_OVER_LIMIT` | trim to ≤ 180 s or use a long-form target |
 | `W_REFRAME_NO_FACES` | install the face model, choose `manual` keys or another mode |
+| `E_RECT_OUT_OF_FRAME` | rects are fractions of the frame (of the recording on framed and `rect`-reframed clips): 0–1, `w`/`h` above 0, `x+w` and `y+h` ≤ 1 |
+| `E_UNKNOWN_STRING` | `"@key"` text needs the key in `strings`; write `"@@…"` for a literal `@` (not needed in a `keys` layer) |
 
 ## Publishing checklist (printed after render)
 

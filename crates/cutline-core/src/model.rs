@@ -564,6 +564,8 @@ pub enum ReframeMode {
     TrackFace,
     /// Keyframed crop rectangle.
     Manual,
+    /// The crop of the target's aspect ratio around `rect` (fractions of the source).
+    Rect,
     /// Two regions stacked vertically.
     Split,
 }
@@ -593,9 +595,86 @@ pub struct Reframe {
     /// Split layout regions (source-normalized rectangles), top then bottom.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub regions: Vec<Rect>,
-    /// fit_pad color (default brand background).
+    /// fit_pad color (default brand background); also fills the bars of a `rect` reframe
+    /// whose rect is larger than any crop of the target's aspect ratio.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pad_color: Option<String>,
+    /// `rect` mode: the part of the source to show, in fractions of the source (the same
+    /// fractions `zoom_to` and annotations use).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rect: Option<Rect>,
+    /// `rect` mode: margin around the rect as a fraction of the source (default 0.03).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding: Option<f64>,
+}
+
+/// The crop a `rect` reframe makes: a whole-pixel crop of the source and where it lands in
+/// the output (the whole frame, unless the rect is too large for the target's aspect ratio).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RectCrop {
+    /// Crop of the source in pixels (even numbers): x, y, w, h.
+    pub crop: (u32, u32, u32, u32),
+    /// Where the crop is drawn, in fractions of the output frame.
+    pub place: Rect,
+}
+
+impl RectCrop {
+    /// Where the *whole* source picture sits in fractions of the output frame (it extends past
+    /// the frame where it is cropped). Rects written in fractions of the source are mapped
+    /// through this, like the content rect of a screen frame.
+    pub fn content(&self, src: (u32, u32)) -> Rect {
+        let (cx, cy, cw, ch) = self.crop;
+        let (kx, ky) = (self.place.w / cw.max(1) as f64, self.place.h / ch.max(1) as f64);
+        Rect {
+            x: self.place.x - cx as f64 * kx,
+            y: self.place.y - cy as f64 * ky,
+            w: src.0 as f64 * kx,
+            h: src.1 as f64 * ky,
+        }
+    }
+}
+
+/// The crop for `reframe: {mode: "rect"}`: the smallest window of the target's `aspect`
+/// (width / height) that contains `rect` plus `padding` on each side, centred on the rect and
+/// shifted to stay inside the `src` (w, h) picture.
+///
+/// When that window does not fit inside the source, the padding is given up first: the window
+/// becomes the largest crop the source allows, as long as that still contains the bare rect.
+/// When even the bare rect is too wide (or too tall) for a crop of this aspect ratio, the
+/// window covers the rect and runs past the source on the other axis: the source is shown
+/// whole along that axis, centred, with bars in the pad color.
+pub fn rect_reframe(rect: &Rect, padding: f64, src: (u32, u32), aspect: f64) -> RectCrop {
+    let (sw, sh) = (src.0.max(2) as f64, src.1.max(2) as f64);
+    let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
+    // smallest window of the aspect covering a (w, h) box, by its width
+    let cover = |w: f64, h: f64| w.max(h * aspect);
+    let x0 = (rect.x.clamp(0.0, 1.0)) * sw;
+    let y0 = (rect.y.clamp(0.0, 1.0)) * sh;
+    let x1 = ((rect.x + rect.w).clamp(0.0, 1.0) * sw).max(x0 + 1.0).min(sw);
+    let y1 = ((rect.y + rect.h).clamp(0.0, 1.0) * sh).max(y0 + 1.0).min(sh);
+    let pad = padding.clamp(0.0, 0.4);
+    let (px0, px1) = ((x0 - pad * sw).max(0.0), (x1 + pad * sw).min(sw));
+    let (py0, py1) = ((y0 - pad * sh).max(0.0), (y1 + pad * sh).min(sh));
+    let fit = sw.min(sh * aspect);
+    let padded = cover(px1 - px0, py1 - py0);
+    let w = if padded <= fit + 1e-6 { padded } else { cover(x1 - x0, y1 - y0).max(fit) };
+    let h = w / aspect;
+    let even = |v: f64, max: f64| -> u32 { ((((v / 2.0).round() * 2.0).max(2.0)) as u32).min((max as u32) & !1) };
+    // one axis: crop start and size in source px, place start and size in output fractions
+    let axis = |size: f64, full: f64, centre: f64| -> (u32, u32, f64, f64) {
+        if size <= full + 1e-6 {
+            let c = even(size, full);
+            let start = (centre - c as f64 / 2.0).clamp(0.0, full - c as f64);
+            // an even start keeps 4:2:0 chroma aligned
+            let start = (((start / 2.0).round() * 2.0) as u32).min(full as u32 - c);
+            (start, c, 0.0, 1.0)
+        } else {
+            (0, full as u32, (1.0 - full / size) / 2.0, full / size)
+        }
+    };
+    let (cx, cw, ox, ow) = axis(w, sw, (x0 + x1) / 2.0);
+    let (cy, ch, oy, oh) = axis(h, sh, (y0 + y1) / 2.0);
+    RectCrop { crop: (cx, cy, cw, ch), place: Rect { x: ox, y: oy, w: ow, h: oh } }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -710,7 +789,7 @@ pub enum Effect {
         focus: Option<Point>,
     },
     /// Zoom so `rect` (fractions of the frame) fills the view, starting at `start`
-    /// (clip-relative) over `duration`; zoom back out from `end` if set.
+    /// (clip-relative) over `duration` (0 = at once); zoom back out from `end` if set.
     ZoomTo {
         rect: Rect,
         #[serde(default)]
@@ -803,6 +882,25 @@ pub fn zoom_to_params(rect: &Rect, padding: f64, max_scale: f64) -> (f64, Point)
         (start * s / (s - 1.0)).clamp(0.0, 1.0)
     };
     (s, Point { x: axis(rect.x + rect.w / 2.0), y: axis(rect.y + rect.h / 2.0) })
+}
+
+/// Move a zoom's fixed point so the view at scale `s` stays inside `bounds` (the clip's
+/// picture in fractions of the frame, e.g. the recording inside a screen frame): the view is
+/// shifted inward, and where it is larger than the picture it is centred on it. The view
+/// never leaves the frame either. Scales of 1 or less have no view to move.
+pub fn clamp_zoom_focus(s: f64, focus: Point, bounds: &Rect) -> Point {
+    if s.is_nan() || s <= 1.0 + 1e-9 {
+        return focus;
+    }
+    let view = 1.0 / s;
+    let axis = |f: f64, b0: f64, b1: f64| {
+        // the visible part of the picture on this axis
+        let (lo, hi) = (b0.max(0.0), b1.min(1.0));
+        let start = (s - 1.0) * f / s;
+        let start = if hi - lo >= view { start.clamp(lo, hi - view) } else { (lo + hi - view) / 2.0 };
+        (start.clamp(0.0, 1.0 - view) * s / (s - 1.0)).clamp(0.0, 1.0)
+    };
+    Point { x: axis(focus.x, bounds.x, bounds.x + bounds.w), y: axis(focus.y, bounds.y, bounds.y + bounds.h) }
 }
 fn punch_dur() -> f64 {
     0.25

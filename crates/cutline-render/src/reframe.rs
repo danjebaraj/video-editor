@@ -79,6 +79,26 @@ pub fn apply(
         );
     };
     let path = match rf.mode {
+        ReframeMode::Rect => {
+            // the same crop the timeline used to place the clip's picture (`TClip::content`)
+            // (from the target's size, not a draft's, so both agree to the pixel)
+            let out = (tl.target.width, tl.target.height);
+            let Some(rc) = cutline_core::timeline::rect_crop(p, &c.clip, c.kind, Some((sw, sh)), out) else {
+                return Ok(None);
+            };
+            x.rect_crop = Some(rc);
+            let (cx, cy, cw, ch) = rc.crop;
+            // a still path, for the review pack and thumbnails
+            return Ok(Some(CropPath {
+                src_w: sw,
+                src_h: sh,
+                cw: vec![cw as f64; n.max(1)],
+                ch: vec![ch as f64; n.max(1)],
+                x: vec![cx as f64; n.max(1)],
+                y: vec![cy as f64; n.max(1)],
+                fps,
+            }));
+        }
         ReframeMode::TrackFace => {
             let Some(an) = analysis(l, c)? else {
                 fallback(x, warnings, &format!("face detector unavailable ({})", cutline_reframe::detector_status()));

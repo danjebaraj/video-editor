@@ -75,6 +75,19 @@ fn merge_assets(v: &mut Value, over: Option<&Value>, at: &str, d: &mut Vec<Diagn
     }
 }
 
+/// Keycap text is literal: `"@t:3,3"` and `"@"` are what the key shows, never a string key.
+/// Only the `"@@…"` escape is undone (to `@…`), so projects written for the earlier rule,
+/// where every `@` in `keys` had to be doubled, render the same.
+fn literal_keys(v: &mut Value) {
+    for x in v.as_array_mut().into_iter().flatten() {
+        if let Value::String(s) = x {
+            if let Some(rest) = s.strip_prefix("@@") {
+                *s = format!("@{rest}");
+            }
+        }
+    }
+}
+
 /// Replace `"@key"` strings (in `text`, `subtitle`, `label`, `title`, `url` and inside
 /// `params`) with the string table's entries. `"@@…"` is a literal `@…`.
 fn localize(v: &mut Value, table: &serde_json::Map<String, Value>, ptr: &str, d: &mut Vec<Diagnostic>) {
@@ -284,10 +297,13 @@ pub fn apply(v: &mut Value, dir: &Path, stem: &str, sel: &Selection) -> (Vec<Dia
     // text that refers to the string table
     if let Some(layers) = v.get_mut("layers").and_then(|l| l.as_array_mut()) {
         for (i, l) in layers.iter_mut().enumerate() {
-            for field in ["text", "subtitle", "label", "params", "keys"] {
+            for field in ["text", "subtitle", "label", "params"] {
                 if let Some(x) = l.get_mut(field) {
                     localize(x, &table, &format!("/layers/{i}/{field}"), &mut d);
                 }
+            }
+            if let Some(x) = l.get_mut("keys") {
+                literal_keys(x);
             }
         }
     }
@@ -381,6 +397,20 @@ mod tests {
         assert_eq!(v["layers"][1]["text"], json!("@handle"));
         assert_eq!(v["captions"]["lang"], json!("de"));
         assert_eq!(v["name"], json!("demo-full-de"));
+    }
+
+    #[test]
+    fn keys_are_literal_keycaps_not_string_keys() {
+        let mut v = project();
+        v["layers"] = json!([
+            {"type": "keys", "keys": ["@t:3,3", "tab", "@", "@@", "@@handle", "@title"]},
+            {"type": "badge", "text": "@title"},
+        ]);
+        let (d, _) = apply(&mut v, Path::new("."), "p", &Selection::default());
+        assert!(d.is_empty(), "{d:?}");
+        // no lookup (even for a key that exists in `strings`); the old "@@" escape still gives "@"
+        assert_eq!(v["layers"][0]["keys"], json!(["@t:3,3", "tab", "@", "@", "@handle", "@title"]));
+        assert_eq!(v["layers"][1]["text"], json!("World clocks"), "other text fields still look up");
     }
 
     #[test]

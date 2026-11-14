@@ -125,6 +125,70 @@ fn zoom_to_rects_are_relative_to_the_recording() {
     assert!(white(mean_rgb(&f[2], 4, 150, 12, 12)), "full-bleed again: {:?}", mean_rgb(&f[2], 4, 150, 12, 12));
 }
 
+/// Bounds (x0, x1, y0, y1) of the red block in a frame, scanning the row and column through `at`.
+fn red_bounds(f: &image::RgbImage, at: (u32, u32)) -> (u32, u32, u32, u32) {
+    let is_red = |x: u32, y: u32| {
+        let p = f.get_pixel(x, y).0;
+        p[0] > 140 && p[1] < 90
+    };
+    let xs: Vec<u32> = (0..f.width()).filter(|x| is_red(*x, at.1)).collect();
+    let ys: Vec<u32> = (0..f.height()).filter(|y| is_red(at.0, *y)).collect();
+    assert!(!xs.is_empty() && !ys.is_empty(), "no red at {at:?}");
+    (xs[0], *xs.last().unwrap() + 1, ys[0], *ys.last().unwrap() + 1)
+}
+
+#[test]
+fn a_zoom_near_the_edge_of_a_framed_recording_shows_no_background() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    setup(d.path());
+    // the top-right corner of the recording; `duration: 0` zooms at once.
+    // A translucent blue highlight sits on the red block (x 0.75..0.9375, y 0.1..0.3).
+    let pp = d.path().join("p.json5");
+    std::fs::write(
+        &pp,
+        "{version: 1, name: 'f', target: 'custom', width: 640, height: 360, fps: 30,
+          default_frame: {style: 'none', background: '#0000FF', shadow: 0, radius: 0},
+          assets: {screen: {path: 'screen.mp4'}}, audio: {voice_chain: 'raw'},
+          main: [{id: 'a', clip: 'screen', effects: [
+            {type: 'zoom_to', rect: {x: 0.78, y: 0.12, w: 0.22, h: 0.34}, start: 0.5, duration: 0}]}],
+          layers: [{type: 'highlight', rect: {x: 0.75, y: 0.1, w: 0.1875, h: 0.2}, style: 'fill', color: '#0000FF',
+                    radius: 0, enter: 'none', anchor: 'a', duration: 3}]}",
+    )
+    .unwrap();
+    let (out, tl) = render(&pp);
+    let f = read_frames(tc, &out, &[14, 15, 60]).unwrap();
+    // before the zoom: the frame's background all round
+    assert!(blue_bg(mean_rgb(&f[0], 4, 100, 12, 100)) && blue_bg(mean_rgb(&f[0], 624, 100, 12, 100)));
+    for (i, fr) in f[1..].iter().enumerate() {
+        // zoomed (already on the first frame at `start`): recording from edge to edge
+        for (x, y) in [(2, 40), (2, 300), (626, 20), (626, 180), (626, 340), (300, 2), (300, 346)] {
+            let c = mean_rgb(fr, x, y, 12, 12);
+            assert!(!blue_bg(c) && c[0] > 200.0, "frame {i}: background in view at ({x}, {y}): {c:?}");
+        }
+    }
+    // the view ends at the recording's right edge, and the highlight is still on the block
+    let c = &tl.clips[0];
+    let ct = c.content.unwrap();
+    let map = cutline_render::annot::zoom_map(c, &tl, 60, 640.0, 360.0);
+    let (right, _) = map.pt((ct.x + ct.w) * 640.0, 0.0);
+    assert!((right - 640.0).abs() < 1.0, "recording's right edge on screen: {right}");
+    let (bx0, by0) = map.pt((ct.x + 0.75 * ct.w) * 640.0, (ct.y + 0.1 * ct.h) * 360.0);
+    let (bx1, by1) = map.pt((ct.x + 0.9375 * ct.w) * 640.0, (ct.y + 0.3 * ct.h) * 360.0);
+    let mid = (((bx0 + bx1) / 2.0) as u32, ((by0 + by1) / 2.0) as u32);
+    let (x0, x1, y0, y1) = red_bounds(&f[2], mid);
+    for (got, want) in [(x0, bx0), (x1, bx1), (y0, by0), (y1, by1)] {
+        assert!(
+            (got as f64 - want).abs() <= 3.0,
+            "block at {x0}..{x1} × {y0}..{y1}, mapped {bx0}..{bx1} × {by0}..{by1}"
+        );
+    }
+    let inside = mean_rgb(&f[2], mid.0 - 10, mid.1 - 10, 20, 20);
+    assert!(inside[0] > 140.0 && inside[2] > 40.0, "block tinted by the highlight: {inside:?}");
+    let left = mean_rgb(&f[2], x0 - 16, mid.1 - 10, 8, 20);
+    assert!(white(left), "no tint beside the block: {left:?}");
+}
+
 #[test]
 fn frame_validation() {
     let Some(_) = test_toolchain() else { return };

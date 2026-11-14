@@ -138,8 +138,9 @@ touched), and the edit draws the pointer (`auto: {cursor: {}}`).
 
 `cutline expand` shows the resulting numbers. Errors: `E_UNKNOWN_STEP` (the hint lists the
 names), `E_STEP_NO_RECT` (the step touched no element), `E_STEP_NOT_A_RECORDING`,
-`E_STEP_NOT_ALLOWED`. Rects are fractions of the viewport, so give the clip a `frame` (or a
-target with the viewport's aspect ratio) rather than a cropping `reframe`.
+`E_STEP_NOT_ALLOWED`. Rects are fractions of the viewport, so give the clip a `frame`, a target
+with the viewport's aspect ratio or `reframe: {mode: "rect"}`; the other cropping reframes make
+annotation rects count against the output frame.
 
 ## Clip (`main` item)
 
@@ -188,8 +189,15 @@ main: [
   padding allows. On vertical targets it sits in the upper part, leaving room for captions.
 - `zoom_to` rects, annotation rects and points stay **relative to the recording**, so adding or
   changing a frame never invalidates them. Zooms use the recording's full resolution.
-- `default_frame` applies to video clips only (not stills, HTML or brand bumpers).
-- A framed clip cannot also have `reframe` (`E_FIELD_CONFLICT`).
+- A zoomed view **stays on the recording**. When a `zoom_to` rect (or the `focus` of a
+  `punch_in` / `zoom`) is near the recording's edge, the view is moved inward until it ends at
+  that edge, so it never shows the background beside the window; the rect is then off-centre in
+  the view. Where the view is larger than the recording at that zoom (a wide recording on a
+  vertical target), it is centred on the recording. Chained zooms pan between views placed this
+  way, and annotations follow as before.
+- `default_frame` applies to video clips only (not stills, HTML or brand bumpers), and not to
+  a clip with its own `reframe` (that clip is cropped instead).
+- A clip cannot have both `frame` and `reframe` (`E_FIELD_CONFLICT`).
 
 ### Transition (`{transition: {...}}` between two clips)
 
@@ -208,7 +216,7 @@ With `profile: "screencast"`, two or more `fade`/`dissolve` transitions between 
 
 ### Reframe
 
-`mode`: `cover` (default) · `center` · `fit_blur` · `fit_pad` · `track_face` · `manual` · `split`.
+`mode`: `cover` (default) · `center` · `fit_blur` · `fit_pad` · `track_face` · `manual` · `rect` · `split`.
 `keys` (manual): `[{t, x, y, zoom}]` (clip-relative `t`; `x, y` = crop center in 0..1 of the
 source, clamped so the view stays inside the frame; zoom ≥ 1; eased in-out-cubic between keys;
 `max_pan_speed` does not apply).
@@ -216,6 +224,39 @@ source, clamped so the view stays inside the frame; zoom ≥ 1; eased in-out-cub
 (default), `largest`, `left`, `right`, `index` + `subject_index`. `max_pan_speed` (frame widths
 per second, default 0.6). `fallback` (default `fit_blur`) when no faces. `regions` (split): two
 `{x, y, w, h}` rects. `pad_color` for `fit_pad` (default brand background).
+
+**`rect`: show one part of a screen recording** in another aspect ratio, e.g. a panel of a
+16:10 recording in a 9:16 Short:
+
+```json5
+{id: "editor", clip: "screen", reframe: {mode: "rect", rect: {x: 0.55, y: 0.08, w: 0.33, h: 0.84}}}
+```
+
+`rect` `{x, y, w, h}` is in fractions of the source, the same numbers a `zoom_to` or a
+`highlight` on that clip uses. `padding` (default 0.03, 0–0.4) is a margin around it, as a
+fraction of the source on each side. The crop is worked out once per clip (it does not move):
+
+1. It is the smallest window of the target's aspect ratio that contains the rect plus padding,
+   centred on the rect.
+2. Near an edge of the source the window is shifted inward so it stays inside the picture.
+3. If that window is larger than the source allows, the padding is given up first: the crop
+   becomes the largest one the source has in this aspect ratio, as long as the bare rect fits.
+4. If even the bare rect is too wide (or too tall) for the target, nothing of it is cut off: the
+   window covers the rect, the source is shown whole along the other axis and centred, and the
+   rest of the frame is filled with `pad_color` (default brand background). E.g. a rect half as
+   wide as a 16:10 recording on a 9:16 target leaves bars above and below.
+
+Crop edges sit on even source pixels. Errors: `E_MISSING_FIELD` (no `rect`),
+`E_RECT_OUT_OF_FRAME` (outside 0–1, or `w` / `h` not above 0), `E_BAD_VALUE` (`padding`),
+`E_FIELD_CONFLICT` (`rect` or `padding` with another mode).
+
+**Annotations keep their source fractions on a `rect` clip.** `highlight`, `spotlight`, `arrow`,
+`cursor`, masks with `follow: true` and `zoom_to` rects on the clip are mapped through the
+crop, so the rect that marks a button in the framed 16:9 edit marks the same button in the
+vertical cut (anything outside the crop is simply off screen). With the other modes
+(`cover`, `manual`, `track_face`, …) those rects count against the output frame, as before.
+As `default_reframe`, `rect` applies to video clips (not stills, HTML or brand bumpers, which
+are covered as usual); `cutline review` draws the crop on the source in `reframe/*.jpg`.
 
 ### Color
 
@@ -229,7 +270,7 @@ or `.cube` path) + `intensity` (0–1), `exposure` (stops), `contrast`, `saturat
 |---|---|
 | `punch_in` | `at`, `scale` 1.15, `duration` 0.25, `ease` out_cubic, `hold` (release after), `focus` {x,y} |
 | `zoom` | `from` 1, `to`, `start` 0, `end` clip end, `ease`, `focus` |
-| `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0, `duration` 0.6, `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`) |
+| `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0, `duration` 0.6 (`0`: the zoom is there at once, on the frame at `start`; the zoom back out at `end` is then instant too), `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`). The view never leaves the picture: near an edge it stops at the edge (on a framed clip, at the edge of the recording) |
 | `ken_burns` | `from_scale` 1, `to_scale` 1.15, `from`/`to` {x,y}, `ease` |
 
 A clip can zoom to several places in turn: each `zoom_to` (and each `punch_in` / `zoom` with a
@@ -286,14 +327,15 @@ watermark, and under text and captions. Coordinates are fractions of the frame (
 | `highlight` | `rect`, `style` (`outline` · `fill` · `underline`), `color` (`brand` accent), `width` 4 px, `radius` 8 px, `enter` (`draw`: the stroke draws itself · `fade` · `none`) |
 | `spotlight` | `rect`, `dim` 0.6 (how dark the rest gets), `feather` 12 px, `radius` 8 px. Spotlights on screen together share one dim layer |
 | `arrow` | `from` `{x, y}`, `to` `{x, y}`, `label` (text behind the tail), `color`, `width` 6 px, `size` 34 px (label) |
-| `keys` | `keys` e.g. `["cmd", "K"]` (cmd, shift, alt, ctrl, enter, tab, esc, space, arrows become keycap symbols), `position` (`bottom`), `size` 64 px |
+| `keys` | `keys` e.g. `["cmd", "K"]` (cmd, shift, alt, ctrl, enter, tab, esc, space, arrows become keycap symbols), `position` (`bottom`), `size` 64 px. Entries are keycap text as written: `"@"` and `"@t:3,3"` show exactly that and are never looked up in `strings` (a leading `"@@"` is still read as one `@`) |
 | `badge` | `text` (a few characters, e.g. `"4×"`), `position` (`top_right`), `size` 30 px: a small dark pill |
 | `cursor` | `path` `[{t, x, y, click}]` (`t` = seconds after the layer starts; the pointer eases between keys and ripples on `click: true`), `size` 1, `click_ripple` true, `color` (ripple). Ends 0.6 s after the last key by default |
 
 Pixel sizes are for a 1080p-class output and scale with drafts. `highlight`, `spotlight`,
 `arrow` and `cursor` **follow the zoom** of the clip underneath (`zoom_to`, `punch_in`, `zoom`,
 `ken_burns`): the rect is written for the unzoomed frame and stays on its target while the
-picture zooms. With `anchor` the clip is the anchor clip; otherwise the clip on screen. Set
+picture zooms. On a framed clip, and on a clip with `reframe: {mode: "rect"}`, the rect is in
+fractions of the clip's own picture (see [Reframe](#reframe)). With `anchor` the clip is the anchor clip; otherwise the clip on screen. Set
 `follow: false` for screen coordinates. A rect or point outside the frame is
 `E_RECT_OUT_OF_FRAME`. `cutline review` writes `annotations/*.jpg`, a frame of each.
 
@@ -500,7 +542,7 @@ name. Outputs are named `<name>-<variant>…`.
 |---|---|
 | `assets` | asset fields to replace: the voice-over, its `script` / `transcript`, images |
 | `cues` | the cue phrases in this language, by cue name |
-| `strings` | a JSON5 file (or an object) of `key: text`. Text written as `"@key"` (layer `text`, `subtitle`, `label`, `keys`, anything inside `params`, clip `chapter`, frame `url` / `title`, marker titles) takes the locale's string, else the project's `strings`. `"@@x"` is a literal `@x`; a missing key is `E_UNKNOWN_STRING` |
+| `strings` | a JSON5 file (or an object) of `key: text`. Text written as `"@key"` (layer `text`, `subtitle`, `label`, anything inside `params`, clip `chapter`, frame `url` / `title`, marker titles) takes the locale's string, else the project's `strings`. `"@@x"` is a literal `@x`; a missing key is `E_UNKNOWN_STRING`. The `keys` of a `keys` layer are not looked up: keycaps are literal (`"@t:3,3"` renders as written). |
 | `lang` | language code for `captions.lang` |
 
 With `--locale`, browser recordings are made in that language too (the script's `locale` is

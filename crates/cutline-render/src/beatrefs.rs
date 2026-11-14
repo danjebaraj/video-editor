@@ -172,7 +172,9 @@ pub fn resolve(v: &mut Value, dir: &Path) -> Vec<Diagnostic> {
                     *slot = serde_json::json!(round6(t));
                 }
             }
-            Ok(t) => d.push(Diagnostic::error("E_BEAT_REF", ptr.clone(), format!("`{r}` resolves to {t:.3}s, before 0"))),
+            Ok(t) => {
+                d.push(Diagnostic::error("E_BEAT_REF", ptr.clone(), format!("`{r}` resolves to {t:.3}s, before 0")))
+            }
             Err(e) => d.push(
                 Diagnostic::error("E_BEAT_REF", ptr.clone(), format!("`{r}`: {e}"))
                     .hint("`cutline beats project.json5` lists the bars and beats"),
