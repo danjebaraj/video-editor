@@ -82,6 +82,11 @@ Segments are cached: changing captions, text or music does not re-render clips.
   usually a `range` of the best 10 seconds), `format: "webm"` where the site wants it. Silent
   exports must read without sound: keep captions burned in and fix every `muted` QA warning.
   Each export gets a `.vtt` and a `.poster.jpg` for the embed.
+- One project, several videos. `variants` for cut-downs (a teaser: `exclude` clips, give it a
+  shorter voice-over, set `max_duration`); `locales` for languages (a voice-over and script per
+  language, cue phrases in that language, and `"@key"` strings for on-screen text). Time
+  everything with cues and `end_at` so each version fits its own narration, then check every
+  one: `cutline review project.json5 --variant teaser --locale de`.
 - Tone: no punch-in cadence, no emoji, no `bold_pop`. Plain cuts between screens, one fade from
   the title and into the end card. Keep captions on: most business video is watched muted.
 

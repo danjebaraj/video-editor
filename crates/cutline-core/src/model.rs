@@ -70,6 +70,15 @@ pub struct Project {
     /// them as `"cue:clocks"`, `"cue:clocks+0.4"` or `"cue:clocks-0.2"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cues: BTreeMap<String, Cue>,
+    /// Named cuts of the edit (`cutline render --variant teaser`); see `Variant`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variants: BTreeMap<String, Variant>,
+    /// Languages (`cutline render --locale de`); see `Locale`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub locales: BTreeMap<String, Locale>,
+    /// Strings that text can refer to as `"@key"` (the base language).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub strings: BTreeMap<String, String>,
     /// Screen frame for every video clip that has no `frame` of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_frame: Option<ScreenFrame>,
@@ -79,6 +88,45 @@ pub struct Project {
     /// `false`: do not draw the brand logo as a watermark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
+}
+
+/// A cut of the edit. Clips and layers also choose their variants with `only` / `except`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Variant {
+    /// Clip ids to keep (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include: Vec<String>,
+    /// Clip ids to leave out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+    /// Warn when this variant runs longer (seconds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_duration: Option<f64>,
+    /// Export names to render for this variant (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exports: Vec<String>,
+    /// Asset fields to replace, by asset id: `{vo: {path: "vo.teaser.mp3", script: "vo.teaser.txt"}}`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub assets: BTreeMap<String, serde_json::Value>,
+}
+
+/// A language of the video.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Locale {
+    /// Asset fields to replace, by asset id (voice-over, its script and transcript, recordings).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub assets: BTreeMap<String, serde_json::Value>,
+    /// Strings for `"@key"` text: a JSON5 file path, or the table itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strings: Option<serde_json::Value>,
+    /// Cue phrases in this language, by cue name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cues: BTreeMap<String, Cue>,
+    /// Language code for transcription and browser recordings (e.g. `de`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 /// `generated_by` of the clips and assets added for the brand's intro and outro.
@@ -367,6 +415,12 @@ pub struct Clip {
     /// Chapter title (long form); defaults to the clip id when the clip starts a chapter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chapter: Option<String>,
+    /// Variants this clip belongs to (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
+    /// Variants this clip is left out of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
     /// Set by `auto` expansion (e.g. `jump_cuts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_by: Option<String>,
@@ -791,6 +845,12 @@ pub struct Placement {
     /// Seconds after the anchor clip's start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<f64>,
+    /// Variants this layer belongs to (default: all).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only: Vec<String>,
+    /// Variants this layer is left out of.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
 }
 
 /// Look shared by visual layers.
@@ -1089,6 +1149,10 @@ pub enum Layer {
         gain_db: Option<f64>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pick_from: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        only: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        except: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         generated_by: Option<String>,
     },

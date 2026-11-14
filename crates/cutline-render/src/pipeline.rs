@@ -22,6 +22,11 @@ pub struct Loaded {
     pub cues: Vec<crate::cues::ResolvedCue>,
     /// Events of the browser recordings among the assets (see `browser`), by asset id.
     pub demos: crate::browser::Demos,
+    /// The variant and locale this was loaded as (see `select`).
+    pub selection: crate::select::Selection,
+    /// Variant and locale names the project defines.
+    pub variants: Vec<String>,
+    pub locales: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -72,8 +77,13 @@ pub fn parse_file_with_cues(
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
     let mut v = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let dir = path.parent().unwrap_or(Path::new("."));
+    let sel = crate::select::current();
+    let (sel_notes, used) = crate::select::apply(&mut v, dir, &file_stem(path), &sel);
+    if has_errors(&sel_notes) {
+        return Err(LoadError::Invalid(sel_notes));
+    }
     // browser recordings already made are used; none is made here
-    let (mut demo_notes, demos) = crate::browser::prepare(&mut v, dir, false);
+    let (mut demo_notes, demos) = crate::browser::prepare(&mut v, dir, false, used.locale.as_deref());
     demo_notes.extend(crate::browser::resolve_steps(&mut v, &demos));
     if has_errors(&demo_notes) {
         return Err(LoadError::Invalid(demo_notes));
@@ -103,6 +113,15 @@ const CUE_ROUNDS: usize = 6;
 /// it stops moving (normally the second round). If it never settles, the anchor clip's own
 /// position depends on those cues (`E_CUE_CYCLE`).
 pub fn load(path: &Path) -> Result<Loaded, LoadError> {
+    load_with(path, &crate::select::current())
+}
+
+fn file_stem(path: &Path) -> String {
+    path.file_stem().and_then(|s| s.to_str()).unwrap_or("video").trim_end_matches(".json5").to_string()
+}
+
+/// `load` as a given variant and locale of the project.
+pub fn load_with(path: &Path, sel: &crate::select::Selection) -> Result<Loaded, LoadError> {
     let path = std::fs::canonicalize(path)
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot open {}: {e}", path.display())))?;
     let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
@@ -110,9 +129,15 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         .map_err(|e| LoadError::Io(anyhow::anyhow!("cannot read {}: {e}", path.display())))?;
     let mut v0 = cutline_core::parse::parse_json5(&text).map_err(LoadError::Invalid)?;
     let tc = cutline_deps::toolchain().map_err(LoadError::Tool)?;
+    // the variant and the locale come first: everything after sees an ordinary project
+    let (variants, locales) = (crate::select::names(&v0, "variants"), crate::select::names(&v0, "locales"));
+    let (sel_notes, selection) = crate::select::apply(&mut v0, &dir, &file_stem(&path), sel);
+    if has_errors(&sel_notes) {
+        return Err(LoadError::Invalid(sel_notes));
+    }
     // browser recordings (`.demo.json5` assets) become cached videos, and references to their
     // named steps become numbers and rects
-    let (mut demo_notes, demos) = crate::browser::prepare(&mut v0, &dir, true);
+    let (mut demo_notes, demos) = crate::browser::prepare(&mut v0, &dir, true, selection.locale.as_deref());
     demo_notes.extend(crate::browser::resolve_steps(&mut v0, &demos));
     if has_errors(&demo_notes) {
         return Err(LoadError::Invalid(demo_notes));
@@ -177,8 +202,37 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         if anchored.is_empty() || settled {
             diags.extend(notes);
             diags.extend(beat_notes);
-            diags.extend(demo_notes);
-            return Ok(Loaded { path, dir, project, media: media.unwrap(), diags, timeline, cues, demos });
+            diags.extend(demo_notes.clone());
+            // a variant with a length to keep
+            if let (Some(tl), Some(v)) = (&timeline, selection.variant.as_ref()) {
+                let max = project.variants.get(v).and_then(|x| x.max_duration);
+                let secs = tl.secs(tl.body_end - tl.origin);
+                if let Some(m) = max.filter(|m| secs > *m + 0.05) {
+                    diags.push(
+                        Diagnostic::warning(
+                            "W_VARIANT_TOO_LONG",
+                            format!("/variants/{}/max_duration", cutline_core::diag::ptr_token(v)),
+                            format!("variant `{v}` runs {secs:.1}s; its limit is {m:.0}s"),
+                        )
+                        .hint(
+                            "leave out more clips (`exclude`, or `except` on clips), or give it a shorter voice-over",
+                        ),
+                    );
+                }
+            }
+            return Ok(Loaded {
+                path,
+                dir,
+                project,
+                media: media.unwrap(),
+                diags,
+                timeline,
+                cues,
+                demos,
+                selection,
+                variants,
+                locales,
+            });
         }
         last_anchor = anchored.first().map(|a| a.layer);
         starts = next;

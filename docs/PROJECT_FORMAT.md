@@ -43,6 +43,7 @@ Errors: `E_BEAT_REF`.
 | `markers` | [`{at, title}`] | `[]` | chapters |
 | `exports` | [Export] | one export of `target` | multi-target from one edit |
 | `cues` | map name → Cue | `{}` | phrases in the voice-over; see [Cues](#cues) |
+| `variants`, `locales`, `strings` | maps | `{}` | several cuts and languages from one project; see [Variants and locales](#variants-and-locales) |
 | `brand_bumpers` | bool | `true` | `false`: do not add the brand's `intro` / `outro` around `main` |
 | `watermark` | bool | `true` | `false`: do not draw the brand `logo` as a watermark |
 | `profile` | `standard` | `screencast`: tuned for screen/terminal recordings — x264 `-tune animation` and CRF − 2 for sharp text and UI edges; QA's freeze check passes (pauses are normal) |
@@ -447,6 +448,63 @@ exports: [
 Every export also writes `<name>.srt`, `<name>.vtt` (WebVTT for web players), `<name>.poster.jpg`,
 `<name>.qa.json` and `<name>.render_report.json`. A part of the edit (`range`, `loop`) is not
 re-normalized, so its loudness is reported but not checked.
+
+## Variants and locales
+
+Several videos from one project. Both are applied before anything else reads the project, so
+cues, steps and timing see an ordinary project; because cuts are timed by cues and `end_at`, a
+shorter script or another language re-times the edit by itself.
+
+```json5
+variants: {
+  full:   {},
+  teaser: {exclude: ["deep_dive"], max_duration: 30, exports: ["linkedin"],
+           assets: {vo: {path: "vo.teaser.mp3", script: "vo.teaser.txt"}}},
+},
+locales: {
+  de: {assets: {vo: {path: "vo.de.mp3", script: "vo.de.txt"}},
+       cues: {export: "die Export-Schaltfläche"}, strings: "strings.de.json5", lang: "de"},
+},
+strings: {title: "World clocks", cta: "Try it free"},
+main: [
+  {id: "title", clip: "plain", end_at: "cue:export"},
+  {id: "deep_dive", clip: "screen", only: ["full"]},
+],
+layers: [{type: "text", template: "title_card", text: "@title", anchor: "title"}],
+```
+
+```
+cutline render project.json5                      # every variant, base language
+cutline render project.json5 --variant teaser --locale de
+cutline validate project.json5 --locale de        # the flags work on every command
+```
+
+**Variants** (a cut of the edit):
+
+| Field | Notes |
+|---|---|
+| `include` / `exclude` | clip ids to keep / leave out (default: all clips) |
+| `only` / `except` on clips and layers | the variants an item belongs to; a layer anchored to a dropped clip goes with it, and a transition survives only between two kept neighbours |
+| `assets` | asset fields to replace, e.g. a shorter voice-over and its script |
+| `exports` | export names to render for this variant |
+| `max_duration` | `W_VARIANT_TOO_LONG` when the edit runs longer |
+
+Without `--variant`, `render` renders every variant and the other commands use the first by
+name. Outputs are named `<name>-<variant>…`.
+
+**Locales** (a language):
+
+| Field | Notes |
+|---|---|
+| `assets` | asset fields to replace: the voice-over, its `script` / `transcript`, images |
+| `cues` | the cue phrases in this language, by cue name |
+| `strings` | a JSON5 file (or an object) of `key: text`. Text written as `"@key"` (layer `text`, `subtitle`, `label`, `keys`, anything inside `params`, clip `chapter`, frame `url` / `title`, marker titles) takes the locale's string, else the project's `strings`. `"@@x"` is a literal `@x`; a missing key is `E_UNKNOWN_STRING` |
+| `lang` | language code for `captions.lang` |
+
+With `--locale`, browser recordings are made in that language too (the script's `locale` is
+replaced and each language is cached separately), so the interface on screen matches the
+narration. Outputs are named `<name>…-<locale>`. `W_FIT_HOLD` shows where a longer narration
+runs out of footage.
 
 ## Brand file
 

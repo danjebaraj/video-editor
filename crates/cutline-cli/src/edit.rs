@@ -306,6 +306,7 @@ pub fn edl_table(tl: &cutline_core::Timeline) -> String {
     s
 }
 
+#[derive(Clone)]
 pub struct RenderArgs {
     pub export: Option<String>,
     pub draft: bool,
@@ -319,6 +320,26 @@ pub struct RenderArgs {
 
 pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
     let l = load_or_return!(path);
+    // several variants and none chosen: render each in turn
+    let sel = cutline_render::select::current();
+    if sel.variant.is_none() && l.variants.len() > 1 && !a.dry_run {
+        let mut human = vec![];
+        let mut all = vec![];
+        let mut code = EXIT_OK;
+        for v in &l.variants {
+            cutline_render::select::set_current(cutline_render::select::Selection {
+                variant: Some(v.clone()),
+                locale: sel.locale.clone(),
+            });
+            let r = render(path, a.clone());
+            cutline_render::select::set_current(sel.clone());
+            let o = r?;
+            code = code.max(o.code);
+            human.push(format!("── variant {v} ──\n{}", o.human));
+            all.push(json!({"variant": v, "result": o.json}));
+        }
+        return Ok(Output::ok(json!({"ok": code == EXIT_OK, "variants": all}), human.join("\n")).with_code(code));
+    }
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
     }
@@ -645,7 +666,8 @@ pub fn beats(path: &Path, asset: Option<&str>) -> CmdResult {
 
 pub fn record(path: &Path, asset: Option<&str>) -> CmdResult {
     // browser recordings and terminal tapes; a project may have either or both
-    let mut done = cutline_render::browser::rerecord(path, asset).map_err(CliError::tool)?;
+    let mut done = cutline_render::browser::rerecord(path, asset, cutline_render::select::current().locale.as_deref())
+        .map_err(CliError::tool)?;
     match cutline_render::terminal::rerecord(path, asset) {
         Ok(t) => done.extend(t),
         Err(e) if done.is_empty() => {

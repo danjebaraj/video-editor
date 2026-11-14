@@ -125,6 +125,13 @@
         "$ref": "#/$defs/Layer"
       }
     },
+    "locales": {
+      "description": "Languages (`cutline render --locale de`); see `Locale`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Locale"
+      }
+    },
     "main": {
       "description": "Main storyline: clips, with transitions between them.",
       "type": "array",
@@ -168,10 +175,24 @@
         }
       ]
     },
+    "strings": {
+      "description": "Strings that text can refer to as `\"@key\"` (the base language).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "target": {
       "description": "Output target preset (geometry, fps, encoder, safe zones).",
       "$ref": "#/$defs/TargetName",
       "default": "shorts"
+    },
+    "variants": {
+      "description": "Named cuts of the edit (`cutline render --variant teaser`); see `Variant`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Variant"
+      }
     },
     "version": {
       "description": "Schema version. Must be 1.",
@@ -743,6 +764,13 @@
             }
           ]
         },
+        "except": {
+          "description": "Variants this clip is left out of.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "fit": {
           "description": "With `end_at`, `in` and `out`: `trim` (default) keeps the speed and trims or holds;\n`speed` plays exactly `in`..`out` at whatever speed fills the slot (frame-blended).",
           "anyOf": [
@@ -793,6 +821,13 @@
               "type": "null"
             }
           ]
+        },
+        "only": {
+          "description": "Variants this clip belongs to (default: all).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "out": {
           "description": "Source out point (default: end of the asset).",
@@ -1853,6 +1888,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -1880,6 +1922,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2049,6 +2098,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -2083,6 +2139,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2249,6 +2312,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -2289,6 +2359,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2449,6 +2526,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -2482,6 +2566,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2622,6 +2713,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "exit": {
               "anyOf": [
                 {
@@ -2649,6 +2747,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "opacity": {
               "type": [
@@ -2761,6 +2866,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "height": {
               "description": "Height in px (default 12 for shorts, 8 otherwise).",
               "type": [
@@ -2777,6 +2889,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "start": {
               "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
@@ -2850,6 +2969,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "fade_in": {
               "type": [
                 "number",
@@ -2885,6 +3011,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "role": {
               "description": "Override the asset role (voice/music/sfx).",
@@ -2966,6 +3099,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "mode": {
               "description": "blur (default) | pixelate | fill. Use `fill` for secrets: blurred or pixelated text\ncan sometimes be recovered.",
               "anyOf": [
@@ -2984,6 +3124,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "rect": {
               "description": "Region as fractions of the frame: `{x, y, w, h}` (top-left corner, size).",
@@ -3089,6 +3236,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "follow": {
               "description": "Move with the zoom of the clip underneath (default true).",
               "type": [
@@ -3103,6 +3257,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "radius": {
               "description": "Corner radius in output px (default 8 at 1080p).",
@@ -3195,6 +3356,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "feather": {
               "description": "Soft edge in output px (default 12 at 1080p).",
               "type": [
@@ -3216,6 +3384,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "radius": {
               "type": [
@@ -3285,6 +3460,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "follow": {
               "type": [
                 "boolean",
@@ -3307,6 +3489,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "size": {
               "description": "Label size in output px (default 34 at 1080p).",
@@ -3380,6 +3569,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "generated_by": {
               "type": [
                 "string",
@@ -3399,6 +3595,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "position": {
               "description": "Default `bottom`.",
@@ -3471,6 +3674,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "generated_by": {
               "type": [
                 "string",
@@ -3484,6 +3694,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "position": {
               "description": "Default `top_right`.",
@@ -3573,6 +3790,13 @@
                 }
               ]
             },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "follow": {
               "type": [
                 "boolean",
@@ -3592,6 +3816,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "path": {
               "description": "Keys: `t` seconds after the layer starts, `x`/`y` fractions of the frame.",
@@ -3653,6 +3884,12 @@
                 }
               ]
             },
+            "except": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "gain_db": {
               "type": [
                 "number",
@@ -3673,6 +3910,12 @@
               ],
               "format": "double"
             },
+            "only": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "pick_from": {
               "type": "array",
               "items": {
@@ -3690,6 +3933,35 @@
           ]
         }
       ]
+    },
+    "Locale": {
+      "description": "A language of the video.",
+      "type": "object",
+      "properties": {
+        "assets": {
+          "description": "Asset fields to replace, by asset id (voice-over, its script and transcript, recordings).",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "cues": {
+          "description": "Cue phrases in this language, by cue name.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Cue"
+          }
+        },
+        "lang": {
+          "description": "Language code for transcription and browser recordings (e.g. `de`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strings": {
+          "description": "Strings for `\"@key\"` text: a JSON5 file path, or the table itself."
+        }
+      },
+      "additionalProperties": false
     },
     "LoudnessTarget": {
       "type": "object",
@@ -4318,6 +4590,47 @@
       "required": [
         "transition"
       ]
+    },
+    "Variant": {
+      "description": "A cut of the edit. Clips and layers also choose their variants with `only` / `except`.",
+      "type": "object",
+      "properties": {
+        "assets": {
+          "description": "Asset fields to replace, by asset id: `{vo: {path: \"vo.teaser.mp3\", script: \"vo.teaser.txt\"}}`.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "exclude": {
+          "description": "Clip ids to leave out.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exports": {
+          "description": "Export names to render for this variant (default: all).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "include": {
+          "description": "Clip ids to keep (default: all).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_duration": {
+          "description": "Warn when this variant runs longer (seconds).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "additionalProperties": false
     },
     "ZoomOnClicks": {
       "type": "object",

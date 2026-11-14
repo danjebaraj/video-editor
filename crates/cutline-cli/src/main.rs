@@ -19,6 +19,12 @@ struct Cli {
     /// Log every ffmpeg command and more.
     #[arg(long, short, global = true)]
     verbose: bool,
+    /// Work on this variant of the project (default: the first by name; `render` does all).
+    #[arg(long, global = true)]
+    variant: Option<String>,
+    /// Work on this locale of the project (default: the base language).
+    #[arg(long, global = true)]
+    locale: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -260,6 +266,10 @@ fn main() {
 }
 
 fn dispatch(cli: Cli) -> CmdResult {
+    cutline_render::select::set_current(cutline_render::select::Selection {
+        variant: cli.variant.clone(),
+        locale: cli.locale.clone(),
+    });
     match cli.cmd {
         Cmd::Doctor => doctor::run(),
         Cmd::Deps { cmd } => match cmd {

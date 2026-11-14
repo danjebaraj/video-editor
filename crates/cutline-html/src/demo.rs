@@ -929,11 +929,24 @@ fn cache_key(script_path: &Path, text: &str, script: &DemoScript) -> String {
     cutline_media::hash_key(&refs)
 }
 
-/// The cached recording of a script, if there is one.
-pub fn cached(script_path: &Path, cache_dir: &Path) -> Result<Option<Recording>> {
+/// Read a script; `locale` (from the project's `--locale`) replaces the script's own.
+fn read_script(script_path: &Path, locale: Option<&str>) -> Result<(String, DemoScript)> {
     let text =
         std::fs::read_to_string(script_path).with_context(|| format!("cannot read {}", script_path.display()))?;
-    let script = parse(&text)?;
+    let mut script = parse(&text)?;
+    match locale {
+        Some(l) => {
+            script.locale = Some(l.to_string());
+            // each language is its own recording
+            Ok((format!("{text}\nlocale={l}"), script))
+        }
+        None => Ok((text, script)),
+    }
+}
+
+/// The cached recording of a script, if there is one.
+pub fn cached(script_path: &Path, cache_dir: &Path, locale: Option<&str>) -> Result<Option<Recording>> {
+    let (text, script) = read_script(script_path, locale)?;
     let key = cache_key(script_path, &text, &script);
     let (video, events_path) = (cache_dir.join(format!("{key}.mp4")), cache_dir.join(format!("{key}.events.json")));
     if !(video.is_file() && events_path.is_file()) {
@@ -949,15 +962,14 @@ pub fn record_cached(
     script_path: &Path,
     cache_dir: &Path,
     force: bool,
+    locale: Option<&str>,
 ) -> Result<Recording> {
     if !force {
-        if let Some(r) = cached(script_path, cache_dir)? {
+        if let Some(r) = cached(script_path, cache_dir, locale)? {
             return Ok(r);
         }
     }
-    let text =
-        std::fs::read_to_string(script_path).with_context(|| format!("cannot read {}", script_path.display()))?;
-    let script = parse(&text)?;
+    let (text, script) = read_script(script_path, locale)?;
     let key = cache_key(script_path, &text, &script);
     let dir = script_path.parent().unwrap_or(Path::new("."));
     let work = cache_dir.join(format!("{key}.work"));

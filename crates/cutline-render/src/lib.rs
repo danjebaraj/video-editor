@@ -19,6 +19,7 @@ pub mod overlay;
 pub mod pipeline;
 pub mod reframe;
 pub mod segment;
+pub mod select;
 pub mod terminal;
 pub mod transitions;
 

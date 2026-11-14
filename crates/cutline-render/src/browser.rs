@@ -24,7 +24,7 @@ pub fn cache_dir(dir: &Path) -> std::path::PathBuf {
 
 /// Record (or, with `record: false`, only look up) every `.demo.json5` asset in the raw
 /// project and point the asset at its video.
-pub fn prepare(v: &mut Value, dir: &Path, record: bool) -> (Vec<Diagnostic>, Demos) {
+pub fn prepare(v: &mut Value, dir: &Path, record: bool, locale: Option<&str>) -> (Vec<Diagnostic>, Demos) {
     let mut d = vec![];
     let mut demos = Demos::new();
     let Some(assets) = v.get_mut("assets").and_then(|a| a.as_object_mut()) else { return (d, demos) };
@@ -40,9 +40,9 @@ pub fn prepare(v: &mut Value, dir: &Path, record: bool) -> (Vec<Diagnostic>, Dem
         }
         let cache = cache_dir(dir);
         let rec = if record {
-            cutline_deps::toolchain().and_then(|tc| demo::record_cached(tc, &script, &cache, false)).map(Some)
+            cutline_deps::toolchain().and_then(|tc| demo::record_cached(tc, &script, &cache, false, locale)).map(Some)
         } else {
-            demo::cached(&script, &cache)
+            demo::cached(&script, &cache, locale)
         };
         match rec {
             Ok(Some(r)) => {
@@ -263,7 +263,11 @@ pub fn resolve_steps(v: &mut Value, demos: &Demos) -> Vec<Diagnostic> {
 }
 
 /// Re-record the `.demo.json5` assets of a project (all, or the one named `only`).
-pub fn rerecord(project: &Path, only: Option<&str>) -> anyhow::Result<Vec<(String, std::path::PathBuf)>> {
+pub fn rerecord(
+    project: &Path,
+    only: Option<&str>,
+    locale: Option<&str>,
+) -> anyhow::Result<Vec<(String, std::path::PathBuf)>> {
     use anyhow::Context;
     let project = std::fs::canonicalize(project).with_context(|| format!("cannot open {}", project.display()))?;
     let dir = project.parent().unwrap_or(Path::new("."));
@@ -276,7 +280,7 @@ pub fn rerecord(project: &Path, only: Option<&str>) -> anyhow::Result<Vec<(Strin
         if only.is_some_and(|o| o != id) {
             continue;
         }
-        let r = demo::record_cached(tc, &dir.join(path), &cache_dir(dir), true)?;
+        let r = demo::record_cached(tc, &dir.join(path), &cache_dir(dir), true, locale)?;
         out.push((id.clone(), r.video));
     }
     Ok(out)

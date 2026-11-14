@@ -62,8 +62,8 @@ fn records_a_session_with_steps_cursor_and_rects() {
          {scroll: {to: 'text=Invoices', duration: 0.5}, name: 'invoices'}",
     );
     let cache = d.path().join("cache");
-    assert!(cached(&script, &cache).unwrap().is_none());
-    let rec = record_cached(tc, &script, &cache, false).unwrap();
+    assert!(cached(&script, &cache, None).unwrap().is_none());
+    let rec = record_cached(tc, &script, &cache, false, None).unwrap();
     let ev = &rec.events;
     assert_eq!((ev.width, ev.height), (800, 500));
     assert_eq!(dims(tc, &rec.video).unwrap(), (800, 500));
@@ -100,10 +100,10 @@ fn records_a_session_with_steps_cursor_and_rects() {
     assert!(em.t1 - em.t > 0.2, "typing takes time: {em:?}");
 
     // the second call is the cache; a forced one records again and matches at settled points
-    let again = record_cached(tc, &script, &cache, false).unwrap();
+    let again = record_cached(tc, &script, &cache, false, None).unwrap();
     assert_eq!(again.video, rec.video);
     assert_eq!(&again.events, ev);
-    let fresh = record_cached(tc, &script, &cache, true).unwrap();
+    let fresh = record_cached(tc, &script, &cache, true, None).unwrap();
     let ex2 = fresh.events.step("export").unwrap();
     assert_eq!(ex2.rect, ex.rect, "same rect on a fresh recording");
     let g = read_frames(tc, &fresh.video, &[fr(ex2.t + 0.35)]).unwrap();
@@ -119,7 +119,7 @@ fn a_failing_step_names_itself() {
     let Some(tc) = test_toolchain() else { return };
     let d = tempfile::tempdir().unwrap();
     let script = setup(d.path(), "{click: '#go'}, {click: '#missing', timeout: 0.5}");
-    let e = record_cached(tc, &script, &d.path().join("cache"), false).unwrap_err();
+    let e = record_cached(tc, &script, &d.path().join("cache"), false, None).unwrap_err();
     let msg = format!("{e:#}");
     assert!(msg.contains("step 1") && msg.contains("#missing"), "{msg}");
 }
