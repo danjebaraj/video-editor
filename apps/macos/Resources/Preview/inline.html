@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Renders one Mermaid diagram or math block at a time for the editor's inline display (InlineRenderService). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { font: 15px -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2328; }
+  body.dark { color: #e6edf3; }
+  #out { display: inline-block; padding: 6px 4px; max-width: 1180px; }
+  #out .katex-display { margin: 0; }
+  #out svg { max-width: 1180px; height: auto; }
+  .err { color: #cf222e; font: 12px ui-monospace, Menlo, monospace; white-space: pre-wrap; max-width: 700px; }
+  body.dark .err { color: #ff7b72; }
+</style>
+<script src="vendor/katex/katex.min.js"></script>
+<script src="vendor/mermaid.min.js"></script>
+<script src="inline.js"></script>
+</head>
+<body><div id="out"></div></body>
+</html>

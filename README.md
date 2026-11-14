@@ -66,6 +66,15 @@ cutline guide                               # the workflow Claude should follow
   silence, black, freeze, hook, caption safe zone and reading speed), `selftest --quick/--full`
   on synthetic media, review pack.
 
+## Syncfusion Video Studio
+
+A desktop app (macOS) and a headless CLI that prepare videos with Claude Code and cutline: a Markdown spec refined with Claude, media by reference, brand and output presets, validation before a run, and runs with progress, cancellation and full logs. See [docs/video-studio/README.md](docs/video-studio/README.md); the specification is [ui/spec.md](ui/spec.md).
+
+```bash
+apps/macos/build.sh                             # the app
+cargo build --release -p video-studio-cli       # the `video-studio` CLI
+```
+
 ## Building
 
 ```bash

@@ -1,0 +1,1064 @@
+{
+  "$defs": {
+    "AssetRef": {
+      "description": "A referenced brand file (logo, font, bumper). Never copied, except into a `.cutbrand` export.",
+      "properties": {
+        "fingerprint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fingerprint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "AssistantSessionRef": {
+      "additionalProperties": true,
+      "properties": {
+        "claude_session": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "BrandPreset": {
+      "properties": {
+        "caption_style": {
+          "default": "",
+          "type": "string"
+        },
+        "colors": {
+          "$ref": "#/$defs/Palette",
+          "default": {
+            "accent": "#2D9CDB",
+            "background": "#FFFFFF",
+            "primary": "#F26B21",
+            "secondary": "#1F2A44",
+            "text": "#111827"
+          }
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "fonts": {
+          "$ref": "#/$defs/Fonts",
+          "default": {
+            "body": {},
+            "heading": {}
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "intro": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "logos": {
+          "$ref": "#/$defs/Logos",
+          "default": {}
+        },
+        "lower_third_style": {
+          "default": "",
+          "type": "string"
+        },
+        "modified": {
+          "default": "",
+          "type": "string"
+        },
+        "music_mood": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outro": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rules": {
+          "default": "",
+          "description": "Do's and don'ts in free text, given to Claude verbatim.",
+          "type": "string"
+        },
+        "voice": {
+          "$ref": "#/$defs/Voice",
+          "default": {
+            "voice_id": ""
+          }
+        },
+        "watermark": {
+          "$ref": "#/$defs/Watermark",
+          "default": {
+            "opacity": 0.6,
+            "position": "bottom_right"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "BrandRef": {
+      "description": "The preset a project uses: its library ID and a full copy taken when it was chosen.",
+      "properties": {
+        "preset_id": {
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/BrandPreset"
+        }
+      },
+      "required": [
+        "preset_id",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    "Fingerprint": {
+      "properties": {
+        "mtime": {
+          "type": "string"
+        },
+        "quick_hash": {
+          "description": "SHA-256 of the first, middle and last 1 MiB plus the size.",
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size",
+        "mtime",
+        "quick_hash"
+      ],
+      "type": "object"
+    },
+    "FontRef": {
+      "description": "A font by installed family name or by file.",
+      "properties": {
+        "family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Fonts": {
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/FontRef",
+          "default": {}
+        },
+        "heading": {
+          "$ref": "#/$defs/FontRef",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "Intent": {
+      "properties": {
+        "audience": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cta": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/IntentKind",
+          "default": "unset"
+        },
+        "locales": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "other": {
+          "description": "Free text when `kind` is `other`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_length_s": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IntentKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "marketing",
+            "product_demo",
+            "tutorial",
+            "explainer",
+            "social_clip",
+            "testimonial",
+            "announcement",
+            "event_recap",
+            "internal",
+            "app_store_preview",
+            "other"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "unset",
+          "description": "Not chosen yet. Validation reports this as a blocker.",
+          "type": "string"
+        }
+      ]
+    },
+    "Logos": {
+      "properties": {
+        "dark": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For dark backgrounds."
+        },
+        "horizontal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icon": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "light": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For light backgrounds."
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MediaItem": {
+      "properties": {
+        "fingerprint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fingerprint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "description": "Stable, short and human-readable, for example `m-intro-take2`.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/MediaKind"
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pasted": {
+          "description": "A pasted clipboard image stored in the `.assets` sidecar (the one case the app writes media).",
+          "type": "boolean"
+        },
+        "paths": {
+          "$ref": "#/$defs/MediaPaths",
+          "default": {}
+        },
+        "probe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probe"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MediaRole"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "MediaKind": {
+      "enum": [
+        "video",
+        "audio",
+        "image",
+        "font",
+        "transcript",
+        "tape",
+        "demo_script",
+        "other"
+      ],
+      "type": "string"
+    },
+    "MediaPaths": {
+      "properties": {
+        "absolute": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bookmark_macos": {
+          "description": "Security-scoped bookmark (base64), when the macOS shell could make one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relative": {
+          "description": "Relative to the project file's folder, with forward slashes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MediaRole": {
+      "description": "A hint for Claude about how a file is meant to be used.",
+      "enum": [
+        "footage",
+        "b_roll",
+        "screen_recording",
+        "logo",
+        "music",
+        "sfx",
+        "voice",
+        "reference"
+      ],
+      "type": "string"
+    },
+    "Models": {
+      "properties": {
+        "assistant": {
+          "description": "Spec assistant model: a CLI alias (`sonnet`) or a full model ID.",
+          "type": "string"
+        },
+        "dry_run": {
+          "description": "Dry run model; cheaper than production by default.",
+          "type": "string"
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "web_access": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "assistant",
+        "dry_run"
+      ],
+      "type": "object"
+    },
+    "OutputConfig": {
+      "description": "A named delivery target in a project: a preset plus overrides.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "overrides": {
+          "$ref": "#/$defs/OutputOverrides",
+          "default": {}
+        },
+        "preset": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "preset"
+      ],
+      "type": "object"
+    },
+    "OutputOverrides": {
+      "description": "Per-project changes on top of a preset.",
+      "properties": {
+        "audio": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "captions": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "formats": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "fps": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "loop": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "max_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_duration_s": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Palette": {
+      "properties": {
+        "accent": {
+          "type": "string"
+        },
+        "background": {
+          "type": "string"
+        },
+        "primary": {
+          "type": "string"
+        },
+        "secondary": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "primary",
+        "secondary",
+        "accent",
+        "background",
+        "text"
+      ],
+      "type": "object"
+    },
+    "Probe": {
+      "properties": {
+        "audio_channels": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_s": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "error": {
+          "description": "Why probing failed, when it did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "for_hash": {
+          "description": "The fingerprint hash this probe was made for; a different file is probed again.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fps": {
+          "description": "Frame rate as `num/den`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "height": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "loudness_lufs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rotation": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "vfr": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "video_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Quality": {
+      "enum": [
+        "draft",
+        "final"
+      ],
+      "type": "string"
+    },
+    "RunConfig": {
+      "properties": {
+        "dry_run_first": {
+          "default": true,
+          "type": "boolean"
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eleven_credit_cap": {
+          "default": 20000,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "locales": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_spend_usd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_turns": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "output_folder": {
+          "default": "",
+          "description": "Parent folder for this config's run folders; `~` is expanded. Empty means the default.",
+          "type": "string"
+        },
+        "outputs": {
+          "default": [],
+          "description": "IDs of the selected output configs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "production_model": {
+          "type": "string"
+        },
+        "quality": {
+          "$ref": "#/$defs/Quality",
+          "default": "final"
+        },
+        "question_timeout_s": {
+          "description": "Seconds a question may wait before Claude proceeds on its stated assumption.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "web_access": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "production_model"
+      ],
+      "type": "object"
+    },
+    "RunKind": {
+      "enum": [
+        "dry_run",
+        "production"
+      ],
+      "type": "string"
+    },
+    "RunRecord": {
+      "properties": {
+        "claude_session": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cost_usd": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "eleven_credits": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finished": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "folder": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RunKind"
+        },
+        "model": {
+          "description": "Model ID actually used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previous_run": {
+          "description": "The run this one revises.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_config": {
+          "type": "string"
+        },
+        "run_config_name": {
+          "description": "The run config's name when the run started (configs can be renamed or deleted later).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        }
+      },
+      "required": [
+        "id",
+        "run_config",
+        "kind",
+        "folder",
+        "status",
+        "started"
+      ],
+      "type": "object"
+    },
+    "RunStatus": {
+      "enum": [
+        "running",
+        "succeeded",
+        "succeeded_with_warnings",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "Voice": {
+      "properties": {
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "settings": {
+          "additionalProperties": true,
+          "description": "ElevenLabs voice settings (stability, similarity_boost, style, speed).",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "voice_id": {
+          "default": "",
+          "description": "ElevenLabs voice ID.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Watermark": {
+      "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssetRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opacity": {
+          "format": "double",
+          "type": "number"
+        },
+        "position": {
+          "description": "`top_left`, `top_right`, `bottom_left` or `bottom_right`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "position",
+        "opacity"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "assistant_sessions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/AssistantSessionRef"
+      },
+      "type": "array"
+    },
+    "brand": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BrandRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created": {
+      "type": "string"
+    },
+    "format": {
+      "type": "string"
+    },
+    "id": {
+      "description": "Stable ID; Duplicate assigns a new one.",
+      "type": "string"
+    },
+    "intent": {
+      "$ref": "#/$defs/Intent",
+      "default": {
+        "kind": "unset",
+        "locales": []
+      }
+    },
+    "media": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MediaItem"
+      },
+      "type": "array"
+    },
+    "media_roots": {
+      "default": [],
+      "description": "Folders searched for moved media, relative to the project file or absolute.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "models": {
+      "$ref": "#/$defs/Models",
+      "default": {
+        "assistant": "sonnet",
+        "dry_run": "haiku",
+        "web_access": false
+      }
+    },
+    "modified": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "output_configs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OutputConfig"
+      },
+      "type": "array"
+    },
+    "run_configs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RunConfig"
+      },
+      "type": "array"
+    },
+    "runs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RunRecord"
+      },
+      "type": "array"
+    },
+    "spec": {
+      "default": "",
+      "description": "The video spec as plain Markdown.",
+      "type": "string"
+    },
+    "version": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "id",
+    "name",
+    "created",
+    "modified"
+  ],
+  "title": "Project",
+  "type": "object"
+}

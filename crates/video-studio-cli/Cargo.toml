@@ -1,0 +1,38 @@
+[package]
+name = "video-studio-cli"
+description = "Headless CLI for Syncfusion Video Studio (ui/spec.md §13) and the helper Claude uses during runs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "video-studio"
+path = "src/main.rs"
+
+[dependencies]
+camino = "1.1.9"
+clap = { version = "4.5.61", features = ["derive"] }
+ctrlc = { version = "3.4.5", features = ["termination"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+video-studio-core = { version = "0.1.0", path = "../video-studio-core" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
+
+# Test doubles (spec §20): a Claude Code CLI that replays a script, and a cutline that writes
+# placeholder outputs. Used by this crate's end-to-end tests and the macOS app's self test.
+[[bin]]
+name = "vs-fake-claude"
+path = "src/bin/fake_claude.rs"
+test = false
+
+[[bin]]
+name = "vs-fake-cutline"
+path = "src/bin/fake_cutline.rs"
+test = false

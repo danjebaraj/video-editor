@@ -1,0 +1,530 @@
+//! Preparing a run (spec §12.2 step 1): the run folder, the files Claude reads, the permission
+//! policy, the helper context and the Claude Code options.
+
+use std::collections::HashSet;
+
+use camino::{Utf8Path, Utf8PathBuf};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use crate::claude::broker::{hook_settings, Mode, Policy};
+use crate::claude::locate::{self, ClaudeInfo, CutlineInfo};
+use crate::claude::process::{containing_dir, ClaudeOptions};
+use crate::eleven::{self, HelperContext, CONTEXT_ENV};
+use crate::media::{self, MediaStatus, Resolution};
+use crate::models::ModelList;
+use crate::platform::{FileRefs, NoFileRefs};
+use crate::presets::{cutline_exports, resolve_run_outputs, Platforms, ResolvedOutput};
+use crate::project::{Project, RunConfig, RunKind, RunRecord, RunStatus};
+use crate::settings::Settings;
+use crate::validation::Report;
+use crate::{ids, paths, timeutil, Error, Result, CORE_VERSION};
+
+/// The machine and library a run uses.
+pub struct RunEnv {
+    pub library: Utf8PathBuf,
+    pub settings: Settings,
+    pub platforms: Platforms,
+    pub models: ModelList,
+    pub claude: ClaudeInfo,
+    pub cutline: CutlineInfo,
+    /// The `video-studio` binary: the ElevenLabs helper, the hook and the cutline proxy.
+    pub helper: Utf8PathBuf,
+    /// cutline's home (tools, models, cache), readable during runs.
+    pub cutline_home: Option<Utf8PathBuf>,
+    pub cutline_doctor: Option<Value>,
+    pub eleven_base_url: Option<String>,
+    pub eleven_test_key: Option<String>,
+    /// Whether an ElevenLabs key is stored (the caller checks through the helper binary).
+    pub eleven_key_present: bool,
+    /// Extra environment for the Claude Code process (proxies, test doubles).
+    pub extra_env: std::collections::HashMap<String, String>,
+    pub file_refs: std::sync::Arc<dyn FileRefs>,
+}
+
+impl RunEnv {
+    /// Finds Claude Code and cutline. Fails with [`Error::Environment`] when either is missing
+    /// or Claude Code is too old (CLI exit code 5).
+    pub fn detect(library: &Utf8Path, helper: &Utf8Path) -> Result<RunEnv> {
+        let settings = Settings::load(library);
+        let claude = locate::find_claude(&settings.claude_path).ok_or_else(|| Error::Environment("Claude Code isn't installed. Install the Claude Code CLI (https://claude.com/claude-code), then try again.".into()))?;
+        if !claude.supported {
+            return Err(Error::Environment(format!(
+                "Claude Code {} is too old; this app needs {} or later. Update the CLI and try again.",
+                claude.version,
+                locate::min_version_text()
+            )));
+        }
+        let cutline = locate::find_cutline(&settings.cutline_path, &settings.cutline_repo).ok_or_else(|| {
+            Error::Environment(
+                "cutline wasn't found. Set its path in Settings › cutline, or put `cutline` on your PATH.".into(),
+            )
+        })?;
+        let doctor = locate::cutline_doctor(Utf8Path::new(&cutline.path)).ok();
+        let cutline_home = doctor
+            .as_ref()
+            .and_then(|d| d.raw["home"].as_str())
+            .map(Utf8PathBuf::from)
+            .or_else(|| std::env::var("CUTLINE_HOME").ok().map(Utf8PathBuf::from));
+        Ok(RunEnv {
+            platforms: Platforms::load(library),
+            models: ModelList::load(library),
+            library: library.to_owned(),
+            settings,
+            claude,
+            cutline,
+            helper: helper.to_owned(),
+            cutline_home,
+            cutline_doctor: doctor.map(|d| d.raw),
+            eleven_base_url: std::env::var("VIDEO_STUDIO_ELEVEN_BASE_URL").ok().filter(|s| !s.is_empty()),
+            eleven_test_key: None,
+            eleven_key_present: false,
+            extra_env: Default::default(),
+            file_refs: std::sync::Arc::new(NoFileRefs),
+        })
+    }
+}
+
+/// Feedback on an earlier run (spec §12.5 Revise).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Revise {
+    /// ID of the run to revise.
+    pub previous_run: String,
+    pub feedback: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RunRequest {
+    pub project_path: Utf8PathBuf,
+    /// Run config ID or name.
+    pub run_config: String,
+    pub kind: RunKind,
+    /// Overrides the config's model for this run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Overrides the config's output folder for this run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<Utf8PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revise: Option<Revise>,
+    /// Headless with `--yes` or no terminal: questions aren't asked, Claude proceeds on its
+    /// stated assumption and the question is logged.
+    #[serde(default)]
+    pub assume_answers: bool,
+    /// Seconds a question waits before Claude proceeds on its assumption (0 or absent: forever).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_timeout_s: Option<u32>,
+    /// The validation report this run was started with; saved as `logs/validation.json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation: Option<Report>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ManifestEntry {
+    pub id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// Resolved absolute path; absent when the file is missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub status: MediaStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<media::Probe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+pub fn manifest(project: &Project, resolutions: &[Resolution]) -> Vec<ManifestEntry> {
+    project
+        .media
+        .iter()
+        .map(|m| {
+            let r = resolutions.iter().find(|r| r.id == m.id);
+            let mut probe = m.probe.clone();
+            if let Some(p) = probe.as_mut() {
+                p.for_hash = None;
+            }
+            ManifestEntry {
+                id: m.id.clone(),
+                kind: m.kind.key().to_string(),
+                role: m.role.and_then(|r| serde_json::to_value(r).ok()).and_then(|v| v.as_str().map(str::to_string)),
+                path: r.and_then(|r| r.path.clone()),
+                status: r.map(|r| r.status).unwrap_or(MediaStatus::Missing),
+                probe,
+                notes: m.notes.clone(),
+                tags: m.tags.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Everything the orchestrator needs to launch and follow the run.
+pub struct Prepared {
+    pub run_id: String,
+    pub folder: Utf8PathBuf,
+    pub logs: Utf8PathBuf,
+    pub context_dir: Utf8PathBuf,
+    pub mode: Mode,
+    pub project: Project,
+    pub run_config: RunConfig,
+    pub outputs: Vec<ResolvedOutput>,
+    pub manifest: Vec<ManifestEntry>,
+    pub policy: Policy,
+    pub options: ClaudeOptions,
+    pub prompt: String,
+    pub record: RunRecord,
+    pub helper_context: HelperContext,
+    pub request: RunRequest,
+}
+
+fn unique_folder(parent: &Utf8Path, name: &str) -> Utf8PathBuf {
+    let first = parent.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let mut n = 2;
+    loop {
+        let c = parent.join(format!("{name}-{n}"));
+        if !c.exists() {
+            return c;
+        }
+        n += 1;
+    }
+}
+
+fn link_or_copy(target: &Utf8Path, link: &Utf8Path) -> Result<()> {
+    let _ = std::fs::remove_file(link);
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)?;
+    }
+    #[cfg(not(unix))]
+    {
+        if std::fs::hard_link(target, link).is_err() {
+            std::fs::copy(target, link)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_tree(from: &Utf8Path, to: &Utf8Path) {
+    if from.is_file() {
+        if let Some(d) = to.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let _ = std::fs::copy(from, to);
+    } else if from.is_dir() {
+        for e in walkdir::WalkDir::new(from).into_iter().flatten().filter(|e| e.file_type().is_file()) {
+            if let Ok(p) = paths::utf8(e.path().to_path_buf()) {
+                if let Ok(rel) = p.strip_prefix(from) {
+                    let dest = to.join(rel);
+                    if let Some(d) = dest.parent() {
+                        let _ = std::fs::create_dir_all(d);
+                    }
+                    let _ = std::fs::copy(&p, &dest);
+                }
+            }
+        }
+    }
+}
+
+/// Builds the run folder and everything in it. Nothing is launched yet.
+pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
+    let mut project = Project::load(&request.project_path)?;
+    let rc = project.run_config(&request.run_config).cloned().ok_or_else(|| {
+        let names: Vec<&str> = project.run_configs.iter().map(|r| r.name.as_str()).collect();
+        Error::NotFound(format!(
+            "no run config \"{}\" in {} (it has: {})",
+            request.run_config,
+            request.project_path,
+            if names.is_empty() { "none".to_string() } else { names.join(", ") }
+        ))
+    })?;
+    let outputs = resolve_run_outputs(&project, &rc, &env.platforms)?;
+    if outputs.is_empty() {
+        return Err(Error::InvalidProject(format!("the run config \"{}\" has no outputs selected", rc.name)));
+    }
+    let mode = match request.kind {
+        RunKind::DryRun => Mode::DryRun,
+        RunKind::Production => Mode::Production,
+    };
+    let run_id = ids::new_id("run");
+    let stamp = timeutil::run_stamp();
+    let slug = ids::slug(&rc.name);
+    let folder_name = format!("{stamp}-{}", if slug.is_empty() { "run" } else { &slug });
+    // A dry run works in a scratch folder in the library; a production run in the output folder.
+    let parent = match (request.kind, &request.output) {
+        (RunKind::DryRun, _) => env.library.join("dry-runs").join(&project.id),
+        (RunKind::Production, Some(o)) => o.clone(),
+        (RunKind::Production, None) => rc.output_root(&project.name, Some(&env.settings.default_output_folder)),
+    };
+    std::fs::create_dir_all(&parent).map_err(|e| {
+        Error::Io(std::io::Error::new(e.kind(), format!("couldn't create the output folder {parent}: {e}")))
+    })?;
+    let folder = paths::canonical_or_normal(&unique_folder(&parent, &folder_name));
+    let logs = folder.join("logs");
+    for d in [&folder, &logs, &folder.join("outputs"), &folder.join("audio"), &folder.join(".bin")] {
+        std::fs::create_dir_all(d)?;
+    }
+
+    // Media: resolve in place, then describe for Claude.
+    let resolutions =
+        media::resolve_all(&project, Some(&request.project_path), &env.settings.media_roots, env.file_refs.as_ref());
+    // Probe data is a cache in the project; fill what is missing so the manifest is complete.
+    media::probe_all(&mut project, &resolutions, Utf8Path::new(&env.cutline.path));
+    let manifest_entries = manifest(&project, &resolutions);
+    paths::write_json_atomic(&folder.join("media-manifest.json"), &manifest_entries)?;
+    paths::write_atomic(&folder.join("spec.md"), project.spec.replace("\r\n", "\n").as_bytes())?;
+    let brand = project.brand.as_ref().map(|b| &b.snapshot);
+    if let Some(b) = brand {
+        paths::write_json_atomic(&folder.join("brand.json"), b)?;
+    }
+    let exports = cutline_exports(&outputs);
+    paths::write_json_atomic(&folder.join("outputs.json"), &json!({"outputs": outputs, "cutline": exports}))?;
+
+    // Revise: start from the previous run's edit and audio.
+    let mut previous: Option<RunRecord> = None;
+    if let Some(rev) = &request.revise {
+        let prev = project
+            .runs
+            .iter()
+            .find(|r| r.id == rev.previous_run)
+            .cloned()
+            .ok_or_else(|| Error::NotFound(format!("no run \"{}\" to revise", rev.previous_run)))?;
+        let prev_folder = Utf8PathBuf::from(&prev.folder);
+        if !prev_folder.is_dir() {
+            return Err(Error::NotFound(format!(
+                "the run to revise is no longer at {prev_folder}; use Locate in the run history first"
+            )));
+        }
+        for name in ["project.json5", "audio", "work", "summary.md"] {
+            let dest = if name == "summary.md" { folder.join("previous-summary.md") } else { folder.join(name) };
+            copy_tree(&prev_folder.join(name), &dest);
+        }
+        previous = Some(prev);
+    }
+
+    // Names Claude types resolve to the helper: `cutline` is a logging proxy, `video-studio` the
+    // ElevenLabs helper.
+    let bin = folder.join(".bin");
+    let exe = if cfg!(windows) { ".exe" } else { "" };
+    link_or_copy(&env.helper, &bin.join(format!("cutline{exe}")))?;
+    link_or_copy(&env.helper, &bin.join(format!("video-studio{exe}")))?;
+
+    // Folders Claude may read besides the run folder.
+    let mut read_paths: Vec<Utf8PathBuf> = Vec::new();
+    let mut add_read = |p: Utf8PathBuf| {
+        if !read_paths.contains(&p) {
+            read_paths.push(p);
+        }
+    };
+    for m in &manifest_entries {
+        if let Some(p) = &m.path {
+            add_read(containing_dir(Utf8Path::new(p)));
+        }
+    }
+    if let Some(b) = brand {
+        for (_, a) in b.assets() {
+            if a.exists() {
+                add_read(a.resolved());
+            }
+        }
+    }
+    if let Some(h) = &env.cutline_home {
+        add_read(h.clone());
+    }
+    // Claude Code saves large tool results (the cutline schema, long logs) in its own folder
+    // for this working directory and reads them back with the file tools.
+    if let Some(d) = locate::claude_project_dir(&folder) {
+        add_read(d);
+    }
+
+    // The helper's context and the hook's policy live outside anything Claude can read.
+    let context_dir = env.library.join("run-contexts").join(&run_id);
+    std::fs::create_dir_all(&context_dir)?;
+    let helper_context = HelperContext {
+        run_id: run_id.clone(),
+        run_folder: folder.clone(),
+        mode,
+        logs_dir: logs.clone(),
+        cutline: Some(Utf8PathBuf::from(&env.cutline.path)),
+        credit_cap: rc.eleven_credit_cap,
+        cache_dir: eleven::cache_dir(&env.library),
+        cache_limit_bytes: env.settings.eleven_cache_limit_bytes,
+        default_voice: brand
+            .map(|b| b.voice.voice_id.clone())
+            .filter(|v| !v.is_empty())
+            .or_else(|| Some(env.settings.eleven_default_voice.clone()).filter(|v| !v.is_empty())),
+        default_voice_settings: brand.and_then(|b| b.voice.settings.clone()),
+        default_model: brand.and_then(|b| b.voice.model.clone()),
+        base_url: env.eleven_base_url.clone(),
+        test_api_key: env.eleven_test_key.clone(),
+    };
+    let context_file = context_dir.join("context.json");
+    paths::write_json_atomic(&context_file, &helper_context)?;
+    let policy = Policy {
+        mode,
+        work_dir: folder.clone(),
+        read_paths: read_paths.clone(),
+        write_files: None,
+        cutline: Some(Utf8PathBuf::from(&env.cutline.path)),
+        helper: Some(env.helper.clone()),
+        path_dirs: vec![bin.clone()],
+        web_access: rc.web_access,
+        log: Some(logs.join("permissions.ndjson")),
+    };
+    let policy_file = context_dir.join("policy.json");
+    paths::write_json_atomic(&policy_file, &policy)?;
+
+    let model = match request.kind {
+        RunKind::DryRun => request.model.clone().unwrap_or_else(|| project.models.dry_run.clone()),
+        RunKind::Production => request.model.clone().unwrap_or_else(|| rc.production_model.clone()),
+    };
+    let mut child_env = locate::child_env(env.claude.login_path.as_deref());
+    let base_path = child_env.get("PATH").cloned().unwrap_or_default();
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    child_env.insert("PATH".into(), format!("{bin}{sep}{base_path}"));
+    child_env.insert(CONTEXT_ENV.into(), context_file.to_string());
+    child_env.extend(env.extra_env.clone());
+
+    let mut tools: Vec<String> = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "AskUserQuestion", "TodoWrite"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    if rc.web_access {
+        tools.extend(["WebSearch".to_string(), "WebFetch".to_string()]);
+    }
+    let guide = locate::cutline_guide(Utf8Path::new(&env.cutline.path)).unwrap_or_default();
+    let has_key = env.eleven_test_key.is_some() || env.eleven_key_present;
+    let system = super::prompt::system_prompt(&super::prompt::PromptInput {
+        project: &project,
+        run_config: &rc,
+        kind: request.kind,
+        folder: &folder,
+        outputs: &outputs,
+        exports: &exports,
+        manifest: &manifest_entries,
+        cutline_guide: &guide,
+        eleven_available: has_key,
+        default_voice: helper_context.default_voice.as_deref(),
+        platforms: &env.platforms,
+    });
+    let prompt = super::prompt::user_prompt(request.kind, request.revise.as_ref(), previous.as_ref());
+    let options = ClaudeOptions {
+        executable: Utf8PathBuf::from(&env.claude.path),
+        working_dir: folder.clone(),
+        env: child_env,
+        model: model.clone(),
+        effort: rc
+            .effort
+            .clone()
+            .or_else(|| Some(env.settings.effort.clone()).filter(|e| !e.is_empty()))
+            .filter(|e| env.claude.effort_levels.contains(e)),
+        tools,
+        resume_session: previous.as_ref().and_then(|p| p.claude_session.clone()),
+        system_prompt_append: system,
+        settings: Some(hook_settings(&env.helper, &policy_file)),
+        add_dirs: read_paths.iter().map(|p| containing_dir(p)).collect::<HashSet<_>>().into_iter().collect(),
+        max_budget_usd: if request.kind == RunKind::Production { rc.max_spend_usd } else { None },
+        log: Some(logs.join("claude.jsonl")),
+    };
+
+    let record = RunRecord {
+        id: run_id.clone(),
+        run_config: rc.id.clone(),
+        run_config_name: Some(rc.name.clone()),
+        kind: request.kind,
+        folder: folder.to_string(),
+        status: RunStatus::Running,
+        started: timeutil::now_rfc3339(),
+        finished: None,
+        claude_session: None,
+        model: Some(model.clone()),
+        previous_run: previous.as_ref().map(|p| p.id.clone()),
+        cost_usd: None,
+        eleven_credits: None,
+    };
+
+    // run.json: the resolved config (inputs). logs/run.json grows the versions and the outcome.
+    let resolved = json!({
+        "run_id": run_id,
+        "kind": request.kind,
+        "project": {"id": project.id, "name": project.name, "path": request.project_path},
+        "run_config": rc,
+        "model": model,
+        "quality": rc.quality,
+        "locales": if rc.locales.is_empty() { project.intent.locales.clone() } else { rc.locales.clone() },
+        "intent": project.intent,
+        "outputs": outputs,
+        "cutline": exports,
+        "previous_run": previous.as_ref().map(|p| json!({"id": p.id, "folder": p.folder})),
+        "revise_feedback": request.revise.as_ref().map(|r| r.feedback.clone()),
+    });
+    paths::write_json_atomic(&folder.join("run.json"), &resolved)?;
+    let mut log_run = resolved.clone();
+    if let Some(o) = log_run.as_object_mut() {
+        o.insert("app".into(), json!({"name": crate::APP_NAME, "core_version": CORE_VERSION}));
+        o.insert("claude".into(), json!({"path": env.claude.path, "version": env.claude.version_text}));
+        o.insert("cutline".into(), json!({"path": env.cutline.path, "version": env.cutline.version, "doctor": env.cutline_doctor.as_ref().map(doctor_brief)}));
+        o.insert("os".into(), json!({"family": std::env::consts::OS, "arch": std::env::consts::ARCH}));
+        o.insert("folder".into(), json!(folder));
+        o.insert("started".into(), json!(record.started));
+        o.insert("status".into(), json!("running"));
+    }
+    paths::write_json_atomic(&logs.join("run.json"), &log_run)?;
+    if let Some(v) = &request.validation {
+        paths::write_json_atomic(&logs.join("validation.json"), v)?;
+    }
+
+    Ok(Prepared {
+        run_id,
+        folder,
+        logs,
+        context_dir,
+        mode,
+        project,
+        run_config: rc,
+        outputs,
+        manifest: manifest_entries,
+        policy,
+        options,
+        prompt,
+        record,
+        helper_context,
+        request: request.clone(),
+    })
+}
+
+/// The parts of `cutline doctor --json` worth keeping in every run log.
+fn doctor_brief(d: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for k in [
+        "ok",
+        "errors",
+        "warnings",
+        "home",
+        "home_source",
+        "platform",
+        "chrome",
+        "whisper_cli",
+        "whisper_models",
+        "face_model",
+        "fixes",
+    ] {
+        if let Some(v) = d.get(k) {
+            out.insert(k.into(), v.clone());
+        }
+    }
+    if let Some(ff) = d.get("ffmpeg") {
+        out.insert("ffmpeg".into(), ff.clone());
+    }
+    let missing: Vec<Value> = d["capabilities"]
+        .as_array()
+        .map(|a| a.iter().filter(|c| c["present"] == false && c["required"] == true).cloned().collect())
+        .unwrap_or_default();
+    out.insert("missing_required".into(), Value::Array(missing));
+    Value::Object(out)
+}
