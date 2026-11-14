@@ -70,6 +70,23 @@ pub struct Project {
     /// them as `"cue:clocks"`, `"cue:clocks+0.4"` or `"cue:clocks-0.2"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cues: BTreeMap<String, Cue>,
+    /// `false`: do not add the brand's `intro` / `outro` around `main`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brand_bumpers: Option<bool>,
+    /// `false`: do not draw the brand logo as a watermark.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watermark: Option<bool>,
+}
+
+/// `generated_by` of the clips and assets added for the brand's intro and outro.
+pub const BRAND_INTRO: &str = "brand_intro";
+pub const BRAND_OUTRO: &str = "brand_outro";
+
+impl Clip {
+    /// A brand intro/outro clip (added around `main`; timeline times do not count it).
+    pub fn is_bumper(&self) -> bool {
+        matches!(self.generated_by.as_deref(), Some(BRAND_INTRO) | Some(BRAND_OUTRO))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]

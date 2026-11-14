@@ -150,7 +150,7 @@ pub fn speech_assets(p: &Project, l: &Loaded) -> Vec<String> {
         }
     }
     let mut v: Vec<String> = vec![];
-    for c in p.clips() {
+    for c in p.clips().filter(|c| !c.is_bumper()) {
         if l.media.get(&c.clip).map(|m| m.facts.has_audio).unwrap_or(false)
             || p.assets.get(&c.clip).map(|a| a.transcript.is_some()).unwrap_or(false)
         {
@@ -185,7 +185,7 @@ pub fn timeline_words(l: &Loaded, p: &Project, tl: &Timeline, brand: &Brand, all
         }
     }
     let mut out = vec![];
-    for c in &tl.clips {
+    for c in tl.clips.iter().filter(|c| !c.clip.is_bumper()) {
         match c.clip.audio.as_deref() {
             Some("mute") => {}
             Some(x) if x != "keep" && x != "duck" => {
@@ -329,7 +329,7 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
             };
             let tc = &tl0.clips[ci];
             ci += 1;
-            if c.end_at.is_some() {
+            if c.end_at.is_some() || c.is_bumper() {
                 // a fitted clip's length is set by its cue; splitting it would break the fit
                 new_main.push(item.clone());
                 continue;
@@ -465,7 +465,7 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
                                 | Effect::Shake { .. }
                         )
                     });
-                    let already = add.contains_key(&c.main_index);
+                    let already = add.contains_key(&c.main_index) || c.clip.is_bumper();
                     if !(pi.skip_if_other_motion && motion) && !already && local + pi.duration < clip_len {
                         let scale = pi.scale[(k - 1) % 2];
                         add.entry(c.main_index).or_default().push(Effect::PunchIn {
@@ -586,6 +586,9 @@ fn snap_to_beats(
     for i in 0..n.saturating_sub(1) {
         let (Some(cur), _) = resolve(q, &l.media, &ctx) else { break };
         let c = &cur.clips[i];
+        if c.clip.is_bumper() || cur.clips[i + 1].clip.is_bumper() {
+            continue; // the joins to the brand intro/outro stay where they are
+        }
         let cut = match cur.transitions.iter().find(|t| t.after == i) {
             Some(t) if t.frames > 0 => cur.secs(t.start) + cur.secs(t.frames) / 2.0,
             _ => cur.secs(c.end()),
@@ -616,7 +619,8 @@ fn snap_to_beats(
             let before = q.main[mi].clone();
             if let MainItem::Clip(cl) = &mut q.main[mi] {
                 cl.duration = None;
-                cl.end_at = Some(TimeValue::Seconds(round6(beat)));
+                // project times count from the start of the edit
+                cl.end_at = Some(TimeValue::Seconds(round6(beat - cur.secs(cur.origin))));
             }
             let (ok_tl, d) = resolve(q, &l.media, &ctx);
             // a move that leaves the clip holding its last frame is not worth the beat

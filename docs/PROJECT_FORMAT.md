@@ -42,6 +42,8 @@ Errors: `E_BEAT_REF`.
 | `markers` | [`{at, title}`] | `[]` | chapters |
 | `exports` | [Export] | one export of `target` | multi-target from one edit |
 | `cues` | map name → Cue | `{}` | phrases in the voice-over; see [Cues](#cues) |
+| `brand_bumpers` | bool | `true` | `false`: do not add the brand's `intro` / `outro` around `main` |
+| `watermark` | bool | `true` | `false`: do not draw the brand `logo` as a watermark |
 | `profile` | `standard` | `screencast`: tuned for screen/terminal recordings — x264 `-tune animation` and CRF − 2 for sharp text and UI edges; QA's freeze check passes (pauses are normal) |
 | `chroma` | `"420"` | `"444"`: full color resolution (no fringes on small colored text; ProRes 4444 segments, H.264 High 4:4:4). Not every player supports 4:4:4 and platforms re-encode to 4:2:0, so use it for downloads and docs. Drafts and `--hw` stay 4:2:0. Exports can override |
 
@@ -271,6 +273,23 @@ time such as `in`), `E_CUE_ASSET`, `E_CUE_LAYER_TIME`, `E_CUE_TRANSCRIPT`, `E_CU
   "dictionary": {"chefs knife": "chef's knife"}
 }
 ```
+
+| Field | Default | Notes |
+|---|---|---|
+| `logo` | — | PNG (with transparency), JPEG or WebP, relative to the brand file. Drawn as a watermark over the edit at `watermark_position` inside the safe zone; also used by `title_card` |
+| `watermark` | `{opacity: 0.7, scale: 0.08}` | `scale` is the logo width as a fraction of the frame width; `from` / `to` (seconds on the edit) limit when it shows |
+| `watermark_position` | `top_right` | any position preset |
+| `intro`, `outro` | — | video, image or HTML file played before / after `main`. They appear in `cutline expand` as clips `brand_intro` / `brand_outro` |
+| `bumper_fade` | 0.4 | seconds of fade between a bumper and the edit; 0 cuts |
+
+**Times with an intro.** Every timeline time written in the project (layer `start`/`end`, sfx
+`at`, clip `end_at`, markers, cues, `bar:`/`beat:`) counts from the start of the *edit*, so adding
+or removing an intro never shifts your edit. `cutline expand`, `review` and `preview --at` show
+output time (intro included). The watermark, captions, auto jump cuts and beat snapping leave
+the bumpers alone. Layers cannot extend over the intro or outro.
+
+`cutline init --style business` scaffolds `brand/default.json` from the bundled `business`
+brand (Inter, blue accent, `clean_sentence` captions).
 
 ## Migration notes
 

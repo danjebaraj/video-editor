@@ -107,12 +107,39 @@ const INIT_TEMPLATE: &str = r#"// cutline project — see `cutline guide` and `c
 }
 "#;
 
-pub fn init(dir: &Path, target: &str, assets_dir: Option<&Path>, name: Option<&str>) -> CmdResult {
+/// `init --style business`: product demos and company videos. Screen-recording profile, sentence
+/// captions (most business video is watched muted), no retention devices.
+const INIT_BUSINESS: &str = r#"// cutline project (business / product demo) — see `cutline guide` and `cutline schema`
+{
+  version: 1,
+  name: "{{name}}",
+  target: "{{target}}",
+  profile: "screencast",
+  // set `logo`, `intro`, `outro` and colors in the brand file
+  brand: "brand/default.json",
+  assets: {
+{{assets}}  },
+  main: [
+{{main}}  ],
+  layers: [],
+  captions: { source: "auto", style: "clean_sentence" },
+  audio: { loudness: { integrated: -14, true_peak: -1.0 }, voice_chain: "clean_voice", music_level: 18 },
+}
+"#;
+
+pub fn init(dir: &Path, target: Option<&str>, style: &str, assets_dir: Option<&Path>, name: Option<&str>) -> CmdResult {
+    let business = match style {
+        "business" => true,
+        "creator" => false,
+        _ => return Err(CliError::usage(anyhow::anyhow!("unknown style `{style}` (creator, business)"))),
+    };
+    let target = target.unwrap_or(if business { "long_1080p" } else { "shorts" });
     std::fs::create_dir_all(dir).map_err(CliError::usage)?;
     for sub in ["footage", "audio", "gen", "sfx", "brand", "out"] {
         std::fs::create_dir_all(dir.join(sub)).map_err(CliError::internal)?;
     }
-    let brand_src = cutline_deps::paths::assets_dir().join("brand").join("default.json");
+    let brand_src =
+        cutline_deps::paths::assets_dir().join("brand").join(if business { "business.json" } else { "default.json" });
     let brand_dst = dir.join("brand").join("default.json");
     if !brand_dst.exists() {
         let b = std::fs::read_to_string(&brand_src).unwrap_or_else(|_| "{}".into());
@@ -160,7 +187,7 @@ pub fn init(dir: &Path, target: &str, assets_dir: Option<&Path>, name: Option<&s
             .unwrap_or_else(|| "video".into())
     });
     let style = if target == "shorts" { "bold_pop" } else { "clean_sentence" };
-    let text = INIT_TEMPLATE
+    let text = if business { INIT_BUSINESS } else { INIT_TEMPLATE }
         .replace("{{name}}", &name)
         .replace("{{target}}", target)
         .replace("{{assets}}", &assets)

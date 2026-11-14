@@ -39,7 +39,11 @@ pub fn chapters(pr: &Prepared) -> (Vec<Chapter>, Vec<Diagnostic>) {
         pr.project
             .markers
             .iter()
-            .map(|m| Chapter { at: m.at.seconds(fps, tl.duration()), title: m.title.clone() })
+            .map(|m| {
+                // marker times are on the edit; a marker at 0 stays the video's first chapter
+                let t = m.at.seconds(fps, tl.secs(tl.body_end - tl.origin));
+                Chapter { at: if t <= 0.0 { 0.0 } else { tl.from_edit(t) }, title: m.title.clone() }
+            })
             .collect()
     } else if tl.clips.iter().any(|c| c.clip.chapter.is_some()) {
         tl.clips

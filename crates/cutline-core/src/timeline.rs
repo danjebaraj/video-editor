@@ -97,6 +97,11 @@ pub struct Timeline {
     pub fps: Fps,
     pub target: TargetSpec,
     pub total_frames: i64,
+    /// Frame where the edit starts: 0, or the end of the brand intro. Timeline times written in
+    /// the project (layer `start`/`end`, sfx `at`, `end_at`, markers, cues) count from here.
+    pub origin: i64,
+    /// Frame where the edit ends (the brand outro, if any, starts around here).
+    pub body_end: i64,
     pub clips: Vec<TClip>,
     pub transitions: Vec<TTransition>,
     pub layers: Vec<TLayer>,
@@ -108,6 +113,10 @@ impl Timeline {
     }
     pub fn secs(&self, frames: i64) -> f64 {
         self.fps.frames_to_secs(frames)
+    }
+    /// Output seconds of a time written in the project (seconds on the edit).
+    pub fn from_edit(&self, secs: f64) -> f64 {
+        secs + self.secs(self.origin)
     }
     pub fn clip_by_id(&self, id: &str) -> Option<&TClip> {
         self.clips.iter().find(|c| c.id == id)
@@ -254,6 +263,8 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
     let mut transitions: Vec<TTransition> = vec![];
     let mut pending_trans: Option<(usize, Transition)> = None;
     let mut ok = true;
+    // start of the edit (after a brand intro): project times count from here
+    let mut origin: Option<i64> = None;
     for (mi, item) in p.main.iter().enumerate() {
         let base = format!("/main/{mi}");
         match item {
@@ -395,7 +406,8 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             _ => 0,
                         };
                         let start = prev_end - tf_in;
-                        let content = e.frames(fps, 0) + tf_out / 2 - start - freeze_frames;
+                        let org = origin.unwrap_or(if c.is_bumper() { 0 } else { start });
+                        let content = e.frames(fps, 0) + org + tf_out / 2 - start - freeze_frames;
                         if content < 1 {
                             d.push(
                                 Diagnostic::error(
@@ -404,7 +416,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                                     format!(
                                         "end_at {:.3}s is not after this clip's start ({:.3}s)",
                                         e.seconds(fps, 0.0),
-                                        fps.frames_to_secs(start)
+                                        fps.frames_to_secs(start - org)
                                     ),
                                 )
                                 .hint("cues and end_at times must increase along `main`"),
@@ -454,13 +466,11 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         (None, None, None) => media_dur,
                     };
                     if c.fit.is_some() && (fit_frames.is_none() || c.out.is_none()) {
-                        d.push(
-                            Diagnostic::warning(
-                                "W_FIT_UNUSED",
-                                format!("{base}/fit"),
-                                "`fit` only applies to a clip with `end_at`, `in` and `out`",
-                            ),
-                        );
+                        d.push(Diagnostic::warning(
+                            "W_FIT_UNUSED",
+                            format!("{base}/fit"),
+                            "`fit` only applies to a clip with `end_at`, `in` and `out`",
+                        ));
                     }
                     if let (Some(ff), Some(_), true) = (fit_frames, c.out, fit_speed) {
                         // in and out fixed: the speed absorbs the difference
@@ -597,6 +607,9 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         });
                     }
                 }
+                if origin.is_none() && !c.is_bumper() {
+                    origin = Some(start);
+                }
                 let mut clip = (**c).clone();
                 if fit_frames.is_some() && !is_visual_still(kind) {
                     // keep the clip copy consistent with what `end_at` resolved to
@@ -633,7 +646,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             .iter()
             .filter(|t| t.frames > 0 && matches!(t.transition.kind.as_str(), "fade" | "dissolve"))
             .filter(|t| {
-                let is_rec = |c: &TClip| c.kind == AssetKind::Video;
+                let is_rec = |c: &TClip| c.kind == AssetKind::Video && !c.clip.is_bumper();
                 is_rec(&clips[t.after]) && clips.get(t.after + 1).is_some_and(is_rec)
             })
             .collect();
@@ -652,6 +665,10 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
         }
     }
     let total = clips.last().map(|c| c.end()).unwrap_or(0);
+    let origin = origin.unwrap_or(0);
+    let body_end = clips.iter().rev().find(|c| !c.clip.is_bumper()).map(|c| c.end()).unwrap_or(total);
+    // layer times are written on the edit: `end` is the edit's end, 0 its start
+    let body_len = body_end - origin;
     if let Some(maxd) = spec.max_duration {
         let secs = fps.frames_to_secs(total);
         if secs > maxd {
@@ -743,7 +760,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             continue;
                         }
                     },
-                    None => at.map(|t| t.frames(fps, total)).unwrap_or(0),
+                    None => origin + at.map(|t| t.frames(fps, body_len)).unwrap_or(0),
                 };
                 let len = fps.secs_to_frames(media_len.unwrap_or(1.0)).max(1);
                 (s, s + len)
@@ -762,7 +779,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             continue;
                         }
                     },
-                    None => at.start.map(|t| t.frames(fps, total)).unwrap_or(0),
+                    None => origin + at.start.map(|t| t.frames(fps, body_len)).unwrap_or(0),
                 };
                 let src_len = match l {
                     Layer::Video { src_in, src_out, .. } | Layer::Broll { src_in, src_out, .. } => {
@@ -793,15 +810,15 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     Layer::Text { .. } => s + fps.secs_to_frames(3.0),
                     _ => match src_len {
                         Some(sl) => s + fps.secs_to_frames(sl),
-                        None => total,
+                        None => body_end,
                     },
                 };
                 let e = match (at.end, at.duration) {
-                    (Some(e), _) => e.frames(fps, total),
-                    (None, Some(dd)) => s + dd.frames(fps, total),
+                    (Some(e), _) => origin + e.frames(fps, body_len),
+                    (None, Some(dd)) => s + dd.frames(fps, body_len),
                     (None, None) => default_end,
                 };
-                (s, e.min(total.max(s + 1)))
+                (s, e.min(body_end.max(s + 1)))
             }
         };
         if end <= start {
@@ -812,12 +829,12 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             ));
             continue;
         }
-        if start >= total && total > 0 {
+        if start >= body_end && total > 0 {
             d.push(Diagnostic::error("E_LAYER_TIME", base.clone(), "layer starts after the timeline ends"));
             continue;
         }
         let z = l.visual().and_then(|v| v.z).unwrap_or(li as i32);
-        let end = end.min(total);
+        let end = end.min(body_end);
         let (mut start, mut layer) = (start, l.clone());
         if let Layer::Audio { align: Some(AudioAlign::End), src_in, r#loop, .. } = &mut layer {
             if src_in.is_some() || *r#loop == Some(true) {
@@ -935,7 +952,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
 
     let tl = (ok && !clips.is_empty()).then(|| {
         layers.sort_by_key(|l| (l.z, l.index));
-        Timeline { fps, target: spec, total_frames: total, clips, transitions, layers }
+        Timeline { fps, target: spec, total_frames: total, origin, body_end, clips, transitions, layers }
     });
     (tl, d)
 }

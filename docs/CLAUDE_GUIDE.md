@@ -62,6 +62,18 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - B-roll every 20–40 s (`broll` layers, PiP with `radius`/`border`/`shadow` or full-frame).
 - Leave the last 20 s free for the YouTube end screen (`end_card` template draws placeholders).
 
+## Business videos and product demos
+
+- Start with `cutline init --style business` (target `long_1080p`, `profile: "screencast"`,
+  `clean_sentence` captions, business brand, no progress bar).
+- Put the company look in the brand file once: `logo` (watermark, top right by default),
+  `intro` / `outro` bumpers, colors and fonts. Every project using the brand gets them;
+  `brand_bumpers: false` or `watermark: false` opt a project out.
+- Times in the project count from the start of the edit, after the intro. Do not add the intro
+  length to anything.
+- Tone: no punch-in cadence, no emoji, no `bold_pop`. Plain cuts between screens, one fade from
+  the title and into the end card. Keep captions on: most business video is watched muted.
+
 ## Screen recordings
 
 - Record terminal footage from VHS tapes: use the `.tape` file itself as the asset path and cutline

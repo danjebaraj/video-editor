@@ -40,6 +40,7 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         luts_dir: Some(cutline_deps::paths::assets_dir().join("luts")),
         ..Default::default()
     };
+    extras.watermark = watermark(p, tl, &brand, &mut extras.warnings);
     text_layers(p, tl, &brand, &mut extras)?;
     html_layers(l, p, tl, &brand, &mut extras, draft, stills)?;
     captions(l, p, tl, &brand, &mut extras)?;
@@ -81,6 +82,42 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         extras.clip.insert(c.id.clone(), x);
     }
     Ok(extras)
+}
+
+/// The brand logo as a watermark over the edit (not over the intro/outro), unless the project
+/// says `watermark: false`.
+fn watermark(
+    p: &Project,
+    tl: &Timeline,
+    brand: &Brand,
+    warnings: &mut Vec<cutline_core::Diagnostic>,
+) -> Option<crate::WatermarkSpec> {
+    if p.watermark == Some(false) {
+        return None;
+    }
+    let path = brand.file(&brand.logo)?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !path.exists() || !["png", "jpg", "jpeg", "webp"].contains(&ext.as_str()) {
+        warnings.push(
+            cutline_core::Diagnostic::warning(
+                "W_BRAND_LOGO",
+                "/brand",
+                format!("brand logo {} is missing or not a PNG/JPEG/WebP; no watermark drawn", path.display()),
+            )
+            .hint("use a PNG with transparency; set `watermark: false` in the project to silence this"),
+        );
+        return None;
+    }
+    let wm = brand.watermark.clone().unwrap_or_default();
+    let (o, e) = (tl.secs(tl.origin), tl.secs(tl.body_end));
+    Some(crate::WatermarkSpec {
+        path,
+        position: brand.watermark_position.clone().unwrap_or_else(|| "top_right".into()),
+        opacity: wm.opacity,
+        scale: wm.scale.clamp(0.01, 1.0),
+        start: (o + wm.from.unwrap_or(0.0)).min(e),
+        end: wm.to.map(|t| (o + t).min(e)).unwrap_or(e),
+    })
 }
 
 pub fn frame_of(tl: &Timeline) -> cutline_text::templates::Frame {

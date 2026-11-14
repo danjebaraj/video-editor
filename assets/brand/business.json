@@ -1,0 +1,22 @@
+{
+  "name": "business",
+  "fonts": { "title": "Inter", "body": "Inter", "caption": "Inter" },
+  "colors": {
+    "primary": "#FFFFFF",
+    "accent": "#3B82F6",
+    "text": "#FFFFFF",
+    "stroke": "#0B1220",
+    "background": "#0B1220"
+  },
+  "logo": null,
+  "caption_style": "clean_sentence",
+  "lower_third": "lower_third",
+  "intro": null,
+  "outro": null,
+  "bumper_fade": 0.4,
+  "watermark": { "opacity": 0.7, "scale": 0.08 },
+  "sfx": { "whoosh": null, "pop": null, "ding": null, "riser": null },
+  "lut": null,
+  "watermark_position": "top_right",
+  "dictionary": {}
+}

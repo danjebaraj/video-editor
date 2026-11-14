@@ -79,7 +79,8 @@ pub fn parse_file_with_cues(
     if has_errors(&notes) {
         return Err(LoadError::Invalid(notes));
     }
-    let p = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+    let mut p = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+    add_brand_bumpers(&mut p, dir);
     Ok((p, notes, cues))
 }
 
@@ -117,6 +118,7 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
             return Err(LoadError::Invalid(notes));
         }
         let mut project = cutline_core::parse::parse_value(&v).map_err(LoadError::Invalid)?;
+        add_brand_bumpers(&mut project, &dir);
         // terminal recordings (`.tape` assets) become cached videos before probing (once)
         match &tapes {
             Some(map) => {
@@ -173,6 +175,51 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
     .hint("anchor the voice layer to an earlier clip (one not fitted to its cues), or give it a numeric `start`")]))
 }
 
+/// Add the brand's `intro` and `outro` around `main` as explicit clips (`generated_by:
+/// "brand_intro"` / `"brand_outro"`), each joined to the edit by a fade (`bumper_fade`).
+/// Times written in the project keep counting from the start of the edit (see
+/// `Timeline::origin`). Does nothing with `brand_bumpers: false`, without a brand intro/outro,
+/// or when the clips are already there (an expanded project).
+pub fn add_brand_bumpers(p: &mut Project, dir: &Path) {
+    use cutline_core::model::{MainItem, BRAND_INTRO, BRAND_OUTRO};
+    if p.brand_bumpers == Some(false) || p.main.is_empty() || p.clips().any(|c| c.is_bumper()) {
+        return;
+    }
+    let Ok(brand) = cutline_core::brand::Brand::load(p.brand.as_deref(), dir, &cutline_deps::paths::assets_dir())
+    else {
+        return; // reported when the brand is loaded for rendering
+    };
+    let fade = brand.bumper_fade.unwrap_or(0.4).clamp(0.0, 5.0);
+    let item = |v: serde_json::Value| -> Option<MainItem> { serde_json::from_value(v).ok() };
+    let add = |p: &mut Project, id: &str, file: std::path::PathBuf, front: bool| {
+        let asset = serde_json::from_value(serde_json::json!({"path": file.to_string_lossy()}));
+        let clip = item(serde_json::json!({"id": id, "clip": id, "generated_by": id}));
+        let (Ok(asset), Some(clip)) = (asset, clip) else { return };
+        if p.assets.contains_key(id) || p.clips().any(|c| c.id == id) {
+            return;
+        }
+        p.assets.insert(id.to_string(), asset);
+        let tr = (fade > 0.0)
+            .then(|| item(serde_json::json!({"transition": {"type": "fade", "duration": fade, "generated_by": id}})))
+            .flatten();
+        if front {
+            if let Some(t) = tr {
+                p.main.insert(0, t);
+            }
+            p.main.insert(0, clip);
+        } else {
+            p.main.extend(tr);
+            p.main.push(clip);
+        }
+    };
+    if let Some(f) = brand.file(&brand.intro) {
+        add(p, BRAND_INTRO, f, true);
+    }
+    if let Some(f) = brand.file(&brand.outro) {
+        add(p, BRAND_OUTRO, f, false);
+    }
+}
+
 /// Timeline start (seconds) of each anchored voice layer: its anchor clip's start (+ offset),
 /// from the project cut off after that clip, so problems later in the edit (or cues that only
 /// fit once the start is right) do not hide it. Layers whose anchor does not resolve are left
@@ -200,7 +247,7 @@ fn anchor_starts(
         q.captions = None;
         if let (Some(tl), _) = resolve(&q, media, &context(dir)) {
             if let Some(c) = tl.clip_by_id(&a.anchor) {
-                out.insert(a.layer, tl.secs(c.start + tl.fps.secs_to_frames(a.offset)));
+                out.insert(a.layer, tl.secs(c.start + tl.fps.secs_to_frames(a.offset) - tl.origin));
             }
         }
     }

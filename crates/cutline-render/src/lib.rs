@@ -227,8 +227,21 @@ pub struct PlanExtras {
     pub srt: String,
     /// Non-fatal findings from extras (e.g. W_REFRAME_NO_FACES).
     pub warnings: Vec<cutline_core::Diagnostic>,
+    /// Brand logo drawn as a watermark.
+    pub watermark: Option<WatermarkSpec>,
     /// Reframe crop paths per clip id (for the review pack).
     pub crop_paths: std::collections::BTreeMap<String, cutline_reframe::CropPath>,
+}
+
+/// The brand logo as a watermark (output seconds; width as a fraction of the frame width).
+#[derive(Debug, Clone, Serialize)]
+pub struct WatermarkSpec {
+    pub path: PathBuf,
+    pub position: String,
+    pub opacity: f64,
+    pub scale: f64,
+    pub start: f64,
+    pub end: f64,
 }
 
 /// Template image overlay (full-target pixel coordinates).

@@ -37,6 +37,13 @@
         "null"
       ]
     },
+    "brand_bumpers": {
+      "description": "`false`: do not add the brand's `intro` / `outro` around `main`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "captions": {
       "anyOf": [
         {
@@ -160,6 +167,13 @@
       "type": "integer",
       "format": "uint32",
       "minimum": 0
+    },
+    "watermark": {
+      "description": "`false`: do not draw the brand logo as a watermark.",
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "width": {
       "description": "Width/height for `target: custom`.",

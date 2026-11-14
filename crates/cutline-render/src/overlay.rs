@@ -503,6 +503,26 @@ pub fn apply(
             _ => {}
         }
     }
+    // brand logo watermark: over footage and overlays, under text and captions
+    if let Some(wm) = extras.watermark.as_ref().filter(|m| m.end > m.start) {
+        let idx = *next_input;
+        *next_input += 1;
+        let len = wm.end - wm.start;
+        o.input_args.extend(
+            ["-loop", "1", "-framerate", &fps.ff(), "-t", &f(len + 0.1), "-i", &wm.path.to_string_lossy()]
+                .map(String::from),
+        );
+        let ow = ((w as f64 * wm.scale).round() as u32).max(2) & !1;
+        lines.push(format!(
+            "[{idx}:v]fps={},setpts=PTS-STARTPTS,scale={ow}:-2:flags=lanczos,format=yuva444p,colorchannelmixer=aa={},setpts=PTS+{}/TB[wm]",
+            fps.ff(),
+            f(wm.opacity.clamp(0.0, 1.0)),
+            f(wm.start)
+        ));
+        let pos = Position::Preset(wm.position.clone());
+        let (x0, y0) = position_exprs(Some(&pos), safe, "top_right");
+        push_overlay(lines, cur, "wm", &x0, &y0, wm.start, wm.end);
+    }
     // template images (emoji pops)
     for (i, im) in extras.extra_images.iter().enumerate() {
         let idx = *next_input;

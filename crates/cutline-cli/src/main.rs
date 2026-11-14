@@ -66,8 +66,13 @@ enum Cmd {
         /// Directory to create the project in.
         #[arg(default_value = ".")]
         dir: PathBuf,
-        #[arg(long, default_value = "shorts")]
-        target: String,
+        /// Default: shorts (long_1080p with --style business).
+        #[arg(long)]
+        target: Option<String>,
+        /// creator (Shorts-style defaults) or business (product demos: screencast profile,
+        /// sentence captions, business brand).
+        #[arg(long, default_value = "creator")]
+        style: String,
         /// Add every media file in this directory as an asset.
         #[arg(long)]
         assets: Option<PathBuf>,
@@ -310,7 +315,9 @@ fn dispatch(cli: Cli) -> CmdResult {
         }
         Cmd::Validate { project } => edit::validate(&project),
         Cmd::Schema => edit::schema(),
-        Cmd::Init { dir, target, assets, name } => edit::init(&dir, &target, assets.as_deref(), name.as_deref()),
+        Cmd::Init { dir, target, style, assets, name } => {
+            edit::init(&dir, target.as_deref(), &style, assets.as_deref(), name.as_deref())
+        }
         Cmd::Expand { project } => edit::expand(&project),
         Cmd::Cues { project } => edit::cues(&project),
         Cmd::Beats { project, asset } => edit::beats(&project, asset.as_deref()),
