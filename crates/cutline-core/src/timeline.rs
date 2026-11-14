@@ -9,6 +9,9 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+/// In the text of a `badge` or `text` layer anchored to a clip: that clip's speed.
+pub const SPEED_PLACEHOLDER: &str = "{speed}";
+
 /// What validation/resolution needs to know about an asset's media.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MediaFacts {
@@ -224,6 +227,29 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 facts.insert(id.clone(), f);
             }
             None => {}
+        }
+        for (gi, g) in a.gaps.iter().enumerate() {
+            let gbase = format!("{base}/gaps/{gi}");
+            if g.before.is_some() == g.after.is_some() {
+                d.push(
+                    Diagnostic::error(
+                        "E_FIELD_CONFLICT",
+                        gbase.clone(),
+                        "a gap needs exactly one of `before` and `after`",
+                    )
+                    .hint("e.g. {before: \"Need more room\", add: 0.7} or {after: \"cue:room\", add: 0.3}"),
+                );
+            }
+            if !(g.add > 0.0 && g.add <= 10.0) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    format!("{gbase}/add"),
+                    "add is the seconds of silence to insert: above 0, at most 10",
+                ));
+            }
+            if g.occurrence == Some(0) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{gbase}/occurrence"), "occurrence counts from 1"));
+            }
         }
         for (field, file) in [("transcript", &a.transcript), ("script", &a.script)] {
             if let Some(t) = file {
@@ -566,8 +592,37 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 // fitted clips take the exact frame count (no rounding drift against the cue)
                 let mut frames = fit_frames.unwrap_or_else(|| fps.secs_to_frames(tl_secs));
                 let clip_secs = fit_frames.map(|ff| fps.frames_to_secs(ff)).unwrap_or(tl_secs);
-                for (ei, e) in c.effects.iter().enumerate() {
-                    check_effect(e, clip_secs, &format!("{base}/effects/{ei}"), &mut d);
+                // source-relative effect times (`src_start`, `src_at`) become clip-relative,
+                // through this clip's in point and the speed it ended up with
+                let ramp_len = if c.speed_ramp.is_empty() { 0.0 } else { tl_secs };
+                let to_clip = |src: f64| -> f64 {
+                    if is_visual_still(kind) {
+                        src
+                    } else if c.reverse {
+                        (src_out - src) / speed
+                    } else if !c.speed_ramp.is_empty() {
+                        let x = src - src_in;
+                        if x < 0.0 {
+                            x
+                        } else if x > src_out - src_in {
+                            ramp_len + (x - (src_out - src_in))
+                        } else {
+                            ramp_duration(x, &c.speed_ramp)
+                        }
+                    } else {
+                        (src - src_in) / speed
+                    }
+                };
+                let effects: Vec<Effect> = c.effects.iter().map(|e| e.at_clip_time(to_clip)).collect();
+                // the outgoing transition hides the tail: the cut is at its middle
+                let tail = match p.main.get(mi + 1) {
+                    Some(MainItem::Transition(t)) if t.transition.kind != "cut" => t.transition.duration / 2.0,
+                    _ => 0.0,
+                };
+                for (ei, (e, written)) in effects.iter().zip(&c.effects).enumerate() {
+                    let ebase = format!("{base}/effects/{ei}");
+                    check_effect(e, written, clip_secs, &ebase, &mut d);
+                    check_effect_seen(e, written, (clip_secs - tail).max(0.0), &c.id, &ebase, &mut d);
                 }
                 frames += freeze_frames;
                 if let Some(cg) = &c.color {
@@ -621,6 +676,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     origin = Some(start);
                 }
                 let mut clip = (**c).clone();
+                clip.effects = effects;
                 if fit_frames.is_some() && !is_visual_still(kind) {
                     // keep the clip copy consistent with what `end_at` resolved to
                     clip.speed = Some(crate::time::round6(speed));
@@ -923,6 +979,69 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
         let z = l.visual().and_then(|v| v.z).unwrap_or(li as i32);
         let end = end.min(body_end);
         let (mut start, mut layer) = (start, l.clone());
+        let anchor_clip = l.placement().and_then(|a| a.anchor.as_ref()).and_then(|a| clips.iter().find(|c| &c.id == a));
+        // an annotation pinned to a clip that the clip's end cuts off before it is seen
+        if let Some(c) =
+            anchor_clip.filter(|_| l.is_annotation() || matches!(l, Layer::Mask { follow: Some(true), .. }))
+        {
+            let inside = fps.frames_to_secs(c.end() - start);
+            if end > c.end() && inside < EFFECT_SEEN_MIN {
+                let msg = if inside <= 0.0 {
+                    format!(
+                        "this {} starts {:.2}s after its anchor clip `{}` has ended ({:.2}s long)",
+                        l.kind(),
+                        -inside,
+                        c.id,
+                        fps.frames_to_secs(c.frames)
+                    )
+                } else {
+                    format!(
+                        "this {} starts {inside:.2}s before its anchor clip `{}` ends ({:.2}s long) and runs on over the next clip",
+                        l.kind(),
+                        c.id,
+                        fps.frames_to_secs(c.frames)
+                    )
+                };
+                d.push(
+                    Diagnostic::warning("W_LAYER_PAST_CLIP", format!("{base}/offset"), msg)
+                        .hint("lower `offset`, anchor it to the clip it belongs to, or lengthen the clip"),
+                );
+            }
+        }
+        // `{speed}`: the anchor clip's speed, so a "3×" badge stays right when the clip is retimed
+        let mut speed_texts: Vec<(&str, &mut String)> = vec![];
+        match &mut layer {
+            Layer::Badge { text, .. } => speed_texts.push(("text", text)),
+            Layer::Text { text, subtitle, .. } => {
+                speed_texts.extend(text.as_mut().map(|t| ("text", t)));
+                speed_texts.extend(subtitle.as_mut().map(|t| ("subtitle", t)));
+            }
+            _ => {}
+        }
+        for (field, text) in speed_texts {
+            if !text.contains(SPEED_PLACEHOLDER) {
+                continue;
+            }
+            match anchor_clip {
+                Some(c) => {
+                    let secs = fps.frames_to_secs(c.frames);
+                    let speed = if c.clip.speed_ramp.is_empty() || is_visual_still(c.kind) || secs <= 0.0 {
+                        c.speed
+                    } else {
+                        (c.src_out - c.src_in) / secs
+                    };
+                    *text = text.replace(SPEED_PLACEHOLDER, &speed_text(speed));
+                }
+                None => d.push(
+                    Diagnostic::error(
+                        "E_SPEED_NO_ANCHOR",
+                        format!("{base}/{field}"),
+                        "`{speed}` is the speed of the layer's anchor clip, and this layer has no `anchor`",
+                    )
+                    .hint("add `anchor: \"<clip id>\"` (with `offset`), or write the number"),
+                ),
+            }
+        }
         if let Layer::Audio { align: Some(AudioAlign::End), src_in, r#loop, .. } = &mut layer {
             if src_in.is_some() || *r#loop == Some(true) {
                 d.push(
@@ -991,6 +1110,21 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                         .hint(catalog::VOICE_CHAINS.join(", ")),
                     );
                 }
+            }
+        }
+        if let Some(sc) = &a.script_check {
+            if sc.similarity.is_some_and(|v| !(0.0..=1.0).contains(&v)) {
+                d.push(
+                    Diagnostic::error("E_BAD_VALUE", "/audio/script_check/similarity", "similarity must be within 0–1")
+                        .hint("0.8 is the default; 1 reports every difference in letters"),
+                );
+            }
+            if sc.min_span_words == Some(0) {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    "/audio/script_check/min_span_words",
+                    "min_span_words must be at least 1",
+                ));
             }
         }
         if let Some(m) = a.music_level {
@@ -1386,7 +1520,67 @@ fn check_sfx(s: &str, p: &Project, ctx: &Context, path: &str, d: &mut Vec<Diagno
     }
 }
 
-fn check_effect(e: &Effect, clip_secs: f64, base: &str, d: &mut Vec<Diagnostic>) {
+/// Seconds of a zoom's settled state that must be on screen before `W_EFFECT_UNSEEN`.
+pub const EFFECT_SEEN_MIN: f64 = 0.3;
+
+/// `W_EFFECT_UNSEEN`: a zoom that the clip's end cuts off before it can be seen. `e` is the
+/// effect in clip time, `written` the effect as the project has it, `visible` the seconds of
+/// the clip before the cut to the next one.
+fn check_effect_seen(e: &Effect, written: &Effect, visible: f64, clip_id: &str, base: &str, d: &mut Vec<Diagnostic>) {
+    let src = written.src_anchor().is_some();
+    let (field, what, start, settled) = match e {
+        Effect::PunchIn { generated_by: Some(_), .. } => return,
+        Effect::PunchIn { at, duration, .. } => (if src { "src_at" } else { "at" }, "punch_in", *at, at + duration),
+        Effect::ZoomTo { start, duration, .. } => {
+            (if src { "src_start" } else { "start" }, "zoom_to", *start, start + duration)
+        }
+        // a continuous zoom has no settled state: it should at least get going
+        Effect::Zoom { start, end, .. } => {
+            let end = end.unwrap_or(visible);
+            let seen = visible.min(end) - start;
+            if *start < visible && seen < EFFECT_SEEN_MIN.min((end - start) / 2.0) {
+                d.push(
+                    Diagnostic::warning(
+                        "W_EFFECT_UNSEEN",
+                        format!("{base}/{}", if src { "src_start" } else { "start" }),
+                        format!(
+                            "zoom runs {start:.2}–{end:.2}s on clip `{clip_id}`, but the clip is cut at {visible:.2}s: only {:.2}s of it is seen",
+                            seen.max(0.0)
+                        ),
+                    )
+                    .hint("start it earlier, or make the clip longer"),
+                );
+            }
+            return;
+        }
+        _ => return,
+    };
+    // a start at or past the clip's end is already `E_EFFECT_OUT_OF_RANGE`
+    if start < 0.0 || visible - settled >= EFFECT_SEEN_MIN {
+        return;
+    }
+    let seen = visible - settled;
+    let msg = if seen <= 0.0 {
+        format!(
+            "{what} starts at {start:.2}s and arrives at {settled:.2}s, but clip `{clip_id}` is cut at {visible:.2}s: the zoom is never seen complete"
+        )
+    } else {
+        format!(
+            "{what} arrives at {settled:.2}s and clip `{clip_id}` is cut at {visible:.2}s: the zoom is held for only {seen:.2}s"
+        )
+    };
+    d.push(Diagnostic::warning("W_EFFECT_UNSEEN", format!("{base}/{field}"), msg).hint(format!(
+        "start it at least {:.2}s earlier, shorten its `duration`, or make the clip longer{}",
+        EFFECT_SEEN_MIN - seen,
+        if src {
+            ""
+        } else {
+            "; on a retimed clip (`fit: \"speed\"`, `end_at`) `src_start` keeps a zoom on its moment of the footage"
+        }
+    )));
+}
+
+fn check_effect(e: &Effect, written: &Effect, clip_secs: f64, base: &str, d: &mut Vec<Diagnostic>) {
     let at = match e {
         Effect::PunchIn { at, scale, .. } => {
             if !(1.0..=3.0).contains(scale) {
@@ -1459,14 +1653,29 @@ fn check_effect(e: &Effect, clip_secs: f64, base: &str, d: &mut Vec<Diagnostic>)
     };
     if let Some(at) = at {
         if at < 0.0 || at >= clip_secs {
-            d.push(
-                Diagnostic::error(
+            let field = match written {
+                Effect::Zoom { src_start: Some(_), .. } | Effect::ZoomTo { src_start: Some(_), .. } => "src_start",
+                Effect::Zoom { .. } | Effect::ZoomTo { .. } => "at",
+                _ if written.src_anchor().is_some() => "src_at",
+                _ => "at",
+            };
+            let diag = match written.src_anchor().filter(|_| field.starts_with("src_")) {
+                Some(src) => Diagnostic::error(
                     "E_EFFECT_OUT_OF_RANGE",
-                    format!("{base}/at"),
+                    format!("{base}/{field}"),
+                    format!(
+                        "source time {src:.3}s is {at:.3}s from the clip's start, outside the clip (0–{clip_secs:.3}s)"
+                    ),
+                )
+                .hint("source times are seconds in the asset: use one between the clip's `in` and where it is cut"),
+                None => Diagnostic::error(
+                    "E_EFFECT_OUT_OF_RANGE",
+                    format!("{base}/{field}"),
                     format!("effect time {at:.3}s is outside the clip (0–{clip_secs:.3}s, clip-relative)"),
                 )
                 .hint("effect times are relative to the clip start on the timeline"),
-            );
+            };
+            d.push(diag);
         }
     }
 }

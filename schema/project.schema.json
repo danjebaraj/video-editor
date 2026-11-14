@@ -286,6 +286,13 @@
             }
           ]
         },
+        "gaps": {
+          "description": "Pauses to add to a narration: silence inserted at a word boundary found by phrase in\nthe asset's transcript, before cues are resolved. See `NarrationGap`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NarrationGap"
+          }
+        },
         "height": {
           "type": [
             "integer",
@@ -422,6 +429,17 @@
             "null"
           ],
           "format": "double"
+        },
+        "script_check": {
+          "description": "The check that compares what was heard in a narration with its `script`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScriptCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "voice_chain": {
           "description": "clean_voice | podcast_warm | raw — applied to voice (VO) assets.",
@@ -1132,7 +1150,8 @@
           "properties": {
             "at": {
               "type": "number",
-              "format": "double"
+              "format": "double",
+              "default": 0.0
             },
             "duration": {
               "type": "number",
@@ -1173,6 +1192,14 @@
               "format": "double",
               "default": 1.15
             },
+            "src_at": {
+              "description": "Instead of `at`: the moment in the asset (source seconds), mapped through the\nclip's `in` and speed, so the effect stays on it when the clip is retimed.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
             "type": {
               "type": "string",
               "const": "punch_in"
@@ -1180,8 +1207,7 @@
           },
           "additionalProperties": false,
           "required": [
-            "type",
-            "at"
+            "type"
           ]
         },
         {
@@ -1213,6 +1239,21 @@
               "type": "number",
               "format": "double",
               "default": 1.0
+            },
+            "src_end": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "src_start": {
+              "description": "Instead of `start` / `end`: source seconds of the asset (see `punch_in.src_at`).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
             },
             "start": {
               "type": "number",
@@ -1265,6 +1306,22 @@
             },
             "rect": {
               "$ref": "#/$defs/Rect"
+            },
+            "src_end": {
+              "description": "Instead of `end`: source seconds at which to start zooming back out.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "src_start": {
+              "description": "Instead of `start`: the moment in the asset (source seconds) the zoom starts,\nmapped through the clip's `in` and speed (`speed`, `fit: \"speed\"`, `end_at`), so\nthe zoom stays on that moment of the footage when the clip is retimed.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
             },
             "start": {
               "type": "number",
@@ -1335,7 +1392,8 @@
           "properties": {
             "at": {
               "type": "number",
-              "format": "double"
+              "format": "double",
+              "default": 0.0
             },
             "duration": {
               "type": "number",
@@ -1347,6 +1405,14 @@
               "format": "double",
               "default": 0.02
             },
+            "src_at": {
+              "description": "Instead of `at`: source seconds of the asset.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
             "type": {
               "type": "string",
               "const": "shake"
@@ -1354,8 +1420,7 @@
           },
           "additionalProperties": false,
           "required": [
-            "type",
-            "at"
+            "type"
           ]
         },
         {
@@ -1363,7 +1428,8 @@
           "properties": {
             "at": {
               "type": "number",
-              "format": "double"
+              "format": "double",
+              "default": 0.0
             },
             "color": {
               "type": [
@@ -1376,6 +1442,14 @@
               "format": "double",
               "default": 0.15
             },
+            "src_at": {
+              "description": "Instead of `at`: source seconds of the asset.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
             "type": {
               "type": "string",
               "const": "flash"
@@ -1383,8 +1457,7 @@
           },
           "additionalProperties": false,
           "required": [
-            "type",
-            "at"
+            "type"
           ]
         },
         {
@@ -1415,12 +1488,21 @@
             },
             "at": {
               "type": "number",
-              "format": "double"
+              "format": "double",
+              "default": 0.0
             },
             "duration": {
               "type": "number",
               "format": "double",
               "default": 0.15
+            },
+            "src_at": {
+              "description": "Instead of `at`: source seconds of the asset.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
             },
             "type": {
               "type": "string",
@@ -1429,8 +1511,7 @@
           },
           "additionalProperties": false,
           "required": [
-            "type",
-            "at"
+            "type"
           ]
         },
         {
@@ -1456,12 +1537,21 @@
           "properties": {
             "at": {
               "type": "number",
-              "format": "double"
+              "format": "double",
+              "default": 0.0
             },
             "duration": {
               "type": "number",
               "format": "double",
               "default": 0.15
+            },
+            "src_at": {
+              "description": "Instead of `at`: source seconds of the asset.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
             },
             "type": {
               "type": "string",
@@ -1470,8 +1560,7 @@
           },
           "additionalProperties": false,
           "required": [
-            "type",
-            "at"
+            "type"
           ]
         },
         {
@@ -4227,6 +4316,44 @@
         "fill"
       ]
     },
+    "NarrationGap": {
+      "description": "Silence added to a narration asset at a word boundary: `{before: \"Need more room\", add:\n0.7}` lengthens the pause in front of that phrase, `{after: \"…\", add: 0.3}` the pause\nbehind it. The phrase is looked up in the asset's transcript (its `script` wording when it\nhas one), so the gap stays on its words when the narration file is generated again.",
+      "type": "object",
+      "properties": {
+        "add": {
+          "description": "Seconds of silence to add (above 0, at most 10).",
+          "type": "number",
+          "format": "double"
+        },
+        "after": {
+          "description": "Add the silence behind this phrase's last word: a phrase, or `\"cue:name\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "before": {
+          "description": "Add the silence in front of this phrase's first word: a phrase, or `\"cue:name\"` for a\ncue's phrase.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "occurrence": {
+          "description": "Which occurrence of the phrase (default 1; a cue brings its own).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "add"
+      ]
+    },
     "OcrEngine": {
       "type": "string",
       "enum": [
@@ -4704,6 +4831,42 @@
             "string",
             "null"
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScriptCheck": {
+      "description": "Settings of the script check: every asset with a `script` has its recognised words\ncompared with the script, and each place where they differ is a `W_SCRIPT_MISMATCH`\nwarning (a mispronounced or skipped word in a generated voice-over).",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "`false` turns the check off.",
+          "type": "boolean",
+          "default": true
+        },
+        "ignore": {
+          "description": "Script words or phrases never reported (e.g. a name the recogniser cannot spell).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "min_span_words": {
+          "description": "Report only differences at least this many words long, counted on the longer side\n(default 1).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "similarity": {
+          "description": "How alike (0–1, by letters) the script and the heard words must be to pass (default\n0.8). Words that sound alike (\"panes\"/\"pains\", \"Claude\"/\"Cloud\") pass from 0.6. `1`\nreports every difference in letters.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
         }
       },
       "additionalProperties": false

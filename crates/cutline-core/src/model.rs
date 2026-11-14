@@ -323,6 +323,31 @@ pub struct Asset {
     /// Mark this asset as AI-generated (affects the publishing checklist).
     #[serde(default, skip_serializing_if = "is_false")]
     pub synthetic: bool,
+    /// Pauses to add to a narration: silence inserted at a word boundary found by phrase in
+    /// the asset's transcript, before cues are resolved. See `NarrationGap`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gaps: Vec<NarrationGap>,
+}
+
+/// Silence added to a narration asset at a word boundary: `{before: "Need more room", add:
+/// 0.7}` lengthens the pause in front of that phrase, `{after: "…", add: 0.3}` the pause
+/// behind it. The phrase is looked up in the asset's transcript (its `script` wording when it
+/// has one), so the gap stays on its words when the narration file is generated again.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NarrationGap {
+    /// Add the silence in front of this phrase's first word: a phrase, or `"cue:name"` for a
+    /// cue's phrase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    /// Add the silence behind this phrase's last word: a phrase, or `"cue:name"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+    /// Seconds of silence to add (above 0, at most 10).
+    pub add: f64,
+    /// Which occurrence of the phrase (default 1; a cue brings its own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<usize>,
 }
 
 /// An element of `main`: either a clip or `{transition: {...}}` between two clips.
@@ -758,7 +783,12 @@ pub enum Ease {
 pub enum Effect {
     /// Quick zoom in at `at` (clip-relative seconds), holding until `hold` ends, then optionally out.
     PunchIn {
+        #[serde(default)]
         at: f64,
+        /// Instead of `at`: the moment in the asset (source seconds), mapped through the
+        /// clip's `in` and speed, so the effect stays on it when the clip is retimed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_at: Option<f64>,
         #[serde(default = "punch_scale")]
         scale: f64,
         #[serde(default = "punch_dur")]
@@ -787,6 +817,11 @@ pub enum Effect {
         ease: Ease,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         focus: Option<Point>,
+        /// Instead of `start` / `end`: source seconds of the asset (see `punch_in.src_at`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_start: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_end: Option<f64>,
     },
     /// Zoom so `rect` (fractions of the frame) fills the view, starting at `start`
     /// (clip-relative) over `duration` (0 = at once); zoom back out from `end` if set.
@@ -804,6 +839,14 @@ pub enum Effect {
         /// Clip-relative time to start zooming back out (same duration and ease).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         end: Option<f64>,
+        /// Instead of `start`: the moment in the asset (source seconds) the zoom starts,
+        /// mapped through the clip's `in` and speed (`speed`, `fit: "speed"`, `end_at`), so
+        /// the zoom stays on that moment of the footage when the clip is retimed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_start: Option<f64>,
+        /// Instead of `end`: source seconds at which to start zooming back out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_end: Option<f64>,
     },
     /// Slow pan+zoom (stills and B-roll).
     KenBurns {
@@ -819,41 +862,116 @@ pub enum Effect {
         ease: Ease,
     },
     Shake {
+        #[serde(default)]
         at: f64,
         #[serde(default = "shake_dur")]
         duration: f64,
         #[serde(default = "shake_int")]
         intensity: f64,
+        /// Instead of `at`: source seconds of the asset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_at: Option<f64>,
     },
     Flash {
+        #[serde(default)]
         at: f64,
         #[serde(default = "flash_dur")]
         duration: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         color: Option<String>,
+        /// Instead of `at`: source seconds of the asset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_at: Option<f64>,
     },
     BlurIn {
         #[serde(default = "blur_dur")]
         duration: f64,
     },
     Glitch {
+        #[serde(default)]
         at: f64,
         #[serde(default = "flash_dur")]
         duration: f64,
         #[serde(default = "glitch_amt")]
         amount: f64,
+        /// Instead of `at`: source seconds of the asset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_at: Option<f64>,
     },
     Vignette {
         #[serde(default = "vig")]
         strength: f64,
     },
     MotionBlur {
+        #[serde(default)]
         at: f64,
         #[serde(default = "flash_dur")]
         duration: f64,
+        /// Instead of `at`: source seconds of the asset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_at: Option<f64>,
     },
     /// Hold the frame at `at` (clip-relative) for `duration` seconds (extends the clip).
     Freeze { at: f64, duration: f64 },
+}
+
+impl Effect {
+    /// The source time (seconds in the asset) this effect is pinned to, when it is written
+    /// with `src_at` / `src_start` instead of a clip-relative time.
+    pub fn src_anchor(&self) -> Option<f64> {
+        match self {
+            Effect::PunchIn { src_at, .. }
+            | Effect::Shake { src_at, .. }
+            | Effect::Flash { src_at, .. }
+            | Effect::Glitch { src_at, .. }
+            | Effect::MotionBlur { src_at, .. } => *src_at,
+            Effect::Zoom { src_start, src_end, .. } | Effect::ZoomTo { src_start, src_end, .. } => {
+                src_start.or(*src_end)
+            }
+            _ => None,
+        }
+    }
+
+    /// The effect with its source-relative times turned into clip-relative ones by `map`
+    /// (source seconds → seconds from the clip's start on the timeline). Effects without
+    /// source times come back unchanged.
+    pub fn at_clip_time(&self, map: impl Fn(f64) -> f64) -> Effect {
+        let r = |v: f64| crate::time::round6(map(v));
+        let mut e = self.clone();
+        match &mut e {
+            Effect::PunchIn { at, src_at, .. }
+            | Effect::Shake { at, src_at, .. }
+            | Effect::Flash { at, src_at, .. }
+            | Effect::Glitch { at, src_at, .. }
+            | Effect::MotionBlur { at, src_at, .. } => {
+                if let Some(s) = src_at.take() {
+                    *at = r(s);
+                }
+            }
+            Effect::Zoom { start, end, src_start, src_end, .. }
+            | Effect::ZoomTo { start, end, src_start, src_end, .. } => {
+                if let Some(s) = src_start.take() {
+                    *start = r(s);
+                }
+                if let Some(s) = src_end.take() {
+                    *end = Some(r(s));
+                }
+            }
+            _ => {}
+        }
+        e
+    }
+}
+
+/// A clip's speed for on-screen text (`{speed}` in a badge): one decimal, none when whole
+/// (3.11 → "3.1", 3.0 → "3", 2.72 → "2.7"); two decimals below 1 (0.25 stays "0.25").
+pub fn speed_text(speed: f64) -> String {
+    let s = if speed < 0.95 { format!("{speed:.2}") } else { format!("{speed:.1}") };
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
 }
 
 fn punch_scale() -> f64 {
@@ -1579,6 +1697,38 @@ pub struct AudioSettings {
     /// is measured and set at render time, replacing trial-and-error with `gain_db`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub music_level: Option<f64>,
+    /// The check that compares what was heard in a narration with its `script`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_check: Option<ScriptCheck>,
+}
+
+/// Settings of the script check: every asset with a `script` has its recognised words
+/// compared with the script, and each place where they differ is a `W_SCRIPT_MISMATCH`
+/// warning (a mispronounced or skipped word in a generated voice-over).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ScriptCheck {
+    /// `false` turns the check off.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// How alike (0–1, by letters) the script and the heard words must be to pass (default
+    /// 0.8). Words that sound alike ("panes"/"pains", "Claude"/"Cloud") pass from 0.6. `1`
+    /// reports every difference in letters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity: Option<f64>,
+    /// Report only differences at least this many words long, counted on the longer side
+    /// (default 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_span_words: Option<usize>,
+    /// Script words or phrases never reported (e.g. a name the recogniser cannot spell).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<String>,
+}
+
+impl Default for ScriptCheck {
+    fn default() -> Self {
+        Self { enabled: true, similarity: None, min_span_words: None, ignore: vec![] }
+    }
 }
 
 /// How an audio layer's asset lines up with the layer span.

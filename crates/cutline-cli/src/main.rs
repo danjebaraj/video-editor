@@ -129,7 +129,9 @@ enum Cmd {
     /// Still PNGs (`--at`) or a 540p proxy clip (`--range a-b`).
     Preview {
         project: PathBuf,
-        #[arg(long, num_args = 1..)]
+        /// Times of the stills: one or several, as `--at 9.8 43`, `--at 9.8,43,47.15` or a
+        /// repeated `--at`. All are taken from one draft render.
+        #[arg(long, num_args = 1.., value_delimiter = ',')]
         at: Vec<String>,
         #[arg(long)]
         range: Option<String>,
@@ -146,8 +148,11 @@ enum Cmd {
     /// Review pack: contact sheet, cuts, captions, reframe, audio.png, timeline, QA, summary.
     Review {
         project: PathBuf,
-        #[arg(long, default_value = "review")]
-        out: PathBuf,
+        /// Folder for the review pack (default: `review/<project name>/` next to the project,
+        /// so several projects in one folder keep their own; the name includes the variant
+        /// and locale).
+        #[arg(long)]
+        out: Option<PathBuf>,
         /// Text recognition for the demo checks: auto, vision (macOS), tesseract or off.
         /// Default: CUTLINE_OCR, else the project's `qa.ocr`, else auto.
         #[arg(long)]
@@ -165,8 +170,14 @@ enum Cmd {
         #[arg(long, short)]
         out: Option<PathBuf>,
     },
-    /// YouTube chapter list (from markers, clip `chapter` fields or clip ids).
-    Chapters { project: PathBuf },
+    /// YouTube chapter list (from markers, clip `chapter` fields or clip ids). A chapter
+    /// shorter than YouTube's 10 s minimum is merged into the one after it.
+    Chapters {
+        project: PathBuf,
+        /// Keep chapters shorter than 10 s (they are then only warned about).
+        #[arg(long)]
+        no_merge_short: bool,
+    },
     /// Cache statistics / cleanup.
     Cache {
         #[command(subcommand)]
@@ -242,6 +253,13 @@ enum DepsCmd {
     Rollback,
     /// Installed versions vs the lockfile.
     Status,
+    /// Print the path of a managed tool, e.g. `"$(cutline deps path ffmpeg)" -i in.wav out.mp3`.
+    Path {
+        /// ffmpeg | ffprobe | whisper | whisper-model | face-model | chrome | tools | home
+        what: String,
+        /// Model name for whisper-model (default: the one cutline would use).
+        name: Option<String>,
+    },
 }
 
 fn init_tracing(verbose: bool) {
@@ -323,6 +341,7 @@ fn dispatch(cli: Cli) -> CmdResult {
             DepsCmd::Update { check } => deps_cmd::update(check),
             DepsCmd::Rollback => deps_cmd::rollback(),
             DepsCmd::Status => deps_cmd::status(),
+            DepsCmd::Path { what, name } => deps_cmd::path(&what, name.as_deref()),
         },
         Cmd::Transcribe { file, model, fast, lang, import_scribe, out } => {
             transcribe(&file, model, fast, lang, import_scribe, out)
@@ -347,11 +366,11 @@ fn dispatch(cli: Cli) -> CmdResult {
             edit::preview(&project, &at, range.as_deref(), safe_zones, out)
         }
         Cmd::Templates { cmd: TemplatesCmd::List } => templates_list(),
-        Cmd::Review { project, out, ocr } => edit::review(&project, &out, ocr.as_deref()),
+        Cmd::Review { project, out, ocr } => edit::review(&project, out.as_deref(), ocr.as_deref()),
         Cmd::Thumbnail { project, at, text, template, out } => {
             edit::thumbnail(&project, &at, text.as_deref(), &template, out)
         }
-        Cmd::Chapters { project } => edit::chapters(&project),
+        Cmd::Chapters { project, no_merge_short } => edit::chapters(&project, !no_merge_short),
         Cmd::Cache { cmd } => match cmd {
             CacheCmd::Stats { project } => cache_cmd(None, project, false),
             CacheCmd::Clean { older_than, project } => cache_cmd(older_than, project, true),
@@ -411,8 +430,8 @@ fn templates_list() -> CmdResult {
     use cutline_core::catalog as c;
     let tpl = cutline_text::templates::list();
     let effects = [
-        ("punch_in", "at, scale=1.15, duration=0.25, ease, hold?, focus?{x,y}"),
-        ("zoom", "from=1, to, start=0, end?, ease, focus?"),
+        ("punch_in", "at | src_at, scale=1.15, duration=0.25, ease, hold?, focus?{x,y}"),
+        ("zoom", "from=1, to, start=0 | src_start, end? | src_end?, ease, focus?"),
         ("ken_burns", "from_scale=1, to_scale=1.15, from?{x,y}, to?{x,y}, ease"),
         ("shake", "at, duration=0.3, intensity=0.02"),
         ("flash", "at, duration=0.15, color?"),

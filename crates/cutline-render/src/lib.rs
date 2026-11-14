@@ -14,6 +14,7 @@ pub mod effects;
 pub mod escape;
 pub mod extras;
 pub mod frame;
+pub mod gaps;
 pub mod job;
 pub mod overlay;
 pub mod pipeline;
@@ -283,6 +284,8 @@ pub struct PlanExtras {
     pub watermark: Option<WatermarkSpec>,
     /// Reframe crop paths per clip id (for the review pack).
     pub crop_paths: std::collections::BTreeMap<String, cutline_reframe::CropPath>,
+    /// Places where a narration differs from its script (also in `warnings`).
+    pub script_mismatches: Vec<auto::ScriptMismatch>,
 }
 
 /// The brand logo as a watermark (output seconds; width as a fraction of the frame width).

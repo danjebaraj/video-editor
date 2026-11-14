@@ -69,7 +69,8 @@ Errors: `E_BEAT_REF`.
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |
-| `script` | — | the text that was spoken (a `.txt`, e.g. the TTS script). Captions, ducking and cues use the script's exact words, timed from the transcript; `[audio tags]` are ignored. `W_SCRIPT_MISMATCH` when under 70 % of the script is heard |
+| `script` | — | the text that was spoken (a `.txt`, e.g. the TTS script). Captions, ducking and cues use the script's exact words, timed from the transcript; `[audio tags]` are ignored. What was heard is compared with it: see [Script check](#script-check) (`W_SCRIPT_MISMATCH`) |
+| `gaps` | `[]` | pauses to add to a narration: `[{before: "Need more room", add: 0.7}, {after: "cue:room", add: 0.3}]`. See [Narration gaps](#narration-gaps) |
 | `duration` | 3 s | stills / HTML / Lottie / SVG |
 | `alpha` | — | assert alpha exists (`E_ALPHA_NOT_PRESENT` if not) |
 | `fps` | 30 | image sequences / HTML |
@@ -78,6 +79,71 @@ Errors: `E_BEAT_REF`.
 | `synthetic` | false | marks AI-generated media in `credits.txt` |
 
 WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
+
+### Narration gaps
+
+`gaps` on a voice asset inserts silence into the narration, so a pause can be lengthened in the
+project instead of cutting the file by hand:
+
+```json5
+assets: {
+  vo: {path: "vo/vo.wav", role: "voice", script: "vo/vo.txt",
+       gaps: [{before: "Need more room", add: 0.7},      // 0.7 s more in front of "Need"
+              {after: "cue:organized", add: 0.3}]},      // 0.3 s more behind the cue's phrase
+},
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `before` / `after` | one is required | a phrase of the narration (matched like a cue phrase: case and punctuation ignored, the script's wording when the asset has a `script`), or `"cue:name"` for a cue's phrase. `before` puts the silence in front of the phrase's first word, `after` behind its last word |
+| `add` | required | seconds of silence to insert (above 0, at most 10) |
+| `occurrence` | 1 (a cue brings its own) | which occurrence of the phrase |
+
+- The narration is cut **between two words, in the middle of the pause that is already there**
+  (word times from the transcript), and the silence is inserted at the cut. A gap before the
+  first word or after the last adds silence at the start or end of the file.
+- This happens when the project loads, **before cues are resolved**: the asset becomes the
+  padded narration (a WAV in `.cutline/cache/gaps/`, with a transcript shifted to match), so
+  cues, `end_at`, captions, ducking and the audio all follow it. Times in `cutline cues` and in
+  the script check are those of the padded narration; `cutline cues` lists each gap.
+- Gaps are found by phrase, so they stay on their words when the narration file is generated
+  again (the cache is keyed by the file and the cuts). A variant or locale that replaces the
+  asset's `path` can replace its `gaps` too.
+- Errors: `E_GAP_NOT_FOUND` (the phrase is not in the narration; the hint lists the closest
+  phrases), `E_GAP_TRANSCRIPT` (no transcript: set `transcript`, run `cutline transcribe` or
+  install a whisper model), `E_GAP_FAILED` (ffmpeg could not write the file),
+  `E_FIELD_CONFLICT` (both or neither of `before` / `after`), `E_BAD_VALUE` (`add`),
+  `E_UNKNOWN_CUE`, `E_CUE_ASSET` (the cue belongs to another asset). `W_GAP_FUZZY`: the phrase
+  matched close words, not the same ones.
+
+### Script check
+
+Captions show the script's words, so a word the voice got wrong does not show up anywhere
+on screen. Every asset with a `script` therefore has what the recogniser heard (the asset's
+transcript, without the script) compared with the script, word by word:
+
+- Both sides are compared as spoken: case, punctuation, apostrophes and `[audio tags]` are
+  ignored; hyphenated, joined and split spellings are the same words ("to-dos" = "todos" =
+  "to do's", "JustNotes" = "Just Notes"); numbers are compared as words ("24-hour" =
+  "twenty-four hour", "1.8" = "one point eight", "50%" = "fifty percent").
+- The brand `dictionary` and `captions.corrections` are applied to the heard words first, so
+  a spelling the recogniser always gets wrong (`"do tab": "Due tab"`) counts as a match.
+- A difference passes when the letters are at least `similarity` alike (0.8: "todo"/"todos"),
+  or when the words sound alike and are at least 0.6 alike ("panes"/"pains",
+  "Claude"/"Cloud": a recogniser cannot tell these apart). Anything else is a
+  `W_SCRIPT_MISMATCH` warning with the time on the edit, the time in the asset, the script's
+  words and the words heard (after the dictionary), each with a few words around them:
+  ``the script says "Todos" but "Dolos" was heard at 00:07.200 (`vo` 5.80–6.26s): script "in a
+  keystroke. [Todos] with due dates.", heard "in a keystroke, [Dolos] with due dates,"``.
+  Words missing from the audio and extra words are reported the same way.
+- When under 70 % of the script is heard at all, there is one `W_SCRIPT_MISMATCH` for the
+  file instead (the wrong script, or another take).
+
+The warnings appear in `cutline validate`, in `cutline review` (its own section of
+`summary.md`, and `script_check.json`) and after `cutline render`; they never fail a render.
+The check uses transcripts that exist already (the asset's `transcript`, or the cache that
+`cutline transcribe`, cues and captions fill); it does not run the recogniser by itself. Tune
+it under [`audio.script_check`](#audio).
 
 ### Browser recordings (`.demo.json5` assets)
 
@@ -268,9 +334,9 @@ or `.cube` path) + `intensity` (0–1), `exposure` (stops), `contrast`, `saturat
 
 | Type | Fields (defaults) |
 |---|---|
-| `punch_in` | `at`, `scale` 1.15, `duration` 0.25, `ease` out_cubic, `hold` (release after), `focus` {x,y} |
-| `zoom` | `from` 1, `to`, `start` 0, `end` clip end, `ease`, `focus` |
-| `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0, `duration` 0.6 (`0`: the zoom is there at once, on the frame at `start`; the zoom back out at `end` is then instant too), `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`). The view never leaves the picture: near an edge it stops at the edge (on a framed clip, at the edge of the recording) |
+| `punch_in` | `at` (or `src_at`), `scale` 1.15, `duration` 0.25, `ease` out_cubic, `hold` (release after), `focus` {x,y} |
+| `zoom` | `from` 1, `to`, `start` 0 (or `src_start`), `end` clip end (or `src_end`), `ease`, `focus` |
+| `zoom_to` | `rect` `{x, y, w, h}` (fractions of the frame), `start` 0 (or `src_start`), `duration` 0.6 (`0`: the zoom is there at once, on the frame at `start`; the zoom back out at `end` is then instant too), `ease` in_out_cubic, `padding` 0.03, `end` (zoom back out from here; or `src_end`). Scale and focus are computed so the rect fills the view (capped at 3×, `W_ZOOM_CAPPED`). The view never leaves the picture: near an edge it stops at the edge (on a framed clip, at the edge of the recording) |
 | `ken_burns` | `from_scale` 1, `to_scale` 1.15, `from`/`to` {x,y}, `ease` |
 
 A clip can zoom to several places in turn: each `zoom_to` (and each `punch_in` / `zoom` with a
@@ -282,13 +348,38 @@ Zooms (`punch_in`, `zoom`, `zoom_to`, `ken_burns`, `shake`) and reframe moves (`
 `manual` keys) move in fractions of a pixel, so slow moves glide. When the source has at least 1.4× the target's pixels and the zoom reaches 1.15×,
 the zoom is taken from the source's detail (2× supersampling) rather than from the downscaled frame.
 
-| `shake` | `at`, `duration` 0.3, `intensity` 0.02 |
-| `flash` | `at`, `duration` 0.15, `color` (white) |
+| `shake` | `at` (or `src_at`), `duration` 0.3, `intensity` 0.02 |
+| `flash` | `at` (or `src_at`), `duration` 0.15, `color` (white) |
 | `blur_in` | `duration` 0.4 |
-| `glitch` | `at`, `duration` 0.15, `amount` 12 |
+| `glitch` | `at` (or `src_at`), `duration` 0.15, `amount` 12 |
 | `vignette` | `strength` 0.4 |
-| `motion_blur` | `at`, `duration` 0.15 |
+| `motion_blur` | `at` (or `src_at`), `duration` 0.15 |
 | `freeze` | `at`, `duration` (extends the clip; audio holds silent) |
+
+**Source-relative effect times.** `at`, `start` and `end` count from the clip's start on the
+timeline, so they point at another moment of the footage as soon as the clip's `in` or speed
+changes (`speed`, `fit: "speed"`, a moved `end_at` cue). Write `src_at`, `src_start` and
+`src_end` instead to name the moment **in the asset** (source seconds, like `in` / `out`):
+
+```json5
+{id: "ask", clip: "s8", in: 2.3, out: 13.6, fit: "speed", end_at: "cue:edits",
+ effects: [{type: "zoom_to", rect: {x: 0.6, y: 0.04, w: 0.38, h: 0.42}, src_start: 11.2, duration: 0.25}]}
+```
+
+The time is mapped through the clip's `in` and the speed it ends up with (also `speed_ramp`
+and `reverse`), so the zoom stays on second 11.2 of the recording however the clip is fitted.
+`duration` stays in timeline seconds. A source time cannot be combined with its clip-relative
+twin (`E_FIELD_CONFLICT`); one outside the part of the asset the clip plays is
+`E_EFFECT_OUT_OF_RANGE`. `cutline expand` keeps the source times; when `auto` splits the clip
+(jump cuts, `fast_forward_idle`) such an effect goes to the piece that holds its moment.
+
+**Zooms that are never seen.** `W_EFFECT_UNSEEN` when the clip is cut before a zoom can be
+seen: a `zoom_to` or `punch_in` whose zoom has been complete for less than 0.3 s when the clip
+ends (`start` + `duration` is the moment it is complete; a 3.2 s clip with a zoom starting at
+3.15 never shows it), or a `zoom` of which less than 0.3 s (or less than half, for a shorter
+one) lies before the cut. The clip's end is the cut to the next clip: the middle of the
+outgoing transition. Fix the time, or use `src_start` on a retimed clip. (An effect that
+*starts* at or after the clip's end is the error `E_EFFECT_OUT_OF_RANGE`.)
 
 Easings: `linear`, `in_quad`, `out_quad`, `in_out_quad`, `in_cubic`, `out_cubic`, `in_out_cubic`,
 `in_expo`, `out_expo`, `in_out_expo`, `back`, `spring`.
@@ -328,7 +419,7 @@ watermark, and under text and captions. Coordinates are fractions of the frame (
 | `spotlight` | `rect`, `dim` 0.6 (how dark the rest gets), `feather` 12 px, `radius` 8 px. Spotlights on screen together share one dim layer |
 | `arrow` | `from` `{x, y}`, `to` `{x, y}`, `label` (text behind the tail), `color`, `width` 6 px, `size` 34 px (label) |
 | `keys` | `keys` e.g. `["cmd", "K"]` (cmd, shift, alt, ctrl, enter, tab, esc, space, arrows become keycap symbols), `position` (`bottom`), `size` 64 px. Entries are keycap text as written: `"@"` and `"@t:3,3"` show exactly that and are never looked up in `strings` (a leading `"@@"` is still read as one `@`) |
-| `badge` | `text` (a few characters, e.g. `"4×"`), `position` (`top_right`), `size` 30 px: a small dark pill |
+| `badge` | `text` (a few characters, e.g. `"4×"`), `position` (`top_right`), `size` 30 px: a small dark pill. `{speed}` in the text is the anchor clip's speed: `text: "{speed}×"` |
 | `cursor` | `path` `[{t, x, y, click}]` (`t` = seconds after the layer starts; the pointer eases between keys and ripples on `click: true`), `size` 1, `click_ripple` true, `color` (ripple). Ends 0.6 s after the last key by default |
 
 Pixel sizes are for a 1080p-class output and scale with drafts. `highlight`, `spotlight`,
@@ -338,6 +429,17 @@ picture zooms. On a framed clip, and on a clip with `reframe: {mode: "rect"}`, t
 fractions of the clip's own picture (see [Reframe](#reframe)). With `anchor` the clip is the anchor clip; otherwise the clip on screen. Set
 `follow: false` for screen coordinates. A rect or point outside the frame is
 `E_RECT_OUT_OF_FRAME`. `cutline review` writes `annotations/*.jpg`, a frame of each.
+
+**`{speed}`.** In the `text` of a `badge`, and the `text` / `subtitle` of a `text` layer, that
+is anchored to a clip, `{speed}` is replaced by that clip's speed as it was resolved (`speed`,
+`fit: "speed"`, the average of a `speed_ramp`): one decimal, none for a whole number (3.11 →
+`3.1`, 3.0 → `3`, 2.72 → `2.7`; two decimals below 1). `{type: "badge", text: "{speed}×",
+anchor: "ask", duration: 3}` stays right when a cue moves and the clip is fitted to another
+speed. Without an `anchor` there is no clip to ask: `E_SPEED_NO_ANCHOR`.
+
+**Annotations past their clip.** `W_LAYER_PAST_CLIP` when an annotation (or a `follow` mask)
+anchored to a clip starts after that clip has ended, or less than 0.3 s before its end while
+running on over the next clip: its `offset` was written for a longer clip.
 
 Text templates: `hook_title`, `lower_third`, `callout`, `step_counter`, `big_number`, `quote`,
 `cta_subscribe`, `end_card`, `emoji_pop`, the [business cards](#business-cards) below, and HTML variants `hook_title_html`,
@@ -403,6 +505,15 @@ amount_db: -12, attack: 0.12, release: 0.45, mode: "envelope"|"sidechain"}`, `mi
 `music_level` (LU, 3–40): the music stem's gain is measured and set so the ducked music sits
 this far below the voice (`render_report.json` → `loudness.music_gain_db`); 18 is a typical
 narration bed.
+
+`script_check` (see [Script check](#script-check)):
+
+| Field | Default | Notes |
+|---|---|---|
+| `enabled` | `true` | `false`: no per-word comparison (the whole-file check for a wrong script stays) |
+| `similarity` | 0.8 | how alike in letters (0–1) the script and the heard words must be to pass. Words that sound alike pass from 0.6. `1` reports every difference in letters, homophones included ("Claude"/"Cloud") |
+| `min_span_words` | 1 | report only differences at least this many words long (on the longer side). `2` hides single-word slips, real ones included |
+| `ignore` | `[]` | script words or phrases never reported, e.g. a name the recogniser cannot spell. For a consistent mishearing prefer the brand `dictionary` (`"do tab": "Due tab"`), which also fixes captions made without a script |
 
 ## Auto directives
 
@@ -611,3 +722,9 @@ brand (Inter, blue accent, `clean_sentence` captions).
 - `end_at` with both `in` and `out` used to change the clip's speed to fit. It now trims (or
   holds the last frame); add `fit: "speed"` for the old behaviour.
 - Transitions ease by default; add `ease: "linear"` for the old constant rate.
+- `cutline review` writes to `review/<project name>/` (it used to write to `review/`, where two
+  projects in one folder overwrote each other); `--out` still names the folder itself.
+- `cutline chapters` merges a chapter shorter than 10 s into the next one; `--no-merge-short`
+  keeps the old list.
+- New warnings on existing projects: `W_EFFECT_UNSEEN`, `W_LAYER_PAST_CLIP`, and
+  `W_SCRIPT_MISMATCH` for single misheard words (it used to cover only a wrong script file).

@@ -234,7 +234,8 @@ pub fn expand(path: &Path) -> CmdResult {
     }
     let tl = tl.ok_or_else(|| CliError::internal(anyhow::anyhow!("no timeline")))?;
     let edl = edl_table(&tl);
-    let pj = serde_json::to_value(&expanded).map_err(CliError::internal)?;
+    let mut pj = serde_json::to_value(&expanded).map_err(CliError::internal)?;
+    cutline_core::parse::strip_shadowed_effect_times(&mut pj);
     let text = serde_json::to_string_pretty(&pj).unwrap_or_default();
     let note_lines: String = notes
         .iter()
@@ -423,6 +424,10 @@ pub fn preview(path: &Path, at: &[String], range: Option<&str>, safe_zones: bool
         return Ok(diag_output(&l.diags));
     }
     let tc = cutline_deps::toolchain().tool_err()?;
+    // a bad time is a usage error before anything is rendered
+    for t in at {
+        cutline_core::time::parse_time(t).map_err(|e| CliError::usage(anyhow::anyhow!("--at `{t}`: {e}")))?;
+    }
     let (name, e) = pipeline::exports(&l.project).into_iter().next().unwrap();
     // stills only: HTML that is on screen at none of the requested times need not be captured
     // frame by frame
@@ -447,6 +452,9 @@ pub fn preview(path: &Path, at: &[String], range: Option<&str>, safe_zones: bool
         let tv = cutline_core::time::parse_time(t).map_err(|e| CliError::usage(anyhow::anyhow!(e)))?;
         let secs = tv.seconds(fps, pr.timeline.duration()).min(pr.timeline.duration() - fps.frames_to_secs(1)).max(0.0);
         let png = out_dir.join(format!("at_{}.png", format_tc(secs).replace(':', "-")));
+        if files.contains(&png) {
+            continue; // the same time given twice
+        }
         let mut vf = String::new();
         if safe_zones {
             vf = safe_zone_filter(&pr.timeline.target, &plan.geometry);
@@ -558,7 +566,29 @@ pub fn qa(video: &Path, target: &str, project: Option<&Path>) -> CmdResult {
     Ok(Output::ok(json!(r), cutline_qa::qa::summary(&r)).with_code(code))
 }
 
-pub fn review(path: &Path, out: &Path, ocr: Option<&str>) -> CmdResult {
+/// A project name as a folder name.
+fn folder_name(name: &str) -> String {
+    let s: String = name
+        .trim()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' ') { c } else { '_' })
+        .collect();
+    let s = s.trim_matches(|c| c == '.' || c == ' ').to_string();
+    if s.is_empty() {
+        "project".into()
+    } else {
+        s
+    }
+}
+
+/// Where `review` writes when `--out` is not given: `review/<project name>/` next to the
+/// project (the `name` field, else the file stem; with the variant and locale in it), so
+/// projects sharing a folder do not overwrite each other's review.
+pub fn review_dir(l: &Loaded) -> PathBuf {
+    l.dir.join("review").join(folder_name(&cutline_render::output_name(&l.project, &l.path)))
+}
+
+pub fn review(path: &Path, out: Option<&Path>, ocr: Option<&str>) -> CmdResult {
     if let Some(o) = ocr {
         cutline_qa::ocr::setting(Some(o), None).map_err(CliError::usage)?;
     }
@@ -566,7 +596,11 @@ pub fn review(path: &Path, out: &Path, ocr: Option<&str>) -> CmdResult {
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
     }
-    let out = if out.is_absolute() { out.to_path_buf() } else { l.dir.join(out) };
+    let out = match out {
+        Some(o) if o.is_absolute() => o.to_path_buf(),
+        Some(o) => l.dir.join(o),
+        None => review_dir(&l),
+    };
     let r = cutline_qa::review::review_with(&l, &out, ocr).map_err(classify)?;
     let mut h = format!(
         "review pack: {}\nsource: {}\nQA: {}\n",
@@ -577,6 +611,12 @@ pub fn review(path: &Path, out: &Path, ocr: Option<&str>) -> CmdResult {
     h.push_str("images:\n");
     for i in &r.images {
         h.push_str(&format!("  {}\n", i.display()));
+    }
+    if !r.script_mismatches.is_empty() {
+        h.push_str("script check (heard ≠ script):\n");
+        for m in &r.script_mismatches {
+            h.push_str(&format!("  {}\n", cutline_qa::review::mismatch_line(m)));
+        }
     }
     h.push_str("suggestions:\n");
     for s in &r.suggestions {
@@ -603,11 +643,24 @@ pub fn cues(path: &Path) -> CmdResult {
             c.source_end
         ));
     }
-    for x in l.diags.iter().filter(|x| x.code.contains("CUE")) {
+    for g in &l.gaps {
+        h.push(format!(
+            "gap +{:.2}s {} \"{}\"  ({} {:.2}–{:.2}s, silence added{})",
+            g.add,
+            g.side,
+            g.matched,
+            g.asset,
+            g.at,
+            g.at + g.add,
+            g.source_at.map(|t| format!(" at {t:.2}s of the original")).unwrap_or_else(|| " at its end".into())
+        ));
+    }
+    let noted = |x: &&Diagnostic| x.code.contains("CUE") || x.code.contains("GAP");
+    for x in l.diags.iter().filter(noted) {
         h.push(format!("⚠ {} {}: {}", x.code, x.path, x.message));
     }
     Ok(Output::ok(
-        json!({"cues": l.cues, "warnings": l.diags.iter().filter(|x| x.code.contains("CUE")).collect::<Vec<_>>()}),
+        json!({"cues": l.cues, "gaps": l.gaps, "warnings": l.diags.iter().filter(noted).collect::<Vec<_>>()}),
         h.join("\n"),
     ))
 }
@@ -691,20 +744,23 @@ pub fn record(path: &Path, asset: Option<&str>) -> CmdResult {
     Ok(Output::ok(json!({"recorded": j}), h.join("\n")))
 }
 
-pub fn chapters(path: &Path) -> CmdResult {
+pub fn chapters(path: &Path, merge_short: bool) -> CmdResult {
     let l = load_or_return!(path);
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
     }
     let (name, e) = pipeline::exports(&l.project).remove(0);
     let pr = pipeline::prepare(&l, name, &e, false).map_err(classify)?;
-    let (ch, warn) = cutline_qa::publish::chapters(&pr);
+    let (ch, warn, merged) = cutline_qa::publish::chapters_with(&pr, merge_short);
     let text = cutline_qa::publish::chapters_text(&ch);
     let mut h = text.clone();
+    for m in &merged {
+        h.push_str(&format!("\n· {m}"));
+    }
     for w in &warn {
         h.push_str(&format!("\n⚠ {}", w.message));
     }
-    Ok(Output::ok(json!({"chapters": ch, "text": text, "warnings": warn}), h))
+    Ok(Output::ok(json!({"chapters": ch, "text": text, "warnings": warn, "merged": merged}), h))
 }
 
 pub fn thumbnail(path: &Path, at: &str, text: Option<&str>, template: &str, out: Option<PathBuf>) -> CmdResult {

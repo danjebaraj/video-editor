@@ -35,9 +35,50 @@ fn is_section(l: &cutline_core::model::Layer) -> bool {
     matches!(l, cutline_core::model::Layer::Text { template, .. } if template == "section_card")
 }
 
+/// YouTube's shortest chapter, in seconds.
+pub const MIN_CHAPTER: f64 = 10.0;
+
+/// Merge chapters shorter than `min` seconds into the chapter after them: the merged chapter
+/// starts where the short one did and keeps the following chapter's title (a short lead-in
+/// such as an "Intro" title card belongs to what it introduces). A short last chapter joins
+/// the one before it. Returns a note per merge.
+pub fn merge_short(v: &mut Vec<Chapter>, dur: f64, min: f64) -> Vec<String> {
+    let mut notes = vec![];
+    while v.len() > 1 {
+        let len = |i: usize| v.get(i + 1).map(|n| n.at).unwrap_or(dur) - v[i].at;
+        let Some(i) = (0..v.len()).find(|&i| len(i) < min - 1e-6) else { break };
+        let (l, short) = (len(i), v[i].clone());
+        if i + 1 < v.len() {
+            v.remove(i);
+            v[i].at = short.at;
+            notes.push(format!(
+                "chapter \"{}\" ({l:.1}s) is shorter than YouTube's {min:.0} s minimum: merged into \"{}\", which now starts at {}",
+                short.title,
+                v[i].title,
+                yt_tc(short.at)
+            ));
+        } else {
+            v.remove(i);
+            notes.push(format!(
+                "chapter \"{}\" ({l:.1}s) is shorter than YouTube's {min:.0} s minimum: merged into \"{}\" before it",
+                short.title,
+                v[i - 1].title
+            ));
+        }
+    }
+    notes
+}
+
 /// Chapters from markers, else `section_card` layers, else clips with `chapter`, else every
 /// clip (merged to ≥ 10 s).
 pub fn chapters(pr: &Prepared) -> (Vec<Chapter>, Vec<Diagnostic>) {
+    let (v, d, _) = chapters_with(pr, false);
+    (v, d)
+}
+
+/// `chapters`; with `merge` chapters under 10 s are merged into the next one (see
+/// `merge_short`), and the notes say which.
+pub fn chapters_with(pr: &Prepared, merge: bool) -> (Vec<Chapter>, Vec<Diagnostic>, Vec<String>) {
     let tl = &pr.timeline;
     let fps: Fps = tl.fps;
     let mut v: Vec<Chapter> = if !pr.project.markers.is_empty() {
@@ -92,6 +133,8 @@ pub fn chapters(pr: &Prepared) -> (Vec<Chapter>, Vec<Diagnostic>) {
     } else if let Some(f) = v.first_mut() {
         f.at = 0.0;
     }
+    let dur = tl.duration();
+    let merged = if merge { merge_short(&mut v, dur, MIN_CHAPTER) } else { vec![] };
     if v.len() < 3 {
         d.push(Diagnostic::warning(
             "W_CHAPTERS_TOO_FEW",
@@ -99,10 +142,9 @@ pub fn chapters(pr: &Prepared) -> (Vec<Chapter>, Vec<Diagnostic>) {
             format!("YouTube needs at least 3 chapters; found {}", v.len()),
         ));
     }
-    let dur = tl.duration();
     for (i, c) in v.iter().enumerate() {
         let end = v.get(i + 1).map(|n| n.at).unwrap_or(dur);
-        if end - c.at < 10.0 {
+        if end - c.at < MIN_CHAPTER {
             d.push(Diagnostic::warning(
                 "W_CHAPTER_TOO_SHORT",
                 "/markers",
@@ -110,7 +152,7 @@ pub fn chapters(pr: &Prepared) -> (Vec<Chapter>, Vec<Diagnostic>) {
             ));
         }
     }
-    (v, d)
+    (v, d, merged)
 }
 
 pub fn chapters_text(v: &[Chapter]) -> String {
@@ -238,5 +280,45 @@ mod tests {
         );
         assert_eq!(yt_tc(65.4), "01:05");
         assert_eq!(yt_tc(3725.0), "1:02:05");
+    }
+}
+
+#[cfg(test)]
+mod chapter_tests {
+    use super::*;
+
+    fn ch(spec: &[(f64, &str)]) -> Vec<Chapter> {
+        spec.iter().map(|(at, t)| Chapter { at: *at, title: t.to_string() }).collect()
+    }
+
+    #[test]
+    fn short_first_chapter_joins_the_next() {
+        // the real case: a 7.9 s intro, then "Write" at 00:08
+        let mut v = ch(&[(0.0, "Intro"), (7.9, "Write"), (31.0, "Plan"), (52.0, "Organize")]);
+        let notes = merge_short(&mut v, 80.0, MIN_CHAPTER);
+        assert_eq!(chapters_text(&v), "00:00 Write\n00:31 Plan\n00:52 Organize");
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains("\"Intro\" (7.9s)") && notes[0].contains("merged into \"Write\""), "{}", notes[0]);
+    }
+
+    #[test]
+    fn short_middle_and_last_chapters() {
+        let mut v = ch(&[(0.0, "Intro"), (12.0, "A"), (15.0, "B"), (40.0, "End")]);
+        let notes = merge_short(&mut v, 44.0, MIN_CHAPTER);
+        // "A" (3 s) joins "B"; "End" (4 s) has no chapter after it and joins the one before
+        assert_eq!(v, ch(&[(0.0, "Intro"), (12.0, "B")]));
+        assert_eq!(notes.len(), 2);
+        assert!(notes[1].contains("merged into \"B\" before it"), "{}", notes[1]);
+        // several short ones in a row collapse into the chapter that follows them
+        let mut v = ch(&[(0.0, "Intro"), (3.0, "A"), (6.0, "B"), (30.0, "C")]);
+        merge_short(&mut v, 60.0, MIN_CHAPTER);
+        assert_eq!(v, ch(&[(0.0, "B"), (30.0, "C")]));
+        // nothing to do
+        let mut v = ch(&[(0.0, "Intro"), (12.0, "A"), (30.0, "B")]);
+        assert!(merge_short(&mut v, 60.0, MIN_CHAPTER).is_empty());
+        assert_eq!(v.len(), 3);
+        // a single chapter stays, however short
+        let mut v = ch(&[(0.0, "Intro")]);
+        assert!(merge_short(&mut v, 4.0, MIN_CHAPTER).is_empty());
     }
 }

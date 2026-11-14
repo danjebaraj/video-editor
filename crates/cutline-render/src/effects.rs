@@ -217,7 +217,7 @@ pub fn zoom_terms(
                     arrive.push(at + duration);
                 }
             }
-            Effect::Zoom { from, to, start, end, ease: ez, focus: fo } => {
+            Effect::Zoom { from, to, start, end, ease: ez, focus: fo, .. } => {
                 let e2 = end.unwrap_or(dur);
                 terms.push(ScaleTerm::Ramp { a: *start, d: e2 - start, from: *from, to: *to, ease: *ez });
                 if let Some(p) = fo {
@@ -225,7 +225,7 @@ pub fn zoom_terms(
                     arrive.push(e2);
                 }
             }
-            Effect::ZoomTo { rect, start, duration, ease: ez, padding, end } => {
+            Effect::ZoomTo { rect, start, duration, ease: ez, padding, end, .. } => {
                 // in a screen frame the rect is relative to the recording
                 let placed = match &c.content {
                     Some(ct) => cutline_core::model::Rect {
@@ -255,7 +255,7 @@ pub fn zoom_terms(
                 let p1 = to.map(|p| (p.x, p.y)).unwrap_or((0.5, 0.5));
                 kb = Some((p0, p1, *ez));
             }
-            Effect::Shake { at, duration, intensity } => {
+            Effect::Shake { at, duration, intensity, .. } => {
                 terms.push(ScaleTerm::Window { a: *at, b: at + duration, k: 1.0 + 2.5 * intensity });
                 shakes.push(Shake { a: *at, d: *duration, amp_x: *intensity, amp_y: *intensity * 0.7 });
             }
@@ -457,7 +457,7 @@ fn look_chain(c: &TClip, g: &Geometry) -> Vec<String> {
     let fps = g.fps.as_f64();
     for e in &c.clip.effects {
         match e {
-            Effect::Flash { at, duration, color } => {
+            Effect::Flash { at, duration, color, .. } => {
                 let env = format!("max(0,1-abs(t-{})/{})", f(at + duration / 2.0), f((duration / 2.0).max(1.0 / fps)));
                 match color.as_deref() {
                     None | Some("white") | Some("#FFFFFF") | Some("#ffffff") => {
@@ -474,7 +474,7 @@ fn look_chain(c: &TClip, g: &Geometry) -> Vec<String> {
                     }
                 }
             }
-            Effect::Glitch { at, duration, amount } => {
+            Effect::Glitch { at, duration, amount, .. } => {
                 let a = amount.round() as i64;
                 let en = format!("between(t,{},{})", f(*at), f(at + duration));
                 v.push(format!("rgbashift=rh={a}:bh={}:gv={}:enable='{en}'", -a, a / 3));
@@ -483,7 +483,7 @@ fn look_chain(c: &TClip, g: &Geometry) -> Vec<String> {
             Effect::Vignette { strength } => {
                 v.push(format!("vignette=angle={}", f(0.25 + 0.45 * strength.clamp(0.0, 1.0))));
             }
-            Effect::MotionBlur { at, duration } => {
+            Effect::MotionBlur { at, duration, .. } => {
                 v.push(format!("tmix=frames=3:weights='1 2 1':enable='between(t,{},{})'", f(*at), f(at + duration)));
             }
             _ => {}

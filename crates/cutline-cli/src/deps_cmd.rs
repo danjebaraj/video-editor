@@ -212,3 +212,44 @@ pub fn install_chrome() -> CmdResult {
         format!("installed chrome-headless-shell {version} → {}", exe.display()),
     ))
 }
+
+/// `deps path <what>`: where a managed tool is, as cutline itself resolves it (the bundled
+/// ffmpeg is not on `PATH`). The human output is the bare path, for use in a shell.
+pub fn path(what: &str, name: Option<&str>) -> CmdResult {
+    use cutline_transcribe::whisper;
+    let missing = |hint: &str| CliError::tool(anyhow::anyhow!("{what} is not installed ({hint})"));
+    let p: std::path::PathBuf = match what {
+        "ffmpeg" => cutline_deps::toolchain().tool_err()?.ffmpeg.clone(),
+        "ffprobe" => cutline_deps::toolchain().tool_err()?.ffprobe.clone(),
+        "whisper" | "whisper-cli" => {
+            whisper::find_cli().ok_or_else(|| missing("install whisper.cpp or set CUTLINE_WHISPER_CLI"))?
+        }
+        "whisper-model" => {
+            let model = name.map(str::to_string).unwrap_or_else(whisper::resolve_model);
+            let p = whisper::model_path(&model);
+            if !p.exists() {
+                return Err(CliError::tool(anyhow::anyhow!(
+                    "whisper model {model} is not installed at {} (run `cutline deps install whisper-model {model}`)",
+                    p.display()
+                )));
+            }
+            p
+        }
+        "face-model" => {
+            let p = tools_dir().join("models").join("face_detection_yunet_2023mar.onnx");
+            if !p.exists() {
+                return Err(missing("run `cutline deps install face-model`"));
+            }
+            p
+        }
+        "chrome" => cutline_deps::paths::find_chrome().ok_or_else(|| missing("run `cutline deps install chrome`"))?,
+        "tools" => tools_dir(),
+        "home" => cutline_deps::paths::data_dir(),
+        other => {
+            return Err(CliError::usage(anyhow::anyhow!(
+                "unknown tool `{other}` (ffmpeg, ffprobe, whisper, whisper-model, face-model, chrome, tools, home)"
+            )))
+        }
+    };
+    Ok(Output::ok(json!({"name": what, "path": p}), p.display().to_string()))
+}

@@ -168,6 +168,7 @@ pub fn fast_forward_idle(
             spans.push((cur, tc.src_out, 1.0));
         }
         let mut pieces = vec![];
+        let span_ranges: Vec<(f64, f64)> = spans.iter().map(|(a, b, _)| (*a, *b)).collect();
         for (k, (a, b, sp)) in spans.iter().enumerate() {
             let id = if k == 0 { c.id.clone() } else { format!("{}~{}", c.id, k + 1) };
             let mut nc: Clip = (**c).clone();
@@ -200,7 +201,11 @@ pub fn fast_forward_idle(
                     let src = tc.src_in + effect_at(e)?;
                     (src >= *a && src < *b).then(|| with_at(e, (src - a) / sp))
                 })
-                .chain(c.effects.iter().filter(|e| effect_at(e).is_none() && k == 0).cloned())
+                .chain(
+                    c.effects.iter().filter(|e| effect_at(e).is_none() && e.src_anchor().is_none() && k == 0).cloned(),
+                )
+                // written in source time: they go to the piece that holds their moment
+                .chain(c.effects.iter().filter(|e| crate::auto::src_piece(e, &span_ranges) == Some(k)).cloned())
                 .collect();
             if k > 0 {
                 nc.chapter = None;
@@ -295,6 +300,8 @@ fn follow_effects(targets: &[Target], z: &ZoomOnClicks, content: Option<&Rect>, 
             padding: Some(round6(pad_for(first))),
             // zoom back out when there is room for it before the clip ends
             end: (out_at + d < len - 0.05).then(|| round6(out_at.max(start + d))),
+            src_start: None,
+            src_end: None,
         });
         for t in &chain[1..] {
             let (_, focus) = zoom_to_params(&place(t.rect, content), pad_for(t), 3.0);
@@ -306,6 +313,8 @@ fn follow_effects(targets: &[Target], z: &ZoomOnClicks, content: Option<&Rect>, 
                 end: Some(round6(st + d)),
                 ease: Ease::InOutCubic,
                 focus: Some(Point { x: round6(focus.x), y: round6(focus.y) }),
+                src_start: None,
+                src_end: None,
             });
         }
     }

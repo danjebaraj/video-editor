@@ -18,7 +18,7 @@ cutline cues     my-short/project.json5     # where each voice-over cue landed
 cutline beats    my-short/project.json5     # tempo and beat times of the music
 cutline record   my-short/project.json5     # record .tape and .demo.json5 assets again
 cutline render   demo/project.json5 --variant teaser --locale de
-cutline review   my-short/project.json5     # review/ pack for vision
+cutline review   my-short/project.json5     # review/<name>/ pack for vision
 cutline render   my-short/project.json5     # final render + QA + .srt + credits
 cutline guide                               # the workflow Claude should follow
 ```

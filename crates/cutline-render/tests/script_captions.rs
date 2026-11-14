@@ -80,3 +80,41 @@ fn wrong_script_and_missing_file_are_reported() {
     };
     assert!(diags.iter().any(|x| x.path == "/assets/vo/script"), "{diags:?}");
 }
+
+/// The voice said something else than the script in one place: captions cannot show it (they
+/// use the script), so the script check points at the time.
+#[test]
+fn a_misspoken_word_is_reported_with_its_time() {
+    let Some(_) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let p = setup(d.path(), "[warm] Seven Todos, each one keystroke away. [confident] Written in Rust.");
+    // "pains" (HEARD) for "Todos": not close in letters or sound
+    let l = pipeline::load(&p).unwrap_or_else(|e| panic!("{e}"));
+    let (name, e) = pipeline::exports(&l.project).remove(0);
+    let pr = pipeline::prepare(&l, name, &e, false).unwrap();
+    assert!(pr.extras.srt.contains("Seven Todos,"), "captions show the script: {}", pr.extras.srt);
+    let w: Vec<_> = pr.diags.iter().filter(|x| x.code == "W_SCRIPT_MISMATCH").collect();
+    assert_eq!(w.len(), 1, "{:?}", pr.diags);
+    assert_eq!(w[0].path, "/assets/vo/script");
+    // the voice layer starts at 0.5 s; "pains" is at 0.6–1.1 s of the asset
+    assert!(w[0].message.contains("\"Todos,\"") && w[0].message.contains("\"pains,\""), "{}", w[0].message);
+    assert!(w[0].message.contains("00:01.100") && w[0].message.contains("0.60–1.10s"), "{}", w[0].message);
+    let m = &pr.extras.script_mismatches;
+    assert_eq!(m.len(), 1);
+    assert_eq!((m[0].asset.as_str(), m[0].at, m[0].source_start), ("vo", Some(1.1), 0.6));
+    // `validate` reports it too, without preparing a render
+    assert!(cutline_render::extras::warnings(&l).iter().any(|x| x.code == "W_SCRIPT_MISMATCH"));
+
+    // the brand dictionary / caption corrections say what a heard spelling means
+    let text = std::fs::read_to_string(&p).unwrap();
+    let fixed = d.path().join("fixed.json5");
+    std::fs::write(&fixed, text.replace("captions: {", "captions: {corrections: {pains: 'Todos'}, ")).unwrap();
+    let l = pipeline::load(&fixed).unwrap_or_else(|e| panic!("{e}"));
+    assert!(cutline_render::extras::warnings(&l).is_empty());
+    // … or the word is ignored, or the check is off
+    for audio in ["audio: {script_check: {ignore: ['todos']}}", "audio: {script_check: {enabled: false}}"] {
+        std::fs::write(&fixed, text.replace("captions: {", &format!("{audio}, captions: {{"))).unwrap();
+        let l = pipeline::load(&fixed).unwrap_or_else(|e| panic!("{e}"));
+        assert!(cutline_render::extras::warnings(&l).is_empty(), "{audio}");
+    }
+}

@@ -109,23 +109,84 @@ pub fn with_script(
     Ok((aligned, Some(stats)))
 }
 
-/// Warnings for assets whose script and audio disagree (wrong script file, or a different take).
-pub fn script_warnings(l: &Loaded, p: &Project) -> Vec<Diagnostic> {
-    let mut out = vec![];
-    for (id, a) in &p.assets {
-        if a.script.is_none() {
-            continue;
+/// A place where a narration does not say what its script says (see
+/// `cutline_transcribe::check`), placed on the timeline.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ScriptMismatch {
+    pub asset: String,
+    /// The script's words (empty: the audio has extra words).
+    pub script: String,
+    /// What was heard instead (empty: the words are missing from the audio).
+    pub heard: String,
+    /// Output seconds where it is heard, when the asset is on the timeline.
+    pub at: Option<f64>,
+    /// Seconds in the asset.
+    pub source_start: f64,
+    pub source_end: f64,
+    /// The script around it, the words in question in brackets.
+    pub context: String,
+    /// What was heard around it, the words in question in brackets.
+    pub heard_context: String,
+}
+
+/// Mismatches listed one by one per asset before the rest is summed up.
+const SCRIPT_MISMATCH_LIMIT: usize = 12;
+
+/// Output seconds at which source second `src` of `asset` is heard, if it is.
+fn asset_time_on_timeline(tl: &Timeline, asset: &str, src: f64) -> Option<f64> {
+    for tlay in &tl.layers {
+        if let Layer::Audio { asset: a, src_in, .. } = &tlay.layer {
+            let si = src_in.map(|v| v.seconds(tl.fps, 0.0)).unwrap_or(0.0);
+            let t = tl.secs(tlay.start) + src - si;
+            if a == asset && src >= si && t <= tl.secs(tlay.end) {
+                return Some(t);
+            }
         }
+    }
+    tl.clips
+        .iter()
+        .filter(|c| c.asset == asset || c.clip.audio.as_deref() == Some(asset))
+        .find(|c| src >= c.src_in && src <= c.src_out)
+        .map(|c| tl.secs(c.start) + (src - c.src_in) / c.speed.max(1e-6))
+}
+
+/// Compare every asset that has a `script` with what was heard in it (its transcript without
+/// the script). A script that mostly does not match is one warning (wrong file or another
+/// take); otherwise every place where the audio differs from the script is one
+/// (`W_SCRIPT_MISMATCH`), with its time. `audio.script_check` tunes or disables the latter.
+pub fn script_check(
+    l: &Loaded,
+    p: &Project,
+    tl: Option<&Timeline>,
+    brand: &Brand,
+) -> (Vec<Diagnostic>, Vec<ScriptMismatch>) {
+    use cutline_transcribe::check;
+    let (mut out, mut found) = (vec![], vec![]);
+    let cfg = p.audio.as_ref().and_then(|a| a.script_check.clone()).unwrap_or_default();
+    let mut dictionary = brand.dictionary.clone();
+    if let Some(c) = &p.captions {
+        dictionary.extend(c.corrections.clone());
+    }
+    let opts = check::CheckOptions {
+        similarity: cfg.similarity.unwrap_or(check::DEFAULT_SIMILARITY),
+        min_span_words: cfg.min_span_words.unwrap_or(1),
+        ignore: cfg.ignore.clone(),
+        dictionary,
+    };
+    for (id, a) in &p.assets {
+        let Some(script) = &a.script else { continue };
+        let path = format!("/assets/{}/script", cutline_core::diag::ptr_token(id));
         let lang = p.captions.as_ref().and_then(|c| c.lang.clone());
         // transcript without the script, to measure how well they match
         let bare = cutline_core::model::Asset { script: None, ..a.clone() };
         let Ok(Some(t)) = load_transcript(&l.dir, id, Some(&bare), lang.as_deref(), false) else { continue };
-        let Ok((_, Some(st))) = with_script(&l.dir, a, t) else { continue };
+        let Ok(text) = std::fs::read_to_string(l.dir.join(script)) else { continue };
+        let (_, st) = cutline_transcribe::align::align(&t, &text);
         if st.match_ratio() < 0.7 {
             out.push(
                 Diagnostic::warning(
                     "W_SCRIPT_MISMATCH",
-                    format!("/assets/{}/script", cutline_core::diag::ptr_token(id)),
+                    path,
                     format!(
                         "only {:.0}% of the script's {} words were heard in `{id}` ({} missing, {} extra in the audio)",
                         st.match_ratio() * 100.0,
@@ -136,9 +197,54 @@ pub fn script_warnings(l: &Loaded, p: &Project) -> Vec<Diagnostic> {
                 )
                 .hint("check that the script file is the text of this take"),
             );
+            continue;
+        }
+        if !cfg.enabled {
+            continue;
+        }
+        let mism = check::check(&t, &text, &opts);
+        let total = mism.len();
+        for (k, m) in mism.into_iter().enumerate() {
+            let at = tl.and_then(|tl| asset_time_on_timeline(tl, id, m.start));
+            if k < SCRIPT_MISMATCH_LIMIT {
+                let said = match (m.script.is_empty(), m.heard.is_empty()) {
+                    (false, false) => format!("the script says \"{}\" but \"{}\" was heard", m.script, m.heard),
+                    (false, true) => format!("the script's \"{}\" was not heard", m.script),
+                    _ => format!("\"{}\" was heard but is not in the script", m.heard),
+                };
+                let when = match at {
+                    Some(t) => format!("at {} (`{id}` {:.2}–{:.2}s)", cutline_core::time::format_tc(t), m.start, m.end),
+                    None => format!("at {:.2}–{:.2}s in `{id}`", m.start, m.end),
+                };
+                out.push(
+                    Diagnostic::warning("W_SCRIPT_MISMATCH", path.clone(), format!("{said} {when}: script \"{}\", heard \"{}\"", m.context, m.heard_context)).hint(
+                        "listen there: if the voice is wrong, generate the line again (or respell the word for the voice); if it is right, add the heard spelling to the brand `dictionary` or the word to `audio.script_check.ignore`",
+                    ),
+                );
+            }
+            found.push(ScriptMismatch {
+                asset: id.clone(),
+                script: m.script,
+                heard: m.heard,
+                at,
+                source_start: m.start,
+                source_end: m.end,
+                context: m.context,
+                heard_context: m.heard_context,
+            });
+        }
+        if total > SCRIPT_MISMATCH_LIMIT {
+            out.push(Diagnostic::warning(
+                "W_SCRIPT_MISMATCH",
+                path,
+                format!(
+                    "{} more places where `{id}` differs from its script (`cutline review` lists them all in script_check.json)",
+                    total - SCRIPT_MISMATCH_LIMIT
+                ),
+            ));
         }
     }
-    out
+    (out, found)
 }
 
 /// Assets whose speech feeds captions/ducking: explicit `captions.assets`, else every clip
@@ -427,7 +533,14 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
                         let src = tc.src_in + at * tc.speed;
                         (src >= *a && src < *b).then(|| with_at(e, (src - a) / tc.speed))
                     })
-                    .chain(c.effects.iter().filter(|e| effect_at(e).is_none() && k == 0).cloned())
+                    .chain(
+                        c.effects
+                            .iter()
+                            .filter(|e| effect_at(e).is_none() && e.src_anchor().is_none() && k == 0)
+                            .cloned(),
+                    )
+                    // written in source time: they go to the piece that holds their moment
+                    .chain(c.effects.iter().filter(|e| src_piece(e, &keep) == Some(k)).cloned())
                     .collect();
                 new_main.push(MainItem::Clip(Box::new(nc)));
             }
@@ -473,6 +586,7 @@ pub fn expand(l: &Loaded, p: &Project, brand: &Brand) -> Result<(Project, Vec<Di
                         let scale = pi.scale[(k - 1) % 2];
                         add.entry(c.main_index).or_default().push(Effect::PunchIn {
                             at: cutline_core::time::round6(local),
+                            src_at: None,
                             scale,
                             duration: pi.duration,
                             ease: Default::default(),
@@ -662,7 +776,21 @@ fn snap_to_beats(
     Ok(())
 }
 
+/// The piece (`[from, to)` in source seconds) that an effect written in source time belongs
+/// to: the one holding its moment, else the nearest.
+pub(crate) fn src_piece(e: &Effect, pieces: &[(f64, f64)]) -> Option<usize> {
+    let src = e.src_anchor()?;
+    pieces.iter().position(|(a, b)| src >= *a && src < *b).or_else(|| {
+        let gap = |(a, b): &(f64, f64)| if src < *a { a - src } else { src - b };
+        (0..pieces.len()).min_by(|x, y| gap(&pieces[*x]).total_cmp(&gap(&pieces[*y])))
+    })
+}
+
+/// The clip-relative time of an effect with a single `at` (not one written in source time).
 pub(crate) fn effect_at(e: &Effect) -> Option<f64> {
+    if e.src_anchor().is_some() {
+        return None;
+    }
     match e {
         Effect::PunchIn { at, .. }
         | Effect::Shake { at, .. }
@@ -686,4 +814,32 @@ pub(crate) fn with_at(e: &Effect, v: f64) -> Effect {
         _ => {}
     }
     e
+}
+
+#[cfg(test)]
+mod src_effect_tests {
+    use super::*;
+
+    fn fx(json: serde_json::Value) -> Effect {
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn source_timed_effects_go_to_the_piece_holding_their_moment() {
+        let pieces = [(2.0, 5.0), (8.0, 12.0), (12.0, 20.0)];
+        let rect = serde_json::json!({"x": 0.1, "y": 0.1, "w": 0.4, "h": 0.4});
+        let zoom = |src: f64| fx(serde_json::json!({"type": "zoom_to", "rect": rect, "src_start": src}));
+        assert_eq!(src_piece(&zoom(9.0), &pieces), Some(1));
+        assert_eq!(src_piece(&zoom(12.0), &pieces), Some(2));
+        // in a removed stretch: the nearest piece
+        assert_eq!(src_piece(&zoom(5.5), &pieces), Some(0));
+        assert_eq!(src_piece(&zoom(7.5), &pieces), Some(1));
+        // clip-relative effects are not placed this way, and source-timed ones have no `at`
+        let punch = fx(serde_json::json!({"type": "punch_in", "at": 1.0}));
+        assert_eq!(src_piece(&punch, &pieces), None);
+        assert_eq!(effect_at(&punch), Some(1.0));
+        let punch_src = fx(serde_json::json!({"type": "punch_in", "src_at": 9.0}));
+        assert_eq!(effect_at(&punch_src), None);
+        assert_eq!(src_piece(&punch_src, &pieces), Some(1));
+    }
 }

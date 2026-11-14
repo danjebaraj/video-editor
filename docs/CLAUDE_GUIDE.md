@@ -9,6 +9,9 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
 
 1. **Tools.** `cutline doctor`. If anything is red: `cutline deps install --all` (ffmpeg, whisper
    model, face model, Chrome headless shell). `cutline deps status` shows versions vs the lockfile.
+   cutline's ffmpeg is not on `PATH`: when you need it yourself, use
+   `"$(cutline deps path ffmpeg)"` (also `ffprobe`, `whisper`, `whisper-model`, `face-model`,
+   `chrome`, `tools`).
 2. **Understand the footage.**
    - `cutline probe <file>...` — duration, fps (VFR flag), rotation, color, alpha, loudness (`--loudness`).
    - `cutline transcribe <file>` for spoken footage (or `--import-scribe vo.scribe.json` for an
@@ -22,21 +25,27 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
 4. **Validate and inspect.** `cutline validate project.json5` — fix every error (each has a
    `code`, a JSON-pointer `path` and usually a `hint`). Then `cutline expand project.json5` to see
    the explicit timeline (jump cuts, removed fillers, generated punch-ins) as JSON + an EDL table.
-5. **Look at it.** `cutline review project.json5` writes `review/`:
+5. **Look at it.** `cutline review project.json5` writes `review/<project name>/` (the project's
+   `name`, else the file name; a variant or locale is part of the name, so `project.json5` and
+   `teaser.json5` in one folder each keep their own pack; `--out <dir>` chooses another folder):
    - `contact_sheet.jpg` (timecode + clip id per tile), `cuts/*.jpg` (before | after each cut),
      `captions/*.jpg` (safe zone shaded, caption box outlined), `reframe/*.jpg` (crop rectangle on
      the source), `audio.png` (per-role waveforms, final mix, duck envelope, momentary LUFS vs
-     target), `timeline.txt`, `qa.json`, `summary.md` (QA + suggested improvements),
-     `preview_540p.mp4`.
+     target), `timeline.txt`, `qa.json`, `summary.md` (QA, script check, suggested improvements),
+     `script_check.json`, `preview_540p.mp4`.
    - Read `summary.md` first, then look at the images. It flags text templates that sit over
      detailed content (measured from frames with and without the text). Iterate until there are **no QA errors** and
-     the suggestions are addressed. Use `cutline preview project.json5 --at 3.2 7.5 --safe-zones`
-     for quick stills while iterating (drafts capture HTML graphics at half density and 15 fps;
+     the suggestions are addressed. Use `cutline preview project.json5 --at 9.8,43,47.15 --safe-zones`
+     for quick stills while iterating: every time you want to see goes into one run (a comma
+     list, `--at 3.2 7.5`, or `--at` repeated), since the draft is rendered once for all of them
+     (drafts capture HTML graphics at half density and 15 fps;
      stills skip frame capture for graphics not on screen at the requested times).
 6. **Render.** `cutline render project.json5` (all exports; `--export name` for one). QA runs
    automatically; the command fails on QA errors unless `--allow-qa-errors`. Outputs next to the
    video: `<name>.qa.json`, `<name>.render_report.json`, `<name>.srt`, `credits.txt`. Then:
-   `cutline chapters project.json5` (long form) and `cutline thumbnail project.json5 --at <t>
+   `cutline chapters project.json5` (long form; a chapter under YouTube's 10 s minimum, such as
+   a short title card before the first section, is merged into the chapter after it and the
+   list says so; `--no-merge-short` keeps it) and `cutline thumbnail project.json5 --at <t>
    --text "..."`. Report the output paths and the **publishing checklist** (printed by `render`).
 
 `render --dry-run` prints every ffmpeg command and filter script (reproducible renders).
@@ -133,17 +142,25 @@ Segments are cached: changing captions, text or music does not re-render clips.
   `rect` clip is mapped through the crop, so it still lands on its target. Do not guess
   `manual` keys for this: with `manual` (and `cover`) annotation rects count against the output
   frame and have to be worked out again. Pick tall rects (a sidebar, a form, a chat column);
-  check `review/reframe/*.jpg`.
+  check `review/<name>/reframe/*.jpg`.
 - Show where to look. Pair a `zoom_to` with a `highlight` on the same `rect` (it follows the
   zoom), use `spotlight` when the rest of the screen distracts, an `arrow` with a short `label`
   for "new here", `keys` when the narration names a shortcut (keycaps are literal text:
   `["@t:3,3", "tab"]` needs no escaping), and a `cursor` layer over
   recordings made without a pointer. One device at a time: a highlight or a spotlight, not both.
-  Time them with cues (`start: "cue:export"`), and check `review/annotations/`.
+  Time them with cues (`start: "cue:export"`), and check `review/<name>/annotations/`.
 - **Keep recordings at 1×.** `end_at` trims a clip to its slot; it never changes the speed. If
   `W_FIT_HOLD` says a clip runs out of footage, give it more footage (earlier `in`, later
   `out`), cut sooner, or accept the held last frame when the screen is still anyway. Use
   `speed`/`fit: "speed"` only for a deliberate fast-forward or slow-down.
+- **On a clip whose speed is fitted, pin effects to the footage.** With `fit: "speed"` (or an
+  `end_at` cue that may move) write `src_start` on a `zoom_to` / `zoom` and `src_at` on a
+  `punch_in`: seconds in the recording, like `in`. The zoom then stays on its moment whatever
+  speed the clip gets. `W_EFFECT_UNSEEN` means the clip is cut before a zoom can be seen (less
+  than 0.3 s of the finished zoom): move it earlier. Label the speed with
+  `{type: "badge", text: "{speed}×", anchor: "<clip>"}`: `{speed}` is the clip's real speed
+  (`3.1×`), so the badge never goes stale. `W_LAYER_PAST_CLIP` is an annotation whose `offset`
+  lies beyond its anchor clip.
 - **Cut between app shots; do not dissolve.** A dissolve between two screens shows both
   screens' text at once (`W_SCREEN_DISSOLVES`). Put plain cuts between recordings (no
   `transition` item), and keep a `fade` for the title card and the end card. When a change of
@@ -182,6 +199,17 @@ Segments are cached: changing captions, text or music does not re-render clips.
   from the script match exactly. Audio tags like `[warm]` are ignored.
 - `cutline cues project.json5` shows what each cue matched and where it landed; fix
   `W_CUE_FUZZY` / `E_CUE_NOT_FOUND` from the hint.
+- **Check the voice against the script.** Captions show the script, so a mispronounced word is
+  invisible on screen. `W_SCRIPT_MISMATCH` (in `validate`, `review`'s `summary.md` and after
+  `render`) lists every place where the recogniser heard something else, with the time: listen
+  there. If the voice is wrong, generate that line again (respell the word for the voice if
+  needed); if the voice is right and the recogniser is wrong, add the heard spelling to the
+  brand `dictionary` (`"do tab": "Due tab"`) or the word to `audio.script_check.ignore`. Run
+  `review` again after regenerating a voice-over: the new take can have new slips.
+- **Need a longer pause? Do not cut the audio file.** Add `gaps` to the voice asset:
+  `gaps: [{before: "Need more room", add: 0.7}, {after: "cue:organized", add: 0.3}]`. The
+  silence goes in at the word boundary and cues, captions and cuts move with it. Gaps are found
+  by phrase, so they survive a regenerated narration (`E_GAP_NOT_FOUND` if the line changed).
 
 ## Audio
 
@@ -227,7 +255,12 @@ Segments are cached: changing captions, text or music does not re-render clips.
 | `E_TRANSITION_TOO_LONG` | shorten the transition or lengthen a neighbour |
 | `E_UNKNOWN_ASSET` / `E_UNKNOWN_ANCHOR` | typo in an asset or clip id |
 | `E_UNKNOWN_FIELD` | the hint lists allowed fields |
-| `E_EFFECT_OUT_OF_RANGE` | effect `at` is clip-relative (seconds from the clip's start on the timeline) |
+| `E_EFFECT_OUT_OF_RANGE` | effect `at` is clip-relative (seconds from the clip's start on the timeline); `src_at` / `src_start` are seconds in the asset, inside the part the clip plays |
+| `W_EFFECT_UNSEEN` | the clip ends before the zoom is seen: start it earlier, shorten its `duration`, or use `src_start` on a retimed clip |
+| `W_LAYER_PAST_CLIP` | the annotation's `offset` is beyond its anchor clip: lower it or anchor it to the clip it belongs to |
+| `W_SCRIPT_MISMATCH` | listen at the time given; regenerate the line, or add the heard spelling to the brand `dictionary` |
+| `E_GAP_NOT_FOUND` | the gap's phrase is not in the narration: copy it from the script (the hint lists the closest) |
+| `E_SPEED_NO_ANCHOR` | `{speed}` needs the layer to have an `anchor` clip |
 | `W_SHORTS_OVER_LIMIT` | trim to ≤ 180 s or use a long-form target |
 | `W_REFRAME_NO_FACES` | install the face model, choose `manual` keys or another mode |
 | `E_RECT_OUT_OF_FRAME` | rects are fractions of the frame (of the recording on framed and `rect`-reframed clips): 0–1, `w`/`h` above 0, `x+w` and `y+h` ≤ 1 |

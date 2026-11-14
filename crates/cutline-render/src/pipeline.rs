@@ -20,6 +20,8 @@ pub struct Loaded {
     pub timeline: Option<Timeline>,
     /// Cue references resolved while loading (see `cues`).
     pub cues: Vec<crate::cues::ResolvedCue>,
+    /// Silences added to narration assets while loading (see `gaps`).
+    pub gaps: Vec<crate::gaps::ResolvedGap>,
     /// Events of the browser recordings among the assets (see `browser`), by asset id.
     pub demos: crate::browser::Demos,
     /// The variant and locale this was loaded as (see `select`).
@@ -88,12 +90,17 @@ pub fn parse_file_with_cues(
     if has_errors(&demo_notes) {
         return Err(LoadError::Invalid(demo_notes));
     }
+    let (gap_notes, _) = crate::gaps::apply(&mut v, dir);
+    if has_errors(&gap_notes) {
+        return Err(LoadError::Invalid(gap_notes));
+    }
     let beat_notes = crate::beatrefs::resolve(&mut v, dir);
     if has_errors(&beat_notes) {
         return Err(LoadError::Invalid(beat_notes));
     }
     let (mut notes, cues) = crate::cues::resolve(&mut v, dir);
     notes.extend(beat_notes);
+    notes.extend(gap_notes);
     if has_errors(&notes) {
         return Err(LoadError::Invalid(notes));
     }
@@ -141,6 +148,11 @@ pub fn load_with(path: &Path, sel: &crate::select::Selection) -> Result<Loaded, 
     demo_notes.extend(crate::browser::resolve_steps(&mut v0, &demos));
     if has_errors(&demo_notes) {
         return Err(LoadError::Invalid(demo_notes));
+    }
+    // narration `gaps`: the asset becomes the padded narration, before anything reads its words
+    let (gap_notes, gaps) = crate::gaps::apply(&mut v0, &dir);
+    if has_errors(&gap_notes) {
+        return Err(LoadError::Invalid(gap_notes));
     }
     // `bar:`/`beat:` times become seconds first (they depend only on the music layer)
     let beat_notes = crate::beatrefs::resolve(&mut v0, &dir);
@@ -202,6 +214,7 @@ pub fn load_with(path: &Path, sel: &crate::select::Selection) -> Result<Loaded, 
         if anchored.is_empty() || settled {
             diags.extend(notes);
             diags.extend(beat_notes);
+            diags.extend(gap_notes);
             diags.extend(demo_notes.clone());
             // a variant with a length to keep
             if let (Some(tl), Some(v)) = (&timeline, selection.variant.as_ref()) {
@@ -228,6 +241,7 @@ pub fn load_with(path: &Path, sel: &crate::select::Selection) -> Result<Loaded, 
                 diags,
                 timeline,
                 cues,
+                gaps,
                 demos,
                 selection,
                 variants,

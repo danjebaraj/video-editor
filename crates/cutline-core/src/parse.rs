@@ -70,6 +70,62 @@ fn layer_allowed_keys(kind: &str) -> Option<Vec<String>> {
     None
 }
 
+/// Clip-relative effect time fields and their source-relative twins.
+const EFFECT_TIME_TWINS: [(&str, &str); 3] = [("at", "src_at"), ("start", "src_start"), ("end", "src_end")];
+
+/// In a serialized project (`cutline expand`), drop the clip-relative defaults (`start: 0`,
+/// `at: 0`) that serialization writes beside an effect's source-relative time.
+pub fn strip_shadowed_effect_times(project: &mut Value) {
+    let Some(main) = project.get_mut("main").and_then(|m| m.as_array_mut()) else { return };
+    for effect in main.iter_mut().filter_map(|c| c.get_mut("effects")).filter_map(|e| e.as_array_mut()).flatten() {
+        let Some(o) = effect.as_object_mut() else { continue };
+        for (plain, src) in EFFECT_TIME_TWINS {
+            if o.get(src).is_some_and(|v| !v.is_null()) && o.get(plain).is_some_and(|v| v.as_f64() == Some(0.0)) {
+                o.remove(plain);
+            }
+        }
+    }
+}
+
+/// An effect's time is written clip-relative (`at`, `start`, `end`) or source-relative
+/// (`src_at`, `src_start`, `src_end`), not both; `punch_in` and the other `at` effects need one.
+fn check_effect_times(clip: &Value, base: &str, errs: &mut Vec<Diagnostic>) {
+    let Some(effects) = clip.get("effects").and_then(|e| e.as_array()) else { return };
+    for (i, e) in effects.iter().enumerate() {
+        let Some(o) = e.as_object() else { continue };
+        let kind = o.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        for (plain, src) in EFFECT_TIME_TWINS {
+            // a clip-relative 0 beside a source time is the default written out (a serialized
+            // project), not a second time
+            let set = o.get(plain).is_some_and(|v| v.as_f64() != Some(0.0) && !v.is_null());
+            if set && o.get(src).is_some_and(|v| !v.is_null()) {
+                errs.push(
+                    Diagnostic::error(
+                        "E_FIELD_CONFLICT",
+                        format!("{base}/effects/{i}/{src}"),
+                        format!("`{src}` (seconds in the asset) and `{plain}` (seconds from the clip's start) both set the same time"),
+                    )
+                    .hint(format!("keep one: `{src}` follows the footage when the clip is retimed, `{plain}` stays put on the timeline")),
+                );
+            }
+        }
+        if matches!(kind, "punch_in" | "shake" | "flash" | "glitch" | "motion_blur")
+            && !o.contains_key("at")
+            && !o.contains_key("src_at")
+            && !o.contains_key("step")
+        {
+            errs.push(
+                Diagnostic::error(
+                    "E_MISSING_FIELD",
+                    format!("{base}/effects/{i}/at"),
+                    format!("`{kind}` needs `at` or `src_at`"),
+                )
+                .hint("`at`: seconds from the clip's start; `src_at`: seconds in the asset"),
+            );
+        }
+    }
+}
+
 /// Parse project text (JSON5 or JSON). Returns all structural errors found.
 pub fn parse_project(text: &str) -> Result<Project, Vec<Diagnostic>> {
     parse_value(&parse_json5(text)?)
@@ -103,6 +159,7 @@ pub fn parse_value(v: &Value) -> Result<Project, Vec<Diagnostic>> {
             if item.get("transition").is_some() {
                 de_at::<TransitionItem>(item, &base, &mut errs);
             } else {
+                check_effect_times(item, &base, &mut errs);
                 de_at::<Clip>(item, &base, &mut errs);
             }
         }

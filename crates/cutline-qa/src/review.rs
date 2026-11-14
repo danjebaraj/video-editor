@@ -23,7 +23,23 @@ pub struct ReviewReport {
     pub images: Vec<PathBuf>,
     pub files: Vec<PathBuf>,
     pub suggestions: Vec<String>,
+    /// Places where a narration differs from its script (also in `script_check.json`).
+    pub script_mismatches: Vec<cutline_render::auto::ScriptMismatch>,
     pub qa_ok: bool,
+}
+
+/// One line for a script mismatch: when, what the script says, what was heard.
+pub fn mismatch_line(m: &cutline_render::auto::ScriptMismatch) -> String {
+    let when = match m.at {
+        Some(t) => format!("{} (`{}` {:.2}–{:.2}s)", format_tc(t), m.asset, m.source_start, m.source_end),
+        None => format!("`{}` {:.2}–{:.2}s", m.asset, m.source_start, m.source_end),
+    };
+    let what = match (m.script.is_empty(), m.heard.is_empty()) {
+        (false, false) => format!("script \"{}\", heard \"{}\"", m.script, m.heard),
+        (false, true) => format!("script \"{}\" was not heard", m.script),
+        _ => format!("heard \"{}\", not in the script", m.heard),
+    };
+    format!("{when}: {what}  (script: {} · heard: {})", m.context, m.heard_context)
 }
 
 /// Grab one frame (seconds) from any media as RGB. Still images have a single frame and any
@@ -472,6 +488,23 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     let dp = out_dir.join("demo_checks.json");
     std::fs::write(&dp, serde_json::to_vec_pretty(&demo)?)?;
     files.push(dp);
+    // ---- script check: what was heard against the script the voice was made from
+    let mismatches = pr.extras.script_mismatches.clone();
+    let scripted = pr.project.assets.values().any(|a| a.script.is_some());
+    let cp = out_dir.join("script_check.json");
+    if scripted {
+        std::fs::write(&cp, serde_json::to_vec_pretty(&mismatches)?)?;
+        files.push(cp);
+    } else {
+        let _ = std::fs::remove_file(&cp);
+    }
+    if !mismatches.is_empty() {
+        suggestions.push(format!(
+            "The narration differs from its script in {} place{} (see Script check): listen there and generate those lines again, or teach the brand `dictionary` the spelling.",
+            mismatches.len(),
+            if mismatches.len() == 1 { "" } else { "s" }
+        ));
+    }
     let mut md = format!(
         "# Review: {}\n\nSource: `{}`  \nDuration: {}  \nTarget: {} ({}×{} @ {} fps)\n\n## QA: {} ({} errors, {} warnings)\n\n",
         cutline_render::output_name(&l.project, &l.path),
@@ -495,6 +528,18 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
         };
         md.push_str(&format!("- {mark} **{}**: {}\n", f.check, f.message));
     }
+    if scripted {
+        md.push_str("\n## Script check\n\n");
+        let off = pr.project.audio.as_ref().and_then(|a| a.script_check.as_ref()).is_some_and(|c| !c.enabled);
+        if off {
+            md.push_str("- the check is off (`audio.script_check.enabled: false`)\n");
+        } else if mismatches.is_empty() {
+            md.push_str("- ✅ no place found where the narration differs from its script\n");
+        }
+        for m in &mismatches {
+            md.push_str(&format!("- ⚠️ {}\n", mismatch_line(m)));
+        }
+    }
     md.push_str("\n## Suggested improvements\n\n");
     if suggestions.is_empty() {
         md.push_str("- none — looks good\n");
@@ -508,7 +553,7 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
             md.push_str(&format!("- `{}` {}: {}\n", d.code, d.path, d.message));
         }
     }
-    md.push_str("\n## Files\n\n- contact_sheet.jpg, cuts/, captions/, annotations/, reframe/, audio.png, timeline.txt, qa.json, preview_540p.mp4\n");
+    md.push_str("\n## Files\n\n- contact_sheet.jpg, cuts/, captions/, annotations/, reframe/, audio.png, timeline.txt, qa.json, demo_checks.json, script_check.json (when an asset has a `script`), preview_540p.mp4\n");
     let sp = out_dir.join("summary.md");
     std::fs::write(&sp, md)?;
     files.push(sp);
@@ -521,6 +566,7 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
         images,
         files,
         suggestions,
+        script_mismatches: mismatches,
         qa_ok: qa.ok,
     })
 }

@@ -247,3 +247,25 @@ Found while making a product demo (see `docs/decisions.md`, same date).
 | `reframe: {mode: "rect"}` with annotations in source fractions | `cutline-core/tests/zoom_to.rs`, `invalid_projects.rs` (e33), `cutline-render/tests/rect_reframe.rs` |
 
 Not done: annotation mapping for `manual` reframe (its crop moves; see decisions).
+
+## Script check, review folders, effect timing, narration gaps (2026-11-14)
+
+Found while finishing a product demo and its teaser (see `docs/decisions.md`, same date).
+
+| Change | Tests |
+|---|---|
+| Script check: per-word `W_SCRIPT_MISMATCH`, `audio.script_check`, `review` section and `script_check.json` | `cutline-transcribe` `check` unit tests (10), `cutline-render/tests/script_captions.rs` |
+| `review` writes to `review/<project name>/` | `cutline-cli/tests/m1_cli.rs` |
+| `W_EFFECT_UNSEEN`, `W_LAYER_PAST_CLIP` | `cutline-core/tests/effect_timing.rs` |
+| Source-relative effect times (`src_at`, `src_start`, `src_end`) | `cutline-core/tests/effect_timing.rs`, `cutline-render` `auto` unit test |
+| `{speed}` in badge and text layers (`E_SPEED_NO_ANCHOR`) | `cutline-core/tests/effect_timing.rs` |
+| Narration `gaps` on assets (`E_GAP_NOT_FOUND`, `E_GAP_TRANSCRIPT`, `E_GAP_FAILED`, `W_GAP_FUZZY`) | `cutline-render` `gaps` unit tests, `cutline-render/tests/narration_gaps.rs` |
+| `preview --at a,b,c`, `deps path <tool>`, `chapters` merges short chapters (`--no-merge-short`) | `cutline-cli/tests/m1_cli.rs`, `cutline-qa` `publish` unit tests |
+
+Checked against the real projects (read-only; scratch copies for the new fields): the old
+voice-over files are flagged at "Todos"/"Dolos" and "a todo"/"it to do" and nowhere else, the
+current ones are clean; the demo's late `zoom_to` on its `fit: "speed"` clip gets
+`W_EFFECT_UNSEEN`; its chapter list merges the 7.9 s intro into "Write".
+
+Not done: a script check for languages other than English beyond letter similarity; `src_at`
+on `freeze`; `{speed}` inside template `params`; removing silence with `gaps`.
