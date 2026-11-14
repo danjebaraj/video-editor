@@ -754,6 +754,30 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/text_size"), "text_size must be positive"));
             }
         }
+        if let Layer::Presenter { asset, scale, layouts, focus, .. } = l {
+            if facts.get(asset).is_some_and(|f| !f.has_video) {
+                d.push(Diagnostic::error(
+                    "E_WRONG_ASSET_KIND",
+                    format!("{base}/asset"),
+                    format!("presenter asset `{asset}` has no video"),
+                ));
+            }
+            if scale.is_some_and(|s| !(0.05..=0.6).contains(&s)) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/scale"), "scale must be within 0.05–0.6"));
+            }
+            if focus.is_some_and(|p| !((0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y))) {
+                d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/focus"), "focus x and y are fractions (0–1)"));
+            }
+            for (i, w) in layouts.windows(2).enumerate() {
+                if w[1].at.frames(fps, body_len) <= w[0].at.frames(fps, body_len) {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/layouts/{}/at", i + 1),
+                        "layout times must increase",
+                    ));
+                }
+            }
+        }
         check_annotation(l, &base, &mut d);
         check_card(l, p, &base, &mut d);
         if let Some(v) = l.visual() {
@@ -818,6 +842,9 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             ));
                         }
                         Some(o - i)
+                    }
+                    Layer::Presenter { src_in, .. } => {
+                        media_len.map(|ml| ml - src_in.map(|t| t.seconds(fps, ml)).unwrap_or(0.0))
                     }
                     Layer::Audio { r#loop: Some(true), .. } => None,
                     // backtimed music runs to the timeline end unless told otherwise

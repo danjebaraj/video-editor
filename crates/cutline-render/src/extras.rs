@@ -92,6 +92,7 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         }
         extras.clip.insert(c.id.clone(), x);
     }
+    presenter_focus(l, tl, &mut extras);
     annotations(l, tl, &g, &brand, &mut extras)?;
     Ok(extras)
 }
@@ -130,6 +131,54 @@ fn watermark(
         start: (o + wm.from.unwrap_or(0.0)).min(e),
         end: wm.to.map(|t| (o + t).min(e)).unwrap_or(e),
     })
+}
+
+/// Find the face in each presenter camera (a `focus` on the layer wins; without a detector the
+/// bubble is centred on the middle of the upper half, where a seated presenter usually is).
+fn presenter_focus(l: &Loaded, tl: &Timeline, extras: &mut PlanExtras) {
+    use cutline_core::model::Layer;
+    for x in &tl.layers {
+        let Layer::Presenter { asset, src_in, focus, .. } = &x.layer else { continue };
+        if let Some(f) = focus {
+            extras.presenter_focus.insert(x.index, (f.x, f.y));
+            continue;
+        }
+        let Some(m) = l.media.get(asset) else { continue };
+        let from = src_in.map(|t| t.seconds(tl.fps, m.facts.duration)).unwrap_or(0.0);
+        // the first 20 s tell where the presenter sits
+        let to = (from + tl.secs(x.end - x.start).min(20.0)).min(m.facts.duration.max(from + 0.1));
+        let cache = cutline_media::cache::Cache::new(crate::cutline_dir(&l.dir).join("cache").join("reframe"));
+        let key = cutline_media::hash_key(&[
+            m.fingerprint.as_bytes(),
+            format!("{from:.3}-{to:.3}").as_bytes(),
+            b"presenter-v1",
+        ]);
+        let found: Option<(f64, f64)> = cache.get_json::<Option<(f64, f64)>>(&key).unwrap_or_else(|| {
+            let res = cutline_reframe::default_detector().and_then(|mut det| {
+                let tc = cutline_deps::toolchain().ok()?;
+                let a = cutline_reframe::analyze(tc, &m.path, from, to, false, det.as_mut(), 2.0, 640).ok()?;
+                // the largest face of each sampled frame; the median is where the presenter is
+                let mut pts: Vec<(f64, f64)> = a
+                    .dets
+                    .iter()
+                    .filter_map(|d| d.faces.iter().max_by(|p, q| (p.w * p.h).partial_cmp(&(q.w * q.h)).unwrap()))
+                    .map(|f| (f.cx(), f.cy()))
+                    .collect();
+                if pts.is_empty() {
+                    return None;
+                }
+                pts.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap());
+                let mx = pts[pts.len() / 2].0;
+                pts.sort_by(|p, q| p.1.partial_cmp(&q.1).unwrap());
+                Some((mx, pts[pts.len() / 2].1))
+            });
+            let _ = cache.put_json(&key, &res);
+            res
+        });
+        if let Some(f) = found {
+            extras.presenter_focus.insert(x.index, f);
+        }
+    }
 }
 
 /// Rasterize annotation layers into cached alpha videos.

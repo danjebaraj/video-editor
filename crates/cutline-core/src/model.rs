@@ -1100,6 +1100,46 @@ pub enum Layer {
         #[serde(flatten)]
         at: Placement,
     },
+    /// The presenter's camera over the screen: a bubble, a side panel or the full frame,
+    /// switchable over time with `layouts`.
+    Presenter {
+        asset: String,
+        /// Camera time shown when the layer starts (to line the camera up with the screen).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        src_in: Option<TimeValue>,
+        /// circle (default) | rounded
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<PresenterShape>,
+        /// Bubble position (default `bottom_right`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<Position>,
+        /// Bubble width as a fraction of the frame width (default 0.18; 0.3 on vertical targets).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f64>,
+        /// Where the face is in the camera picture (fractions). Default: detected, else the
+        /// middle of the upper half.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        focus: Option<Point>,
+        /// Border width in output px (default 4) and color (default white).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        border: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        border_color: Option<String>,
+        /// Drop shadow (default true).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shadow: Option<bool>,
+        /// Use the camera's sound as dialogue (default false).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gain_db: Option<f64>,
+        /// Layout changes: `[{at: 0, layout: "bubble"}, {at: "cue:intro", layout: "presenter_full"}]`.
+        /// Default: `bubble` throughout.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        layouts: Vec<LayoutKey>,
+        #[serde(flatten)]
+        at: Placement,
+    },
     /// A small pill with a short text, e.g. the speed while fast-forwarding ("4×").
     Badge {
         text: String,
@@ -1176,6 +1216,7 @@ impl Layer {
             Layer::Keys { .. } => "keys",
             Layer::Cursor { .. } => "cursor",
             Layer::Badge { .. } => "badge",
+            Layer::Presenter { .. } => "presenter",
         }
     }
     pub fn placement(&self) -> Option<&Placement> {
@@ -1193,6 +1234,7 @@ impl Layer {
             | Layer::Keys { at, .. }
             | Layer::Cursor { at, .. }
             | Layer::Badge { at, .. }
+            | Layer::Presenter { at, .. }
             | Layer::Audio { at, .. } => Some(at),
             Layer::Sfx { .. } => None,
         }
@@ -1212,6 +1254,7 @@ impl Layer {
             | Layer::Keys { at, .. }
             | Layer::Cursor { at, .. }
             | Layer::Badge { at, .. }
+            | Layer::Presenter { at, .. }
             | Layer::Audio { at, .. } => Some(at),
             Layer::Sfx { .. } => None,
         }
@@ -1248,11 +1291,42 @@ impl Layer {
             | Layer::Broll { asset, .. }
             | Layer::Image { asset, .. }
             | Layer::Html { asset, .. }
+            | Layer::Presenter { asset, .. }
             | Layer::Audio { asset, .. }
             | Layer::Sfx { asset, .. } => Some(asset),
             _ => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenterShape {
+    #[default]
+    Circle,
+    Rounded,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PresenterLayout {
+    /// Small camera picture in a corner.
+    #[default]
+    Bubble,
+    /// The camera as a tall panel over the right third of the frame.
+    SideBySide,
+    /// The camera fills the frame.
+    PresenterFull,
+    /// The camera is hidden.
+    ScreenFull,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutKey {
+    /// Time on the edit from which this layout shows.
+    pub at: TimeValue,
+    pub layout: PresenterLayout,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]

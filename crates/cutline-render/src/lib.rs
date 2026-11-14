@@ -277,6 +277,8 @@ pub struct PlanExtras {
     pub warnings: Vec<cutline_core::Diagnostic>,
     /// Rendered annotation runs (highlight, spotlight, arrow, keys, cursor).
     pub annot: Vec<annot::AnnotRender>,
+    /// Where the face is in each presenter layer's camera picture (layer index → x, y).
+    pub presenter_focus: std::collections::BTreeMap<usize, (f64, f64)>,
     /// Brand logo drawn as a watermark.
     pub watermark: Option<WatermarkSpec>,
     /// Reframe crop paths per clip id (for the review pack).

@@ -87,6 +87,10 @@ Segments are cached: changing captions, text or music does not re-render clips.
   language, cue phrases in that language, and `"@key"` strings for on-screen text). Time
   everything with cues and `end_at` so each version fits its own narration, then check every
   one: `cutline review project.json5 --variant teaser --locale de`.
+- A person on camera builds trust: add the webcam recording as a `presenter` layer. Open on
+  `presenter_full` for the greeting, switch to `bubble` when the product comes on, hide it
+  (`screen_full`) while zoomed into detail, and come back full for the close; time the
+  switches with cues. Keep the bubble clear of what the narration points at (`position`).
 - Tone: no punch-in cadence, no emoji, no `bold_pop`. Plain cuts between screens, one fade from
   the title and into the end card. Keep captions on: most business video is watched muted.
 

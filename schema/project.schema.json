@@ -3644,6 +3644,177 @@
           ]
         },
         {
+          "description": "The presenter's camera over the screen: a bubble, a side panel or the full frame,\nswitchable over time with `layouts`.",
+          "type": "object",
+          "properties": {
+            "anchor": {
+              "description": "Main clip id this layer follows.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "asset": {
+              "type": "string"
+            },
+            "audio": {
+              "description": "Use the camera's sound as dialogue (default false).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "border": {
+              "description": "Border width in output px (default 4) and color (default white).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "border_color": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duration": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "end": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "except": {
+              "description": "Variants this layer is left out of.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "focus": {
+              "description": "Where the face is in the camera picture (fractions). Default: detected, else the\nmiddle of the upper half.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Point"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "gain_db": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "layouts": {
+              "description": "Layout changes: `[{at: 0, layout: \"bubble\"}, {at: \"cue:intro\", layout: \"presenter_full\"}]`.\nDefault: `bubble` throughout.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LayoutKey"
+              }
+            },
+            "offset": {
+              "description": "Seconds after the anchor clip's start.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "only": {
+              "description": "Variants this layer belongs to (default: all).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "position": {
+              "description": "Bubble position (default `bottom_right`).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scale": {
+              "description": "Bubble width as a fraction of the frame width (default 0.18; 0.3 on vertical targets).",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "shadow": {
+              "description": "Drop shadow (default true).",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "shape": {
+              "description": "circle (default) | rounded",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PresenterShape"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "src_in": {
+              "description": "Camera time shown when the layer starts (to line the camera up with the screen).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "description": "Absolute timeline start (seconds/timecode). Ignored when `anchor` is set.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TimeValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "presenter"
+            }
+          },
+          "required": [
+            "type",
+            "asset"
+          ]
+        },
+        {
           "description": "A small pill with a short text, e.g. the speed while fast-forwarding (\"4×\").",
           "type": "object",
           "properties": {
@@ -3934,6 +4105,23 @@
         }
       ]
     },
+    "LayoutKey": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "Time on the edit from which this layout shows.",
+          "$ref": "#/$defs/TimeValue"
+        },
+        "layout": {
+          "$ref": "#/$defs/PresenterLayout"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "layout"
+      ]
+    },
     "Locale": {
       "description": "A language of the video.",
       "type": "object",
@@ -4048,6 +4236,37 @@
         {
           "$ref": "#/$defs/Point"
         }
+      ]
+    },
+    "PresenterLayout": {
+      "oneOf": [
+        {
+          "description": "Small camera picture in a corner.",
+          "type": "string",
+          "const": "bubble"
+        },
+        {
+          "description": "The camera as a tall panel over the right third of the frame.",
+          "type": "string",
+          "const": "side_by_side"
+        },
+        {
+          "description": "The camera fills the frame.",
+          "type": "string",
+          "const": "presenter_full"
+        },
+        {
+          "description": "The camera is hidden.",
+          "type": "string",
+          "const": "screen_full"
+        }
+      ]
+    },
+    "PresenterShape": {
+      "type": "string",
+      "enum": [
+        "circle",
+        "rounded"
       ]
     },
     "Profile": {

@@ -120,6 +120,8 @@ pub(crate) fn is_timeline_field(ptr: &str) -> bool {
     match parts.as_slice() {
         ["exports", n, "range", k] => return n.parse::<usize>().is_ok() && k.parse::<usize>().is_ok(),
         ["exports", n, "poster"] => return n.parse::<usize>().is_ok(),
+        // `/layers/N/layouts/K/at`: when a presenter layout takes over
+        ["layers", n, "layouts", k, "at"] => return n.parse::<usize>().is_ok() && k.parse::<usize>().is_ok(),
         _ => {}
     }
     // `/layers/N/params/reveal/K`: the reveal times of a feature_list
