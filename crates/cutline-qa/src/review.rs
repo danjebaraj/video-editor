@@ -265,11 +265,13 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     let mut files: Vec<PathBuf> = vec![];
 
     // ---- QA
-    let ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);
+    let mut ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);
     let mut target = tl.target.clone();
     if !use_final {
         target.width = plan.geometry.width;
         target.height = plan.geometry.height;
+        // the boxes were laid out at full size; the preview is smaller
+        crate::deliver::scale_boxes(&mut ctx, plan.geometry.width as f64 / tl.target.width as f64);
     }
     let qa: QaReport = run_qa(tc, &src, &target, &ctx)?;
     let qa_path = out_dir.join("qa.json");

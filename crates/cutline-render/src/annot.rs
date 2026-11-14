@@ -358,6 +358,10 @@ pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], st: &Style
     for lay in &active {
         if let (Layer::Text { template, text, subtitle, params, look, .. }, Some(cards)) = (&lay.layer, &st.cards) {
             let (t, len) = times(lay);
+            // a card that opens the video is complete on the first frame (no blank opening
+            // frame, and a usable poster): its entrance is treated as already played
+            let lead = if lay.start == 0 { 1.0 } else { 0.0 };
+            let (t, len) = (t + lead, len + lead);
             let empty = serde_json::Map::new();
             let params = params.as_ref().unwrap_or(&empty);
             let start = tl.secs(lay.start);
@@ -365,7 +369,7 @@ pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], st: &Style
             let reveal = params
                 .get("reveal")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_f64()).map(|x| tl.from_edit(x) - start).collect())
+                .map(|a| a.iter().filter_map(|x| x.as_f64()).map(|x| tl.from_edit(x) - start + lead).collect())
                 .unwrap_or_default();
             crate::cards::draw(
                 cv,
@@ -656,7 +660,7 @@ pub fn render(
             format!("{}x{}@{} {a}-{b} {:?} {:?} {}", g.width, g.height, g.fps, st.accent, st.safe, st.k).as_bytes(),
             st.look_key.as_bytes(),
             cutline_core::VERSION.as_bytes(),
-            b"annot-v1",
+            b"annot-v2",
         ]);
         let path = cache_dir.join(format!("{key}.mov"));
         if !path.exists() {

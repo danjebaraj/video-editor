@@ -111,6 +111,20 @@ pub fn qa_context_for(pr: &Prepared, d: &cutline_render::Delivery) -> QaContext 
     c
 }
 
+/// Scale the laid-out text boxes (full-size pixels) to the size of the file being checked,
+/// e.g. a draft preview.
+pub fn scale_boxes(c: &mut QaContext, k: f64) {
+    if (k - 1.0).abs() < 1e-9 {
+        return;
+    }
+    for b in &mut c.caption_boxes {
+        b.x *= k;
+        b.y *= k;
+        b.w *= k;
+        b.h *= k;
+    }
+}
+
 fn extras_caption_boxes(e: &cutline_render::PlanExtras) -> Vec<crate::qa::CaptionBox> {
     e.text_boxes
         .iter()
@@ -172,7 +186,8 @@ fn finish(
     exec: ExecReport,
 ) -> Result<ExportResult> {
     let t = std::time::Instant::now();
-    let ctx = qa_context_for(pr, &plan.delivery);
+    let mut ctx = qa_context_for(pr, &plan.delivery);
+    scale_boxes(&mut ctx, plan.geometry.width as f64 / pr.timeline.target.width as f64);
     let target = if plan.draft {
         let mut t = pr.timeline.target.clone();
         t.width = plan.geometry.width;
