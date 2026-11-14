@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "note": "Approximate ElevenLabs credit costs used to quote a call before it runs. The API's own usage figures are logged after each call.",
+  "tts_credits_per_char": {"default": 1.0, "eleven_flash_v2_5": 0.5, "eleven_turbo_v2_5": 0.5, "eleven_flash_v2": 0.5, "eleven_turbo_v2": 0.5},
+  "sfx_credits_per_second": 40.0,
+  "music_credits_per_second": 30.0,
+  "scribe_credits_per_minute": 100.0
+}
