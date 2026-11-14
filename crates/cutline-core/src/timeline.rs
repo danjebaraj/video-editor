@@ -63,6 +63,13 @@ pub struct TClip {
     pub start: i64,
     /// Timeline duration in frames (including freezes).
     pub frames: i64,
+    /// Where the clip's picture sits in the output frame (fractions) when it is drawn inside
+    /// a screen frame. Rects on the clip (`zoom_to`, annotations) are relative to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Rect>,
+    /// The screen frame in effect (the clip's own, or the project's `default_frame`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<ScreenFrame>,
     pub clip: Clip,
 }
 
@@ -616,7 +623,22 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     clip.speed = Some(crate::time::round6(speed));
                     clip.out = Some(TimeValue::Seconds(crate::time::round6(src_out)));
                 }
+                // screen frame: the clip's own, else the project default for recordings
+                let frame = c
+                    .frame
+                    .clone()
+                    .or_else(|| p.default_frame.clone().filter(|_| kind == AssetKind::Video && !c.is_bumper()))
+                    .filter(|f| f.style != FrameStyle::Off);
+                if let Some(fr) = &frame {
+                    check_frame(fr, c, p, &facts, &format!("{base}/frame"), &mut d);
+                }
+                let content = frame.as_ref().map(|fr| {
+                    let src = f.map(|f| (f.width, f.height)).filter(|s| s.0 > 0 && s.1 > 0).unwrap_or((16, 9));
+                    crate::frame::layout(fr, src, (spec.width, spec.height)).content_rect((spec.width, spec.height))
+                });
                 clips.push(TClip {
+                    content,
+                    frame,
                     main_index: mi,
                     index,
                     id: c.id.clone(),
@@ -964,6 +986,63 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
         Timeline { fps, target: spec, total_frames: total, origin, body_end, clips, transitions, layers }
     });
     (tl, d)
+}
+
+fn check_frame(
+    fr: &ScreenFrame,
+    c: &Clip,
+    p: &Project,
+    facts: &BTreeMap<String, MediaFacts>,
+    base: &str,
+    d: &mut Vec<Diagnostic>,
+) {
+    if c.frame.is_some() && c.reframe.is_some() {
+        d.push(
+            Diagnostic::error(
+                "E_FIELD_CONFLICT",
+                base,
+                "a framed clip is fitted inside its window, so it cannot also have `reframe`",
+            )
+            .hint("remove `reframe`, or remove `frame` (or `frame: {style: \"off\"}` to opt out of default_frame)"),
+        );
+    }
+    for (k, v, hi) in [("padding", fr.padding, 0.4), ("shadow", fr.shadow, 1.0)] {
+        if v.is_some_and(|v| !(0.0..=hi).contains(&v)) {
+            d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/{k}"), format!("{k} must be within 0–{hi}")));
+        }
+    }
+    if fr.radius.is_some_and(|r| r.is_nan() || r < 0.0) {
+        d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/radius"), "radius must not be negative"));
+    }
+    match &fr.background {
+        Some(FrameBackground::Gradient { gradient }) if gradient.len() != 2 => {
+            d.push(Diagnostic::error(
+                "E_BAD_VALUE",
+                format!("{base}/background/gradient"),
+                "a gradient needs exactly two colors",
+            ));
+        }
+        Some(FrameBackground::Name(n)) if n != "brand" && !n.starts_with('#') => match p.assets.get(n) {
+            None => d.push(
+                Diagnostic::error(
+                    "E_UNKNOWN_ASSET",
+                    format!("{base}/background"),
+                    format!("background `{n}` is not `brand`, a #color or an asset id"),
+                )
+                .hint("e.g. \"brand\", \"#101014\", {gradient: [\"#1b1f3b\", \"#0b0d1a\"]} or an image asset"),
+            ),
+            Some(_) => {
+                if facts.get(n).is_some_and(|f| f.kind != AssetKind::Image) {
+                    d.push(Diagnostic::error(
+                        "E_WRONG_ASSET_KIND",
+                        format!("{base}/background"),
+                        format!("background asset `{n}` must be an image"),
+                    ));
+                }
+            }
+        },
+        _ => {}
+    }
 }
 
 /// A rect in fractions of the frame, inside it.

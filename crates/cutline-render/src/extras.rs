@@ -76,7 +76,18 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         ) {
             x.source_override = Some(html_clip(l, p, tl, c, draft, stills)?);
         }
-        if let Some(path) = crate::reframe::apply(l, p, tl, &g, c, &mut x, &mut extras.warnings)? {
+        if let (Some(fr), Some(m)) = (&c.frame, l.media.get(&c.asset)) {
+            let bg = crate::frame::background(fr.background.as_ref(), &brand.colors.background, |id| {
+                l.media.get(id).map(|a| (a.path.clone(), a.fingerprint.clone()))
+            });
+            let zg = crate::segment::zoom_geometry(c, m, &g, &x);
+            let src = if x.source_override.is_some() { (zg.width, zg.height) } else { (m.facts.width, m.facts.height) };
+            let cache = crate::cutline_dir(&l.dir).join("cache").join("frames");
+            x.frame = Some(
+                crate::frame::ensure(fr, src, (zg.width, zg.height), &bg, &cache)
+                    .map_err(|e| anyhow::anyhow!("clip `{}` frame: {e:#}", c.id))?,
+            );
+        } else if let Some(path) = crate::reframe::apply(l, p, tl, &g, c, &mut x, &mut extras.warnings)? {
             extras.crop_paths.insert(c.id.clone(), path);
         }
         extras.clip.insert(c.id.clone(), x);
@@ -136,7 +147,7 @@ fn annotations(l: &Loaded, tl: &Timeline, g: &crate::Geometry, brand: &Brand, ex
         font,
     };
     let cache = crate::cutline_dir(&l.dir).join("cache").join("annot");
-    extras.annot = crate::annot::render(cutline_deps::toolchain()?, tl, g, &extras.content_rects, &st, &cache)?;
+    extras.annot = crate::annot::render(cutline_deps::toolchain()?, tl, g, &st, &cache)?;
     Ok(())
 }
 

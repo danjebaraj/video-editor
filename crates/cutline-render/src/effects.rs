@@ -185,7 +185,17 @@ pub fn zoom_terms(
                 }
             }
             Effect::ZoomTo { rect, start, duration, ease: ez, padding, end } => {
-                let (s, p) = cutline_core::model::zoom_to_params(rect, padding.unwrap_or(0.03), 3.0);
+                // in a screen frame the rect is relative to the recording
+                let placed = match &c.content {
+                    Some(ct) => cutline_core::model::Rect {
+                        x: ct.x + rect.x * ct.w,
+                        y: ct.y + rect.y * ct.h,
+                        w: rect.w * ct.w,
+                        h: rect.h * ct.h,
+                    },
+                    None => *rect,
+                };
+                let (s, p) = cutline_core::model::zoom_to_params(&placed, padding.unwrap_or(0.03), 3.0);
                 if s > 1.0 {
                     terms.push(ScaleTerm::Ramp { a: *start, d: *duration, from: 1.0, to: s, ease: *ez });
                     if let Some(e) = end {

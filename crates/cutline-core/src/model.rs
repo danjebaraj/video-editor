@@ -70,6 +70,9 @@ pub struct Project {
     /// them as `"cue:clocks"`, `"cue:clocks+0.4"` or `"cue:clocks-0.2"`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cues: BTreeMap<String, Cue>,
+    /// Screen frame for every video clip that has no `frame` of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_frame: Option<ScreenFrame>,
     /// `false`: do not add the brand's `intro` / `outro` around `main`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brand_bumpers: Option<bool>,
@@ -347,6 +350,10 @@ pub struct Clip {
     pub color: Option<ColorGrade>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Effect>,
+    /// Draw the clip inside a window (browser, app window, phone, tablet) on a background,
+    /// instead of full-bleed. `zoom_to` rects and annotations stay relative to the recording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<ScreenFrame>,
     /// Clip audio: keep (default), mute, duck (−12 dB), or an asset id replacing it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<String>,
@@ -360,6 +367,72 @@ pub struct Clip {
     /// Set by `auto` expansion (e.g. `jump_cuts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_by: Option<String>,
+}
+
+/// A screen frame: the recording inside generated window chrome on a background.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenFrame {
+    #[serde(default)]
+    pub style: FrameStyle,
+    /// Address shown in a `browser` frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Title shown in a `window` frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// `brand` (default: the brand background), a color, `{gradient: [from, to]}`, or the id
+    /// of an image asset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<FrameBackground>,
+    /// Space around the window as a fraction of the frame's shorter side (default 0.06).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding: Option<f64>,
+    /// Corner radius in output px (default 14 at 1080p; phones and tablets have their own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// Drop shadow strength 0–1 (default 0.5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow: Option<f64>,
+    /// Chrome colors: dark (default) or light.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<FrameTheme>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameStyle {
+    /// Title bar with an address field.
+    #[default]
+    Browser,
+    /// Title bar with a title.
+    Window,
+    /// Rounded bezel, portrait recordings.
+    Phone,
+    Tablet,
+    /// No chrome: just rounded corners, shadow and background.
+    None,
+    /// No frame at all (opts a clip out of `default_frame`).
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameTheme {
+    #[default]
+    Dark,
+    Light,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum FrameBackground {
+    Gradient {
+        /// Two colors, top-left to bottom-right.
+        gradient: Vec<String>,
+    },
+    /// `brand`, a color (`#101014`) or an image asset id.
+    Name(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

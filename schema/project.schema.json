@@ -72,6 +72,17 @@
         "$ref": "#/$defs/Cue"
       }
     },
+    "default_frame": {
+      "description": "Screen frame for every video clip that has no `frame` of its own.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScreenFrame"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "default_reframe": {
       "description": "Default geometry for clips whose aspect differs from the target (default `cover`).",
       "anyOf": [
@@ -658,6 +669,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/EndFit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "frame": {
+          "description": "Draw the clip inside a window (browser, app window, phone, tablet) on a background,\ninstead of full-bleed. `zoom_to` rects and annotations stay relative to the recording.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScreenFrame"
             },
             {
               "type": "null"
@@ -1447,6 +1469,71 @@
         {
           "type": "string"
         }
+      ]
+    },
+    "FrameBackground": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "gradient": {
+              "description": "Two colors, top-left to bottom-right.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "gradient"
+          ]
+        },
+        {
+          "description": "`brand`, a color (`#101014`) or an image asset id.",
+          "type": "string"
+        }
+      ]
+    },
+    "FrameStyle": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "tablet"
+          ]
+        },
+        {
+          "description": "Title bar with an address field.",
+          "type": "string",
+          "const": "browser"
+        },
+        {
+          "description": "Title bar with a title.",
+          "type": "string",
+          "const": "window"
+        },
+        {
+          "description": "Rounded bezel, portrait recordings.",
+          "type": "string",
+          "const": "phone"
+        },
+        {
+          "description": "No chrome: just rounded corners, shadow and background.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "No frame at all (opts a clip out of `default_frame`).",
+          "type": "string",
+          "const": "off"
+        }
+      ]
+    },
+    "FrameTheme": {
+      "type": "string",
+      "enum": [
+        "dark",
+        "light"
       ]
     },
     "HighlightStyle": {
@@ -3671,6 +3758,77 @@
         "left",
         "right"
       ]
+    },
+    "ScreenFrame": {
+      "description": "A screen frame: the recording inside generated window chrome on a background.",
+      "type": "object",
+      "properties": {
+        "background": {
+          "description": "`brand` (default: the brand background), a color, `{gradient: [from, to]}`, or the id\nof an image asset.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameBackground"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "padding": {
+          "description": "Space around the window as a fraction of the frame's shorter side (default 0.06).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "radius": {
+          "description": "Corner radius in output px (default 14 at 1080p; phones and tablets have their own).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "shadow": {
+          "description": "Drop shadow strength 0–1 (default 0.5).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "style": {
+          "$ref": "#/$defs/FrameStyle",
+          "default": "browser"
+        },
+        "theme": {
+          "description": "Chrome colors: dark (default) or light.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "description": "Title shown in a `window` frame.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Address shown in a `browser` frame.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "SnapToBeats": {
       "type": "object",

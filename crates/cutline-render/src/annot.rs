@@ -24,10 +24,6 @@ pub struct AnnotRender {
     pub end: f64,
 }
 
-/// Where a clip's picture sits in the output frame (fractions). The whole frame unless the clip
-/// is drawn inside a screen frame.
-pub type ContentRects = std::collections::BTreeMap<String, Rect>;
-
 const FULL: Rect = Rect { x: 0.0, y: 0.0, w: 1.0, h: 1.0 };
 
 /// Look shared by every annotation in a render.
@@ -288,16 +284,17 @@ pub fn cursor_at(path: &[CursorKey], t: f64) -> ((f64, f64), Option<f64>) {
 }
 
 /// Draw every annotation active at timeline frame `fr`.
-pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], content: &ContentRects, st: &Style, fr: i64) {
+pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], st: &Style, fr: i64) {
     let (w, h) = (cv.w as f64, cv.h as f64);
     let k = st.k;
     let active: Vec<&&TLayer> = layers.iter().filter(|l| fr >= l.start && fr < l.end).collect();
     let ctx = |lay: &TLayer, follow: Option<bool>| -> (Map, Rect) {
         let c = clip_under(tl, lay, fr);
-        let content = c.and_then(|c| content.get(&c.id)).copied().unwrap_or(FULL);
-        let map = match c {
-            Some(c) if follow != Some(false) => zoom_map(c, tl, fr, w, h),
-            _ => Map::IDENTITY,
+        // screen coordinates with `follow: false`; otherwise relative to the clip's picture
+        // (inside its screen frame, if any) and moving with its zoom
+        let (map, content) = match c {
+            Some(c) if follow != Some(false) => (zoom_map(c, tl, fr, w, h), c.content.unwrap_or(FULL)),
+            _ => (Map::IDENTITY, FULL),
         };
         (map, content)
     };
@@ -579,7 +576,6 @@ pub fn render(
     tc: &cutline_deps::Toolchain,
     tl: &Timeline,
     g: &Geometry,
-    content: &ContentRects,
     st: &Style,
     cache_dir: &Path,
 ) -> Result<Vec<AnnotRender>> {
@@ -590,7 +586,6 @@ pub fn render(
         let key = cutline_media::hash_key(&[
             serde_json::to_string(&layers).unwrap_or_default().as_bytes(),
             serde_json::to_string(&clips).unwrap_or_default().as_bytes(),
-            serde_json::to_string(content).unwrap_or_default().as_bytes(),
             format!("{}x{}@{} {a}-{b} {:?} {:?} {}", g.width, g.height, g.fps, st.accent, st.safe, st.k).as_bytes(),
             cutline_core::VERSION.as_bytes(),
             b"annot-v1",
@@ -614,7 +609,7 @@ pub fn render(
                 let mut cv = Canvas::new(g.width, g.height);
                 for fr in a..b {
                     cv.clear();
-                    draw_frame(&mut cv, tl, &layers, content, st, fr);
+                    draw_frame(&mut cv, tl, &layers, st, fr);
                     stdin.write_all(&cv.px).context("writing annotation frames")?;
                 }
             }

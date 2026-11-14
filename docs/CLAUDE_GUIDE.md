@@ -85,6 +85,11 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - Point at UI with `{type: "zoom_to", rect: {x, y, w, h}, start, end}` instead of working out
   zoom scales and focus points. Zooms are sub-pixel smooth and use the recording's full
   resolution, so do not pre-crop or pre-scale footage outside cutline.
+- Frame the recording: `default_frame: {style: "browser", url: "app.example.com"}` puts every
+  recording in a window on the brand background (`window` for desktop apps, `phone` / `tablet`
+  for mobile recordings). It reads as a product shot instead of a raw capture, and it is the
+  right way to show a 16:9 recording in a vertical video (prefer it to `fit_blur`). Rects for
+  `zoom_to` and annotations stay relative to the recording.
 - Show where to look. Pair a `zoom_to` with a `highlight` on the same `rect` (it follows the
   zoom), use `spotlight` when the rest of the screen distracts, an `arrow` with a short `label`
   for "new here", `keys` when the narration names a shortcut, and a `cursor` layer over

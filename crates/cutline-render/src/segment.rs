@@ -48,6 +48,8 @@ pub struct ClipExtras {
     pub pad_color: String,
     /// Keep full chroma resolution (4:4:4 mezzanine) for a 4:4:4 deliverable.
     pub chroma444: bool,
+    /// Screen frame: the chrome picture and where the recording goes (see `frame`).
+    pub frame: Option<crate::frame::FramePlan>,
 }
 
 fn atempo_chain(speed: f64) -> Vec<String> {
@@ -123,6 +125,28 @@ pub fn geometry_chain(
         _ => format!(
             "[{inp}]scale={w}:{h}:force_original_aspect_ratio=increase:force_divisible_by=2:flags=lanczos:{cs},crop={w}:{h},setsar=1[{out}]"
         ),
+    }
+}
+
+/// The geometry a clip's zoom works in. Zooming clips whose source out-resolves the picture
+/// work at 2× and scale down after the zoom, so a punch-in shows source detail rather than an
+/// enlarged downscale. A framed clip is judged by the size of its window, not the whole frame.
+pub fn zoom_geometry(c: &TClip, m: &AssetMedia, g: &Geometry, extras: &ClipExtras) -> Geometry {
+    let (sw, sh) = (m.facts.width as f64, m.facts.height as f64);
+    let (pw, ph) = match &c.content {
+        Some(ct) => (ct.w * g.width as f64, ct.h * g.height as f64),
+        None => (g.width as f64, g.height as f64),
+    };
+    let zoom_max = effects::max_zoom(c, g.fps.frames_to_secs(c.frames));
+    let supersample = extras.geometry_override.is_none()
+        && extras.source_override.is_none()
+        && zoom_max >= 1.15
+        && (sw / pw.max(1.0)).min(sh / ph.max(1.0)) >= 1.4
+        && g.width.max(g.height) <= 2560;
+    if supersample {
+        Geometry { width: g.width * 2, height: g.height * 2, fps: g.fps }
+    } else {
+        *g
     }
 }
 
@@ -210,18 +234,28 @@ pub fn build(
     }
     v.push(format!("[0:v]{}[vn]", pre.join(",")));
     let (sw, sh) = (m.facts.width, m.facts.height);
-    // Zooming clips whose source out-resolves the target work at 2× and scale down after
-    // the zoom, so a punch-in shows source detail rather than an enlarged downscale.
-    let zoom_max = effects::max_zoom(c, dur_secs);
-    let supersample = extras.geometry_override.is_none()
-        && extras.source_override.is_none()
-        && zoom_max >= 1.15
-        && (sw as f64 / g.width as f64).min(sh as f64 / g.height as f64) >= 1.4
-        && g.width.max(g.height) <= 2560;
-    let zg = if supersample { Geometry { width: g.width * 2, height: g.height * 2, fps: g.fps } } else { g.clone() };
-    match &extras.geometry_override {
-        Some(go) => v.push(go.replace("{in}", "vn").replace("{out}", "vg").replace("{cin}", &color_in(m))),
-        None => v.push(geometry_chain(mode, sw, sh, &zg, "vn", "vg", &extras.pad_color, &color_in(m))),
+    let zg = zoom_geometry(c, m, g, extras);
+    // a screen frame only applies when its picture was drawn for this geometry
+    let frame = extras.frame.as_ref().filter(|f| f.size == (zg.width, zg.height));
+    match (&extras.geometry_override, frame) {
+        (_, Some(fp)) => {
+            let (cx, cy, cw, ch) = fp.layout.content;
+            input.extend(
+                ["-loop", "1", "-framerate", &fps.ff(), "-t", &f(dur_secs + 1.0), "-i", &fp.png.to_string_lossy()]
+                    .map(String::from),
+            );
+            v.push(format!(
+                "[vn]scale={cw}:{ch}:flags=lanczos:{cin}:out_color_matrix=bt709:out_range=tv,setsar=1,format=yuv444p,pad={}:{}:{cx}:{cy}:color=black[vfc];\
+                 [1:v]fps={},scale=w=iw:h=ih:out_color_matrix=bt709:out_range=tv,format=yuva444p[vfp];\
+                 [vfc][vfp]overlay=0:0:eof_action=repeat:format=auto,format=yuv444p[vg]",
+                zg.width,
+                zg.height,
+                fps.ff(),
+                cin = color_in(m),
+            ));
+        }
+        (Some(go), None) => v.push(go.replace("{in}", "vn").replace("{out}", "vg").replace("{cin}", &color_in(m))),
+        (None, None) => v.push(geometry_chain(mode, sw, sh, &zg, "vn", "vg", &extras.pad_color, &color_in(m))),
     }
     let mut vlab = "vg".to_string();
     if let Some(cg) = &c.clip.color {
@@ -281,6 +315,9 @@ pub fn build(
     filter.push_str(&a.join(";\n"));
     filter.push('\n');
     let mut deps = extras.deps.clone();
+    if let Some(fp) = frame {
+        deps.push(fp.png.clone());
+    }
     if let Some(l) = &extras.lut_path {
         deps.push(l.clone());
     }

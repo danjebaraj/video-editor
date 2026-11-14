@@ -37,6 +37,7 @@ Errors: `E_BEAT_REF`.
 | `captions` | Captions | none | |
 | `audio` | AudioSettings | defaults below | |
 | `auto` | AutoDirectives | none | expanded by `cutline expand` |
+| `default_frame` | ScreenFrame | none | screen frame for every video clip; see [Screen frame](#screen-frame-frame-on-a-clip-default_frame-on-the-project) |
 | `default_reframe` | Reframe | `{mode: "cover"}` | geometry when source aspect ≠ target |
 | `safe_zone` | `{top, bottom, left, right}` fractions | per target | |
 | `markers` | [`{at, title}`] | `[]` | chapters |
@@ -94,6 +95,36 @@ WebM VP9 alpha is decoded with `libvpx-vp9` automatically.
 | `audio` | `keep` | `keep`, `mute`, `duck` (−12 dB) or an asset id replacing it |
 | `gain_db` | 0 | |
 | `chapter` | — | chapter title starting at this clip |
+
+### Screen frame (`frame` on a clip, `default_frame` on the project)
+
+Draws the clip inside generated window chrome on a background instead of full-bleed:
+
+```json5
+default_frame: {style: "browser", url: "app.example.com"},        // every video clip
+main: [
+  {id: "dash", clip: "screen"},
+  {id: "ios", clip: "phone_rec", frame: {style: "phone", background: {gradient: ["#3b1f5b", "#0b0d1a"]}}},
+  {id: "raw", clip: "screen2", frame: {style: "off"}},             // full-bleed after all
+]
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `style` | `browser` | `browser` (title bar with `url`), `window` (title bar with `title`), `phone`, `tablet` (rounded bezel), `none` (rounded corners and shadow only), `off` (no frame; opts a clip out of `default_frame`) |
+| `url`, `title` | — | text in the bar |
+| `background` | `"brand"` | `"brand"` (soft gradient from the brand background), a `"#color"`, `{gradient: [from, to]}` (top-left to bottom-right) or an image asset id (cover-fitted) |
+| `padding` | 0.06 | space around the window, as a fraction of the frame's shorter side |
+| `radius` | 14 px | corner radius (phones and tablets have their own) |
+| `shadow` | 0.5 | drop-shadow strength, 0–1 |
+| `theme` | `dark` | chrome colors: `dark` or `light` |
+
+- The recording keeps its aspect ratio and is never cropped; the window is as large as the
+  padding allows. On vertical targets it sits in the upper part, leaving room for captions.
+- `zoom_to` rects, annotation rects and points stay **relative to the recording**, so adding or
+  changing a frame never invalidates them. Zooms use the recording's full resolution.
+- `default_frame` applies to video clips only (not stills, HTML or brand bumpers).
+- A framed clip cannot also have `reframe` (`E_FIELD_CONFLICT`).
 
 ### Transition (`{transition: {...}}` between two clips)
 

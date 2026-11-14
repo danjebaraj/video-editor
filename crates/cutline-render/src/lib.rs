@@ -10,6 +10,7 @@ pub mod custom_transitions;
 pub mod effects;
 pub mod escape;
 pub mod extras;
+pub mod frame;
 pub mod job;
 pub mod overlay;
 pub mod pipeline;
@@ -230,8 +231,6 @@ pub struct PlanExtras {
     pub warnings: Vec<cutline_core::Diagnostic>,
     /// Rendered annotation runs (highlight, spotlight, arrow, keys, cursor).
     pub annot: Vec<annot::AnnotRender>,
-    /// Where each clip's picture sits in the output frame (clips inside a screen frame).
-    pub content_rects: annot::ContentRects,
     /// Brand logo drawn as a watermark.
     pub watermark: Option<WatermarkSpec>,
     /// Reframe crop paths per clip id (for the review pack).

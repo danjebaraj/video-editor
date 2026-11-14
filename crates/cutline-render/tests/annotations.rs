@@ -161,7 +161,7 @@ fn draw(tl: &Timeline, fr: i64) -> Canvas {
     let st = Style { accent: [255, 196, 0], safe: (32.0, 18.0, 576.0, 313.0), k: 1.0, font };
     let layers: Vec<_> = tl.layers.iter().collect();
     let mut cv = Canvas::new(640, 360);
-    annot::draw_frame(&mut cv, tl, &layers, &Default::default(), &st, fr);
+    annot::draw_frame(&mut cv, tl, &layers, &st, fr);
     cv
 }
 

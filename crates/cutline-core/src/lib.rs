@@ -3,6 +3,7 @@
 pub mod brand;
 pub mod catalog;
 pub mod diag;
+pub mod frame;
 pub mod model;
 pub mod parse;
 pub mod target;
