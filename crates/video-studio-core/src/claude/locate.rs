@@ -35,8 +35,13 @@ pub struct ClaudeInfo {
 
 pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
     let token = text.split_whitespace().find(|t| t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))?;
-    let mut parts = token.split('.').map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>());
-    Some((parts.next()?.ok()?, parts.next().and_then(|p| p.ok()).unwrap_or(0), parts.next().and_then(|p| p.ok()).unwrap_or(0)))
+    let mut parts =
+        token.split('.').map(|p| p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>());
+    Some((
+        parts.next()?.ok()?,
+        parts.next().and_then(|p| p.ok()).unwrap_or(0),
+        parts.next().and_then(|p| p.ok()).unwrap_or(0),
+    ))
 }
 
 /// Parses `--effort <level> … (low, medium, high)` from the CLI help.
@@ -48,7 +53,11 @@ pub fn parse_effort_levels(help: &str) -> Vec<String> {
     let end = rest[9..].find(" --").map(|e| e + 9).unwrap_or(rest.len());
     let rest = &rest[..end];
     match (rest.rfind('('), rest.rfind(')')) {
-        (Some(a), Some(b)) if b > a => rest[a + 1..b].split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && !s.contains(' ')).collect(),
+        (Some(a), Some(b)) if b > a => rest[a + 1..b]
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && !s.contains(' '))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -71,7 +80,9 @@ fn login_path() -> Option<String> {
             if cfg!(windows) {
                 return std::env::var("PATH").ok();
             }
-            run_login_shell("echo $PATH").map(|s| s.lines().last().unwrap_or("").trim().to_string()).filter(|s| !s.is_empty())
+            run_login_shell("echo $PATH")
+                .map(|s| s.lines().last().unwrap_or("").trim().to_string())
+                .filter(|s| !s.is_empty())
         })
         .clone()
 }
@@ -139,13 +150,19 @@ pub fn child_env(login: Option<&str>) -> HashMap<String, String> {
     env
 }
 
-fn run_with_env(exe: &Utf8Path, args: &[&str], login: Option<&str>, timeout: Duration) -> Option<(i32, String, String)> {
+fn run_with_env(
+    exe: &Utf8Path,
+    args: &[&str],
+    login: Option<&str>,
+    timeout: Duration,
+) -> Option<(i32, String, String)> {
     let mut cmd = Command::new(exe.as_str());
     cmd.args(args).env_clear().envs(child_env(login));
     run_capture(&mut cmd, timeout).ok()
 }
 
-const CLAUDE_LOCATIONS: [&str; 4] = ["~/.claude/local/claude", "~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"];
+const CLAUDE_LOCATIONS: [&str; 4] =
+    ["~/.claude/local/claude", "~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"];
 
 /// Finds Claude Code. `VIDEO_STUDIO_CLAUDE` overrides everything (tests use a fake CLI), and
 /// `VIDEO_STUDIO_NO_CLAUDE` makes detection fail (to exercise the setup screen).
@@ -163,10 +180,14 @@ pub fn find_claude(custom_path: &str) -> Option<ClaudeInfo> {
         if !is_executable(&c) {
             continue;
         }
-        let Some((0, out, _)) = run_with_env(&c, &["--version"], login.as_deref(), Duration::from_secs(15)) else { continue };
+        let Some((0, out, _)) = run_with_env(&c, &["--version"], login.as_deref(), Duration::from_secs(15)) else {
+            continue;
+        };
         let text = out.lines().next().unwrap_or("").trim().to_string();
         let Some(v) = parse_version(&text) else { continue };
-        let effort_levels = run_with_env(&c, &["--help"], login.as_deref(), Duration::from_secs(15)).map(|(_, help, _)| parse_effort_levels(&help)).unwrap_or_default();
+        let effort_levels = run_with_env(&c, &["--help"], login.as_deref(), Duration::from_secs(15))
+            .map(|(_, help, _)| parse_effort_levels(&help))
+            .unwrap_or_default();
         return Some(ClaudeInfo {
             path: c.to_string(),
             version: format!("{}.{}.{}", v.0, v.1, v.2),
@@ -181,7 +202,12 @@ pub fn find_claude(custom_path: &str) -> Option<ClaudeInfo> {
 
 /// Whether the CLI is signed in (`claude auth status`). `None` when it can't be told.
 pub fn claude_signed_in(info: &ClaudeInfo) -> Option<bool> {
-    let (_, out, _) = run_with_env(Utf8Path::new(&info.path), &["auth", "status"], info.login_path.as_deref(), Duration::from_secs(20))?;
+    let (_, out, _) = run_with_env(
+        Utf8Path::new(&info.path),
+        &["auth", "status"],
+        info.login_path.as_deref(),
+        Duration::from_secs(20),
+    )?;
     let v: Value = serde_json::from_str(out.trim()).ok()?;
     v["loggedIn"].as_bool()
 }
@@ -202,7 +228,11 @@ pub fn find_cutline(custom_path: &str, repo: &str) -> Option<CutlineInfo> {
     let forced = std::env::var("VIDEO_STUDIO_CUTLINE").ok().filter(|s| !s.is_empty());
     let mut list = match &forced {
         Some(f) => vec![Utf8PathBuf::from(f)],
-        None => candidates("cutline", custom_path, &["~/.local/bin/cutline", "/opt/homebrew/bin/cutline", "/usr/local/bin/cutline"]),
+        None => candidates(
+            "cutline",
+            custom_path,
+            &["~/.local/bin/cutline", "/opt/homebrew/bin/cutline", "/usr/local/bin/cutline"],
+        ),
     };
     if forced.is_none() && !repo.trim().is_empty() {
         let repo = paths::expand_tilde(repo.trim());
@@ -236,14 +266,19 @@ pub fn summarize_doctor(report: &Value) -> DoctorSummary {
     let mut s = DoctorSummary { ok: true, raw: report.clone(), ..Default::default() };
     for c in report["capabilities"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
         if c["present"].as_bool() == Some(false) && c["required"].as_bool() == Some(true) {
-            s.missing_required.push(format!("{} {}", c["kind"].as_str().unwrap_or("tool"), c["name"].as_str().unwrap_or("?")));
+            s.missing_required.push(format!(
+                "{} {}",
+                c["kind"].as_str().unwrap_or("tool"),
+                c["name"].as_str().unwrap_or("?")
+            ));
         }
     }
     if let Some(o) = report.as_object() {
         if o.get("chrome").map(Value::is_null).unwrap_or(false) {
             s.missing_optional.push("Chrome (HTML graphics)".into());
         }
-        let no_whisper = o.get("whisper_cli").map(Value::is_null).unwrap_or(false) || o.get("whisper_models").and_then(Value::as_array).map(|a| a.is_empty()).unwrap_or(false);
+        let no_whisper = o.get("whisper_cli").map(Value::is_null).unwrap_or(false)
+            || o.get("whisper_models").and_then(Value::as_array).map(|a| a.is_empty()).unwrap_or(false);
         if no_whisper {
             s.missing_optional.push("whisper (captions from speech)".into());
         }
@@ -251,15 +286,24 @@ pub fn summarize_doctor(report: &Value) -> DoctorSummary {
             s.missing_optional.push("face model (reframing)".into());
         }
     }
-    if report["ok"].as_bool() == Some(false) || report["errors"].as_u64().unwrap_or(0) > 0 || !s.missing_required.is_empty() {
+    if report["ok"].as_bool() == Some(false)
+        || report["errors"].as_u64().unwrap_or(0) > 0
+        || !s.missing_required.is_empty()
+    {
         s.ok = false;
     }
     s
 }
 
 pub fn cutline_doctor(cutline: &Utf8Path) -> Result<DoctorSummary> {
-    let (code, out, err) = run_capture(Command::new(cutline.as_str()).args(["doctor", "--json"]), Duration::from_secs(120))?;
-    let v: Value = serde_json::from_str(out.trim()).map_err(|_| Error::Environment(format!("cutline doctor failed (exit {code}): {}", err.lines().last().unwrap_or("no output"))))?;
+    let (code, out, err) =
+        run_capture(Command::new(cutline.as_str()).args(["doctor", "--json"]), Duration::from_secs(120))?;
+    let v: Value = serde_json::from_str(out.trim()).map_err(|_| {
+        Error::Environment(format!(
+            "cutline doctor failed (exit {code}): {}",
+            err.lines().last().unwrap_or("no output")
+        ))
+    })?;
     let mut s = summarize_doctor(&v);
     if code != 0 {
         s.ok = false;

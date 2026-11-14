@@ -191,9 +191,13 @@ pub fn kind_for_path(path: &Utf8Path) -> MediaKind {
         return MediaKind::DemoScript;
     }
     match path.extension().map(|e| e.to_ascii_lowercase()).as_deref() {
-        Some("mp4" | "mov" | "m4v" | "mkv" | "webm" | "avi" | "mxf" | "mts" | "m2ts" | "mpg" | "mpeg" | "wmv") => MediaKind::Video,
+        Some("mp4" | "mov" | "m4v" | "mkv" | "webm" | "avi" | "mxf" | "mts" | "m2ts" | "mpg" | "mpeg" | "wmv") => {
+            MediaKind::Video
+        }
         Some("wav" | "mp3" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "aif" | "aiff" | "wma") => MediaKind::Audio,
-        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "heic" | "svg" | "psd") => MediaKind::Image,
+        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "heic" | "svg" | "psd") => {
+            MediaKind::Image
+        }
         Some("ttf" | "otf" | "ttc" | "woff" | "woff2") => MediaKind::Font,
         Some("json" | "srt" | "vtt") => MediaKind::Transcript,
         Some("tape") => MediaKind::Tape,
@@ -204,13 +208,17 @@ pub fn kind_for_path(path: &Utf8Path) -> MediaKind {
 fn default_role(kind: MediaKind, name: &str) -> Option<MediaRole> {
     let n = name.to_ascii_lowercase();
     match kind {
-        MediaKind::Video if n.contains("screen") || n.contains("recording") || n.contains("demo") => Some(MediaRole::ScreenRecording),
+        MediaKind::Video if n.contains("screen") || n.contains("recording") || n.contains("demo") => {
+            Some(MediaRole::ScreenRecording)
+        }
         MediaKind::Video if n.contains("broll") || n.contains("b-roll") => Some(MediaRole::BRoll),
         MediaKind::Video => Some(MediaRole::Footage),
         MediaKind::Image if n.contains("logo") => Some(MediaRole::Logo),
         MediaKind::Audio if n.contains("music") || n.contains("track") || n.contains("song") => Some(MediaRole::Music),
         MediaKind::Audio if n.contains("sfx") || n.contains("whoosh") => Some(MediaRole::Sfx),
-        MediaKind::Audio if n.contains("vo") || n.contains("voice") || n.contains("narration") => Some(MediaRole::Voice),
+        MediaKind::Audio if n.contains("vo") || n.contains("voice") || n.contains("narration") => {
+            Some(MediaRole::Voice)
+        }
         _ => None,
     }
 }
@@ -220,7 +228,8 @@ const MIB: u64 = 1 << 20;
 /// Size, modification time and a fast content hash (first, middle and last 1 MiB plus the size).
 pub fn fingerprint(path: &Utf8Path) -> Result<Fingerprint> {
     use sha2::{Digest, Sha256};
-    let mut f = std::fs::File::open(path).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{path}: {e}"))))?;
+    let mut f =
+        std::fs::File::open(path).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{path}: {e}"))))?;
     let meta = f.metadata()?;
     let size = meta.len();
     let mut h = Sha256::new();
@@ -255,7 +264,11 @@ pub fn fingerprint(path: &Utf8Path) -> Result<Fingerprint> {
 }
 
 fn project_dir(project_path: Option<&Utf8Path>) -> Utf8PathBuf {
-    project_path.and_then(|p| p.parent()).filter(|p| !p.as_str().is_empty()).map(|p| p.to_owned()).unwrap_or_else(|| Utf8PathBuf::from("."))
+    project_path
+        .and_then(|p| p.parent())
+        .filter(|p| !p.as_str().is_empty())
+        .map(|p| p.to_owned())
+        .unwrap_or_else(|| Utf8PathBuf::from("."))
 }
 
 fn set_location(item: &mut MediaItem, file: &Utf8Path, project_path: Option<&Utf8Path>, refs: &dyn FileRefs) {
@@ -267,11 +280,19 @@ fn set_location(item: &mut MediaItem, file: &Utf8Path, project_path: Option<&Utf
 
 /// Adds a file as a media item (by reference) and returns its ID. Adding a file that is already
 /// in the project returns the existing item's ID.
-pub fn add_media(project: &mut Project, project_path: Option<&Utf8Path>, file: &Utf8Path, refs: &dyn FileRefs) -> Result<String> {
+pub fn add_media(
+    project: &mut Project,
+    project_path: Option<&Utf8Path>,
+    file: &Utf8Path,
+    refs: &dyn FileRefs,
+) -> Result<String> {
     if !file.is_file() {
         return Err(Error::NotFound(format!("{file} isn't a file")));
     }
-    let abs = paths::absolutize(file, &std::env::current_dir().ok().and_then(|p| paths::utf8(p).ok()).unwrap_or_else(|| Utf8PathBuf::from(".")));
+    let abs = paths::absolutize(
+        file,
+        &std::env::current_dir().ok().and_then(|p| paths::utf8(p).ok()).unwrap_or_else(|| Utf8PathBuf::from(".")),
+    );
     let canon = paths::canonical_or_normal(&abs);
     let base = project_dir(project_path);
     for m in &project.media {
@@ -293,12 +314,22 @@ pub fn add_media(project: &mut Project, project_path: Option<&Utf8Path>, file: &
 
 /// Adds every media file under `dir` (recursively), optionally only of the given kinds.
 /// Hidden files and unknown file types are skipped. Returns the new or existing IDs.
-pub fn add_folder(project: &mut Project, project_path: Option<&Utf8Path>, dir: &Utf8Path, kinds: Option<&[MediaKind]>, refs: &dyn FileRefs) -> Result<Vec<String>> {
+pub fn add_folder(
+    project: &mut Project,
+    project_path: Option<&Utf8Path>,
+    dir: &Utf8Path,
+    kinds: Option<&[MediaKind]>,
+    refs: &dyn FileRefs,
+) -> Result<Vec<String>> {
     if !dir.is_dir() {
         return Err(Error::NotFound(format!("{dir} isn't a folder")));
     }
     let mut files: Vec<Utf8PathBuf> = Vec::new();
-    for e in walkdir::WalkDir::new(dir).follow_links(false).into_iter().filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.')) {
+    for e in walkdir::WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
+    {
         let Ok(e) = e else { continue };
         if !e.file_type().is_file() {
             continue;
@@ -396,7 +427,8 @@ impl RootIndex {
     /// name (renamed), then — when `allow_changed` — the same name with different content.
     fn find(&self, item: &MediaItem, allow_changed: bool) -> Option<(Utf8PathBuf, bool)> {
         let name = item.file_name().map(|n| n.to_lowercase());
-        let named: &[Utf8PathBuf] = name.as_ref().and_then(|n| self.by_name.get(n)).map(|v| v.as_slice()).unwrap_or(&[]);
+        let named: &[Utf8PathBuf] =
+            name.as_ref().and_then(|n| self.by_name.get(n)).map(|v| v.as_slice()).unwrap_or(&[]);
         if let Some(fp) = &item.fingerprint {
             for p in named {
                 if matches_fingerprint(p, fp) {
@@ -453,7 +485,12 @@ pub fn search_roots(project: &Project, project_path: Option<&Utf8Path>, app_root
 }
 
 /// Resolves one item: bookmark, relative path, absolute path, then search roots.
-pub fn resolve_item(item: &MediaItem, project_path: Option<&Utf8Path>, index: Option<&RootIndex>, refs: &dyn FileRefs) -> Resolution {
+pub fn resolve_item(
+    item: &MediaItem,
+    project_path: Option<&Utf8Path>,
+    index: Option<&RootIndex>,
+    refs: &dyn FileRefs,
+) -> Resolution {
     let base = project_dir(project_path);
     let stored = item.paths.absolute.clone().or_else(|| item.paths.relative.clone());
     let stored_abs = item.paths.absolute.as_ref().map(|a| paths::normalize(Utf8Path::new(a)));
@@ -484,23 +521,44 @@ pub fn resolve_item(item: &MediaItem, project_path: Option<&Utf8Path>, index: Op
         }
     }
     match found {
-        None => Resolution { id: item.id.clone(), status: MediaStatus::Missing, path: None, found_by: None, stored_path: stored },
+        None => Resolution {
+            id: item.id.clone(),
+            status: MediaStatus::Missing,
+            path: None,
+            found_by: None,
+            stored_path: stored,
+        },
         Some((p, by)) => {
             let status = if !via_root_exact || !content_matches(&p, item) {
                 MediaStatus::Changed
-            } else if stored_abs.as_ref().map(|s| paths::canonical_or_normal(s) != paths::canonical_or_normal(&p)).unwrap_or(true) {
+            } else if stored_abs
+                .as_ref()
+                .map(|s| paths::canonical_or_normal(s) != paths::canonical_or_normal(&p))
+                .unwrap_or(true)
+            {
                 MediaStatus::Moved
             } else {
                 MediaStatus::Ok
             };
-            Resolution { id: item.id.clone(), status, path: Some(p.to_string()), found_by: Some(by), stored_path: stored }
+            Resolution {
+                id: item.id.clone(),
+                status,
+                path: Some(p.to_string()),
+                found_by: Some(by),
+                stored_path: stored,
+            }
         }
     }
 }
 
 /// Resolves every media item. The search-root index is only built when something is missing
 /// from its stored location.
-pub fn resolve_all(project: &Project, project_path: Option<&Utf8Path>, app_roots: &[String], refs: &dyn FileRefs) -> Vec<Resolution> {
+pub fn resolve_all(
+    project: &Project,
+    project_path: Option<&Utf8Path>,
+    app_roots: &[String],
+    refs: &dyn FileRefs,
+) -> Vec<Resolution> {
     let first: Vec<Resolution> = project.media.iter().map(|m| resolve_item(m, project_path, None, refs)).collect();
     if first.iter().all(|r| r.status != MediaStatus::Missing) {
         return first;
@@ -514,13 +572,26 @@ pub fn resolve_all(project: &Project, project_path: Option<&Utf8Path>, app_roots
         .media
         .iter()
         .zip(first)
-        .map(|(m, r)| if r.status == MediaStatus::Missing { resolve_item(m, project_path, Some(&index), refs) } else { r })
+        .map(
+            |(m, r)| {
+                if r.status == MediaStatus::Missing {
+                    resolve_item(m, project_path, Some(&index), refs)
+                } else {
+                    r
+                }
+            },
+        )
         .collect()
 }
 
 /// Updates stored paths for items found somewhere else (status Moved), and keeps relative paths
 /// current. Returns true when the project changed and should be marked dirty.
-pub fn apply_resolutions(project: &mut Project, project_path: Option<&Utf8Path>, resolutions: &[Resolution], refs: &dyn FileRefs) -> bool {
+pub fn apply_resolutions(
+    project: &mut Project,
+    project_path: Option<&Utf8Path>,
+    resolutions: &[Resolution],
+    refs: &dyn FileRefs,
+) -> bool {
     let mut dirty = false;
     for r in resolutions {
         let Some(path) = &r.path else { continue };
@@ -528,11 +599,9 @@ pub fn apply_resolutions(project: &mut Project, project_path: Option<&Utf8Path>,
         let before = item.paths.clone();
         match r.status {
             MediaStatus::Moved => set_location(item, Utf8Path::new(path), project_path, refs),
-            MediaStatus::Ok => {
-                // Keep the relative path in step with where the project file is now.
-                if project_path.is_some() {
-                    item.paths.relative = paths::relative_to(Utf8Path::new(path), &project_dir(project_path));
-                }
+            // Keep the relative path in step with where the project file is now.
+            MediaStatus::Ok if project_path.is_some() => {
+                item.paths.relative = paths::relative_to(Utf8Path::new(path), &project_dir(project_path));
             }
             _ => {}
         }
@@ -542,9 +611,19 @@ pub fn apply_resolutions(project: &mut Project, project_path: Option<&Utf8Path>,
 }
 
 /// Accepts a changed file as the item's content: refreshes the fingerprint and drops the probe.
-pub fn accept_changed(project: &mut Project, id: &str, path: &Utf8Path, project_path: Option<&Utf8Path>, refs: &dyn FileRefs) -> Result<()> {
+pub fn accept_changed(
+    project: &mut Project,
+    id: &str,
+    path: &Utf8Path,
+    project_path: Option<&Utf8Path>,
+    refs: &dyn FileRefs,
+) -> Result<()> {
     let fp = fingerprint(path)?;
-    let item = project.media.iter_mut().find(|m| m.id == id).ok_or_else(|| Error::NotFound(format!("no media item \"{id}\"")))?;
+    let item = project
+        .media
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or_else(|| Error::NotFound(format!("no media item \"{id}\"")))?;
     item.fingerprint = Some(fp);
     item.probe = None;
     set_location(item, path, project_path, refs);
@@ -591,17 +670,31 @@ pub fn rewrite_prefix(stored: &str, fix: &PrefixFix) -> Option<String> {
     if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
         return None;
     }
-    let rest = if fix.new_prefix.contains('/') || !fix.new_prefix.contains('\\') { rest.replace('\\', "/") } else { rest.to_string() };
+    let rest = if fix.new_prefix.contains('/') || !fix.new_prefix.contains('\\') {
+        rest.replace('\\', "/")
+    } else {
+        rest.to_string()
+    };
     Some(format!("{}{}", fix.new_prefix, rest))
 }
 
 /// Points an item at a file the user picked. Returns a prefix fix to offer for the other missing
 /// items when one can be derived from the old and new locations.
-pub fn relink_item(project: &mut Project, project_path: Option<&Utf8Path>, id: &str, new_file: &Utf8Path, refs: &dyn FileRefs) -> Result<Option<PrefixFix>> {
+pub fn relink_item(
+    project: &mut Project,
+    project_path: Option<&Utf8Path>,
+    id: &str,
+    new_file: &Utf8Path,
+    refs: &dyn FileRefs,
+) -> Result<Option<PrefixFix>> {
     if !new_file.is_file() {
         return Err(Error::NotFound(format!("{new_file} isn't a file")));
     }
-    let item = project.media.iter_mut().find(|m| m.id == id).ok_or_else(|| Error::NotFound(format!("no media item \"{id}\"")))?;
+    let item = project
+        .media
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or_else(|| Error::NotFound(format!("no media item \"{id}\"")))?;
     let old_abs = item.paths.absolute.clone();
     let same_content = item.fingerprint.as_ref().map(|fp| matches_fingerprint(new_file, fp)).unwrap_or(false);
     if !same_content {
@@ -619,7 +712,12 @@ pub fn relink_item(project: &mut Project, project_path: Option<&Utf8Path>, id: &
 }
 
 /// Items a prefix fix would relink right now: `(id, new path)` for those whose rewritten path exists.
-pub fn prefix_fix_candidates(project: &Project, project_path: Option<&Utf8Path>, fix: &PrefixFix, refs: &dyn FileRefs) -> Vec<(String, String)> {
+pub fn prefix_fix_candidates(
+    project: &Project,
+    project_path: Option<&Utf8Path>,
+    fix: &PrefixFix,
+    refs: &dyn FileRefs,
+) -> Vec<(String, String)> {
     project
         .media
         .iter()
@@ -632,7 +730,12 @@ pub fn prefix_fix_candidates(project: &Project, project_path: Option<&Utf8Path>,
 }
 
 /// Rewrites the prefix for every missing item whose new path exists. Returns the relinked IDs.
-pub fn apply_prefix_fix(project: &mut Project, project_path: Option<&Utf8Path>, fix: &PrefixFix, refs: &dyn FileRefs) -> Vec<String> {
+pub fn apply_prefix_fix(
+    project: &mut Project,
+    project_path: Option<&Utf8Path>,
+    fix: &PrefixFix,
+    refs: &dyn FileRefs,
+) -> Vec<String> {
     let candidates = prefix_fix_candidates(project, project_path, fix, refs);
     for (id, new) in &candidates {
         if let Some(item) = project.media.iter_mut().find(|m| &m.id == id) {
@@ -644,7 +747,12 @@ pub fn apply_prefix_fix(project: &mut Project, project_path: Option<&Utf8Path>, 
 
 /// Scans a folder and relinks every missing item it can match by name, then fingerprint.
 /// A name match with different content is linked too and shows as Changed.
-pub fn search_folder(project: &mut Project, project_path: Option<&Utf8Path>, dir: &Utf8Path, refs: &dyn FileRefs) -> Result<Vec<String>> {
+pub fn search_folder(
+    project: &mut Project,
+    project_path: Option<&Utf8Path>,
+    dir: &Utf8Path,
+    refs: &dyn FileRefs,
+) -> Result<Vec<String>> {
     if !dir.is_dir() {
         return Err(Error::NotFound(format!("{dir} isn't a folder")));
     }
@@ -681,7 +789,8 @@ pub fn probe_file(path: &Utf8Path, cutline: &Utf8Path, loudness: bool) -> Result
         let msg = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("probe failed").trim().to_string();
         return Err(Error::other(msg));
     }
-    let v: serde_json::Value = serde_json::from_str(&out).map_err(|e| Error::other(format!("unexpected probe output: {e}")))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&out).map_err(|e| Error::other(format!("unexpected probe output: {e}")))?;
     Ok(probe_from_cutline(&v))
 }
 
@@ -863,7 +972,10 @@ mod tests {
         // absolute and relative paths are both dead now
         let res = resolve_all(&p, Some(&path), &[], &NoFileRefs);
         assert!(res.iter().all(|r| r.status == MediaStatus::Missing));
-        let fix = relink_item(&mut p, Some(&path), "m-hero", &root.join("Volumes/Work/footage/day1/hero.mov"), &NoFileRefs).unwrap().expect("a prefix fix is offered");
+        let fix =
+            relink_item(&mut p, Some(&path), "m-hero", &root.join("Volumes/Work/footage/day1/hero.mov"), &NoFileRefs)
+                .unwrap()
+                .expect("a prefix fix is offered");
         assert_eq!(fix.old_prefix, root.to_string());
         assert_eq!(fix.new_prefix, root.join("Volumes/Work").to_string());
         let would = prefix_fix_candidates(&p, Some(&path), &fix, &NoFileRefs);

@@ -6,10 +6,8 @@ const ALPHABET: &[u8] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
 /// A sortable random ID: 10 characters of time (ms) and 10 random, Crockford base 32.
 pub fn new_id(prefix: &str) -> String {
-    let ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let ms =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     let mut rnd = [0u8; 8];
     if getrandom::fill(&mut rnd).is_err() {
         rnd = (ms ^ std::process::id() as u64).to_le_bytes();

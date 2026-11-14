@@ -41,7 +41,10 @@ pub fn activity_path(ctx: &HelperContext) -> Utf8PathBuf {
 fn open_log(ctx: &HelperContext, command: &str) -> Option<(u32, Utf8PathBuf, std::fs::File)> {
     let dir = ctx.logs_dir.join("cutline");
     std::fs::create_dir_all(&dir).ok()?;
-    let mut n = std::fs::read_dir(&dir).map(|rd| rd.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".log")).count() as u32).unwrap_or(0) + 1;
+    let mut n = std::fs::read_dir(&dir)
+        .map(|rd| rd.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".log")).count() as u32)
+        .unwrap_or(0)
+        + 1;
     loop {
         let path = dir.join(format!("{n:03}-{command}.log"));
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -81,13 +84,26 @@ pub fn run(ctx: &HelperContext, args: &[String]) -> i32 {
         }
     };
     let started = Instant::now();
-    write_log(&format!("# argv: {}", serde_json::to_string(&std::iter::once(real.to_string()).chain(args.iter().cloned()).collect::<Vec<_>>()).unwrap_or_default()));
+    write_log(&format!(
+        "# argv: {}",
+        serde_json::to_string(&std::iter::once(real.to_string()).chain(args.iter().cloned()).collect::<Vec<_>>())
+            .unwrap_or_default()
+    ));
     write_log(&format!("# cwd: {cwd}"));
     write_log(&format!("# started: {}", timeutil::now_rfc3339()));
     let activity = activity_path(ctx);
-    append_line(&activity, &json!({"ts": timeutil::now_rfc3339(), "type": "start", "n": n, "command": command, "argv": args}).to_string());
+    append_line(
+        &activity,
+        &json!({"ts": timeutil::now_rfc3339(), "type": "start", "n": n, "command": command, "argv": args}).to_string(),
+    );
 
-    let mut child = match Command::new(real.as_str()).args(args).stdin(Stdio::inherit()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+    let mut child = match Command::new(real.as_str())
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
         Ok(c) => c,
         Err(e) => {
             eprintln!("couldn't start cutline ({real}): {e}");
@@ -193,14 +209,40 @@ mod tests {
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let run = dir.join("run");
         std::fs::create_dir_all(run.join("logs")).unwrap();
-        let mut ctx = HelperContext { run_id: "r".into(), run_folder: run.clone(), mode: Mode::Production, logs_dir: run.join("logs"), cutline: Some(fake), credit_cap: 0, cache_dir: dir.join("cache"), cache_limit_bytes: 0, default_voice: None, default_voice_settings: None, default_model: None, base_url: None, test_api_key: None };
+        let mut ctx = HelperContext {
+            run_id: "r".into(),
+            run_folder: run.clone(),
+            mode: Mode::Production,
+            logs_dir: run.join("logs"),
+            cutline: Some(fake),
+            credit_cap: 0,
+            cache_dir: dir.join("cache"),
+            cache_limit_bytes: 0,
+            default_voice: None,
+            default_voice_settings: None,
+            default_model: None,
+            base_url: None,
+            test_api_key: None,
+        };
         let args: Vec<String> = ["--json", "validate", "project.json5"].iter().map(|s| s.to_string()).collect();
         assert_eq!(run_proxy(&ctx, &args), 3);
         assert_eq!(run_proxy(&ctx, &args), 3);
         let log = std::fs::read_to_string(run.join("logs/cutline/001-validate.log")).unwrap();
-        assert!(log.contains("# argv: [") && log.contains("\"validate\"") && log.contains("[out] out --json validate project.json5") && log.contains("[err] segment 1/2") && log.contains("# exit: 3") && log.contains("# duration:"), "{log}");
+        assert!(
+            log.contains("# argv: [")
+                && log.contains("\"validate\"")
+                && log.contains("[out] out --json validate project.json5")
+                && log.contains("[err] segment 1/2")
+                && log.contains("# exit: 3")
+                && log.contains("# duration:"),
+            "{log}"
+        );
         assert!(run.join("logs/cutline/002-validate.log").exists());
-        let activity: Vec<serde_json::Value> = std::fs::read_to_string(activity_path(&ctx)).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let activity: Vec<serde_json::Value> = std::fs::read_to_string(activity_path(&ctx))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert_eq!(activity.iter().filter(|a| a["type"] == "exit" && a["code"] == 3).count(), 2);
         assert!(activity.iter().any(|a| a["type"] == "line" && a["text"] == "segment 1/2"));
         ctx.mode = Mode::DryRun;

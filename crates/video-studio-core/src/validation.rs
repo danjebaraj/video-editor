@@ -210,7 +210,16 @@ struct Ctx {
 
 impl Ctx {
     #[allow(clippy::too_many_arguments)]
-    fn add(&mut self, rule: &str, target: Option<&str>, severity: Severity, category: &str, title: String, detail: Option<String>, fix: Option<FixLink>) {
+    fn add(
+        &mut self,
+        rule: &str,
+        target: Option<&str>,
+        severity: Severity,
+        category: &str,
+        title: String,
+        detail: Option<String>,
+        fix: Option<FixLink>,
+    ) {
         let id = match target {
             Some(t) => format!("{rule}:{t}"),
             None => rule.to_string(),
@@ -221,7 +230,15 @@ impl Ctx {
 
 /// Intents whose spec should state a call to action.
 fn intent_needs_cta(kind: IntentKind) -> bool {
-    matches!(kind, IntentKind::Marketing | IntentKind::ProductDemo | IntentKind::SocialClip | IntentKind::Announcement | IntentKind::Testimonial | IntentKind::AppStorePreview)
+    matches!(
+        kind,
+        IntentKind::Marketing
+            | IntentKind::ProductDemo
+            | IntentKind::SocialClip
+            | IntentKind::Announcement
+            | IntentKind::Testimonial
+            | IntentKind::AppStorePreview
+    )
 }
 
 /// Whether the spec asks for generated audio: voice-over text with no recorded voice in the
@@ -236,8 +253,26 @@ pub fn needs_generated_audio(project: &Project) -> (bool, bool) {
 
 /// Approximate Claude cost range in USD for a production run (spec §22.2): from past runs of this
 /// project when there are any, else from the spec size, media count and output count.
-pub fn estimate_claude_cost(project: &Project, outputs: usize, model: &str, models: &ModelList, kind: RunKind) -> (f64, f64) {
-    let past: Vec<f64> = project.runs.iter().filter(|r| r.kind == kind && r.cost_usd.is_some() && r.model.as_deref().map(|m| models.family_of(m).map(|f| &f.id) == models.family_of(model).map(|f| &f.id)).unwrap_or(false)).filter_map(|r| r.cost_usd).collect();
+pub fn estimate_claude_cost(
+    project: &Project,
+    outputs: usize,
+    model: &str,
+    models: &ModelList,
+    kind: RunKind,
+) -> (f64, f64) {
+    let past: Vec<f64> = project
+        .runs
+        .iter()
+        .filter(|r| {
+            r.kind == kind
+                && r.cost_usd.is_some()
+                && r.model
+                    .as_deref()
+                    .map(|m| models.family_of(m).map(|f| &f.id) == models.family_of(model).map(|f| &f.id))
+                    .unwrap_or(false)
+        })
+        .filter_map(|r| r.cost_usd)
+        .collect();
     if !past.is_empty() {
         let avg = past.iter().sum::<f64>() / past.len() as f64;
         return (avg * 0.6, avg * 1.6);
@@ -264,22 +299,71 @@ pub fn estimate_claude_cost(project: &Project, outputs: usize, model: &str, mode
 fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
     let env = input.env;
     match env.claude() {
-        None => c.add("claude_missing", None, Severity::Blocker, "environment", "Claude Code isn't installed".into(), Some("Install the Claude Code CLI, then choose Re-check in Settings › Claude.".into()), FixLink::target("settings", "claude")),
+        None => c.add(
+            "claude_missing",
+            None,
+            Severity::Blocker,
+            "environment",
+            "Claude Code isn't installed".into(),
+            Some("Install the Claude Code CLI, then choose Re-check in Settings › Claude.".into()),
+            FixLink::target("settings", "claude"),
+        ),
         Some(info) => {
             if !info.supported {
-                c.add("claude_unsupported", None, Severity::Blocker, "environment", format!("Claude Code {} is too old", info.version), Some(format!("This app needs Claude Code {} or later. Update the CLI and re-check.", locate::min_version_text())), FixLink::target("settings", "claude"));
+                c.add(
+                    "claude_unsupported",
+                    None,
+                    Severity::Blocker,
+                    "environment",
+                    format!("Claude Code {} is too old", info.version),
+                    Some(format!(
+                        "This app needs Claude Code {} or later. Update the CLI and re-check.",
+                        locate::min_version_text()
+                    )),
+                    FixLink::target("settings", "claude"),
+                );
             } else if env.claude_signed_in(&info) == Some(false) {
-                c.add("claude_signed_out", None, Severity::Blocker, "environment", "Claude Code isn't signed in".into(), Some("Open Terminal, run `claude` and sign in. The app never asks for Anthropic credentials.".into()), FixLink::target("settings", "claude"));
+                c.add(
+                    "claude_signed_out",
+                    None,
+                    Severity::Blocker,
+                    "environment",
+                    "Claude Code isn't signed in".into(),
+                    Some(
+                        "Open Terminal, run `claude` and sign in. The app never asks for Anthropic credentials.".into(),
+                    ),
+                    FixLink::target("settings", "claude"),
+                );
             }
         }
     }
     match env.cutline() {
-        None => c.add("cutline_missing", None, Severity::Blocker, "environment", "cutline wasn't found".into(), Some("Set the cutline path in Settings › cutline, or put `cutline` on your PATH.".into()), FixLink::target("settings", "cutline")),
+        None => c.add(
+            "cutline_missing",
+            None,
+            Severity::Blocker,
+            "environment",
+            "cutline wasn't found".into(),
+            Some("Set the cutline path in Settings › cutline, or put `cutline` on your PATH.".into()),
+            FixLink::target("settings", "cutline"),
+        ),
         Some(info) => match env.doctor(&info) {
-            None => c.add("cutline_doctor", None, Severity::Blocker, "environment", "`cutline doctor` didn't run".into(), Some(format!("Run `{} doctor` in Terminal to see why.", info.path)), FixLink::target("settings", "cutline")),
+            None => c.add(
+                "cutline_doctor",
+                None,
+                Severity::Blocker,
+                "environment",
+                "`cutline doctor` didn't run".into(),
+                Some(format!("Run `{} doctor` in Terminal to see why.", info.path)),
+                FixLink::target("settings", "cutline"),
+            ),
             Some(d) => {
                 if !d.ok {
-                    let what = if d.missing_required.is_empty() { "see Settings › cutline for the report".to_string() } else { d.missing_required.join(", ") };
+                    let what = if d.missing_required.is_empty() {
+                        "see Settings › cutline for the report".to_string()
+                    } else {
+                        d.missing_required.join(", ")
+                    };
                     c.add("cutline_doctor", None, Severity::Blocker, "environment", "cutline is missing required tools".into(), Some(format!("Missing: {what}. Use Install Dependencies in Settings › cutline (`cutline deps install --all`).")), FixLink::target("settings", "cutline"));
                 } else if !d.missing_optional.is_empty() {
                     c.add("cutline_optional", None, Severity::Info, "environment", "Some optional cutline tools aren't installed".into(), Some(format!("Not installed: {}. They are only needed for HTML graphics, captions from speech or reframing.", d.missing_optional.join(", "))), FixLink::target("settings", "cutline"));
@@ -293,7 +377,18 @@ fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, ne
         } else if let Some(remaining) = env.eleven_remaining() {
             est.eleven_remaining = Some(remaining);
             if remaining < est.eleven_credits {
-                c.add("eleven_credits_low", None, Severity::Blocker, "budget", "Not enough ElevenLabs credits".into(), Some(format!("About {} credits are needed and {} remain on the account.", est.eleven_credits, remaining)), FixLink::target("settings", "elevenlabs"));
+                c.add(
+                    "eleven_credits_low",
+                    None,
+                    Severity::Blocker,
+                    "budget",
+                    "Not enough ElevenLabs credits".into(),
+                    Some(format!(
+                        "About {} credits are needed and {} remain on the account.",
+                        est.eleven_credits, remaining
+                    )),
+                    FixLink::target("settings", "elevenlabs"),
+                );
             }
         }
     }
@@ -310,21 +405,53 @@ fn check_media(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput]) {
             MediaStatus::Missing => {
                 let sev = if used.contains(&m.id) { Severity::Blocker } else { Severity::Warning };
                 let stored = res.and_then(|r| r.stored_path.clone()).unwrap_or_default();
-                c.add("media_missing", Some(&m.id), sev, "media", format!("{name} is missing"), Some(format!("Last seen at {stored}. Relink it from the Media panel.")), fix);
+                c.add(
+                    "media_missing",
+                    Some(&m.id),
+                    sev,
+                    "media",
+                    format!("{name} is missing"),
+                    Some(format!("Last seen at {stored}. Relink it from the Media panel.")),
+                    fix,
+                );
                 continue;
             }
-            MediaStatus::Changed => c.add("media_changed", Some(&m.id), Severity::Warning, "media", format!("{name} has changed since it was added"), Some("Accept the new content or relink the original file.".into()), fix.clone()),
+            MediaStatus::Changed => c.add(
+                "media_changed",
+                Some(&m.id),
+                Severity::Warning,
+                "media",
+                format!("{name} has changed since it was added"),
+                Some("Accept the new content or relink the original file.".into()),
+                fix.clone(),
+            ),
             MediaStatus::Ok | MediaStatus::Moved => {}
         }
         let Some(path) = res.and_then(|r| r.path.as_deref()) else { continue };
         match std::fs::File::open(path) {
             Err(e) => {
-                c.add("media_unreadable", Some(&m.id), Severity::Blocker, "media", format!("{name} can't be read"), Some(e.to_string()), fix);
+                c.add(
+                    "media_unreadable",
+                    Some(&m.id),
+                    Severity::Blocker,
+                    "media",
+                    format!("{name} can't be read"),
+                    Some(e.to_string()),
+                    fix,
+                );
                 continue;
             }
             Ok(f) => {
                 if f.metadata().map(|md| md.len() == 0).unwrap_or(false) {
-                    c.add("media_zero_length", Some(&m.id), Severity::Blocker, "media", format!("{name} is empty (0 bytes)"), None, fix);
+                    c.add(
+                        "media_zero_length",
+                        Some(&m.id),
+                        Severity::Blocker,
+                        "media",
+                        format!("{name} is empty (0 bytes)"),
+                        None,
+                        fix,
+                    );
                     continue;
                 }
             }
@@ -332,21 +459,61 @@ fn check_media(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput]) {
         let Some(p) = &m.probe else { continue };
         if let Some(err) = &p.error {
             if m.kind.is_probeable() {
-                c.add("media_probe_failed", Some(&m.id), Severity::Blocker, "media", format!("{name} couldn't be read as {}", m.kind.key()), Some(format!("ffprobe: {err}. The codec may be unsupported or the file damaged.")), fix);
+                c.add(
+                    "media_probe_failed",
+                    Some(&m.id),
+                    Severity::Blocker,
+                    "media",
+                    format!("{name} couldn't be read as {}", m.kind.key()),
+                    Some(format!("ffprobe: {err}. The codec may be unsupported or the file damaged.")),
+                    fix,
+                );
             }
             continue;
         }
         if m.kind == MediaKind::Video && p.video_codec.is_none() {
-            c.add("media_probe_failed", Some(&m.id), Severity::Blocker, "media", format!("{name} has no video stream"), None, fix.clone());
+            c.add(
+                "media_probe_failed",
+                Some(&m.id),
+                Severity::Blocker,
+                "media",
+                format!("{name} has no video stream"),
+                None,
+                fix.clone(),
+            );
         }
         if matches!(m.kind, MediaKind::Video | MediaKind::Audio) && p.duration_s.unwrap_or(0.0) <= 0.0 {
-            c.add("media_zero_length", Some(&m.id), Severity::Blocker, "media", format!("{name} has no duration"), None, fix.clone());
+            c.add(
+                "media_zero_length",
+                Some(&m.id),
+                Severity::Blocker,
+                "media",
+                format!("{name} has no duration"),
+                None,
+                fix.clone(),
+            );
         }
         if p.vfr == Some(true) {
-            c.add("media_vfr", Some(&m.id), Severity::Info, "media", format!("{name} has a variable frame rate"), Some("cutline conforms it to a constant rate; cuts may land a frame off the original.".into()), fix.clone());
+            c.add(
+                "media_vfr",
+                Some(&m.id),
+                Severity::Info,
+                "media",
+                format!("{name} has a variable frame rate"),
+                Some("cutline conforms it to a constant rate; cuts may land a frame off the original.".into()),
+                fix.clone(),
+            );
         }
         if let Some(r) = p.rotation {
-            c.add("media_rotation", Some(&m.id), Severity::Info, "media", format!("{name} is stored rotated by {r}°"), Some("It is shown upright; the stored frame is turned.".into()), fix.clone());
+            c.add(
+                "media_rotation",
+                Some(&m.id),
+                Severity::Info,
+                "media",
+                format!("{name} is stored rotated by {r}°"),
+                Some("It is shown upright; the stored frame is turned.".into()),
+                fix.clone(),
+            );
         }
         if let (MediaKind::Video, Some(w), Some(h), Some(target)) = (m.kind, p.width, p.height, smallest_target) {
             // Reference clips and logos aren't footage: only footage is expected to fill the frame.
@@ -361,15 +528,46 @@ fn check_media(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput]) {
 fn check_spec(c: &mut Ctx, input: &ValidateInput, est: &Estimates) {
     let p = input.project;
     if p.spec.trim().is_empty() {
-        c.add("spec_empty", None, Severity::Blocker, "spec", "The spec is empty".into(), Some("Describe the video, or start from a template.".into()), FixLink::line(1));
+        c.add(
+            "spec_empty",
+            None,
+            Severity::Blocker,
+            "spec",
+            "The spec is empty".into(),
+            Some("Describe the video, or start from a template.".into()),
+            FixLink::line(1),
+        );
     }
     if p.intent.kind == IntentKind::Unset {
-        c.add("intent_unset", None, Severity::Blocker, "spec", "The video's intent isn't set".into(), Some("Choose an intent in the Project inspector: it sets defaults and is given to Claude.".into()), FixLink::to("project"));
+        c.add(
+            "intent_unset",
+            None,
+            Severity::Blocker,
+            "spec",
+            "The video's intent isn't set".into(),
+            Some("Choose an intent in the Project inspector: it sets defaults and is given to Claude.".into()),
+            FixLink::to("project"),
+        );
     } else if p.intent.kind == IntentKind::Other && p.intent.other.as_deref().unwrap_or("").trim().is_empty() {
-        c.add("intent_unset", None, Severity::Blocker, "spec", "The intent is \"Other\" with no description".into(), None, FixLink::to("project"));
+        c.add(
+            "intent_unset",
+            None,
+            Severity::Blocker,
+            "spec",
+            "The intent is \"Other\" with no description".into(),
+            None,
+            FixLink::to("project"),
+        );
     }
     let ids: HashSet<String> = p.media.iter().map(|m| m.id.clone()).collect();
-    let lint = spec::lint(&p.spec, &spec::LintContext { media_ids: &ids, target_length_s: p.intent.target_length_s, words_per_minute: input.settings.words_per_minute });
+    let lint = spec::lint(
+        &p.spec,
+        &spec::LintContext {
+            media_ids: &ids,
+            target_length_s: p.intent.target_length_s,
+            words_per_minute: input.settings.words_per_minute,
+        },
+    );
     for (n, i) in lint.into_iter().enumerate() {
         let (rule, sev) = match i.rule.as_str() {
             "unresolved_media" => ("spec_unresolved_media", Severity::Blocker),
@@ -380,27 +578,69 @@ fn check_spec(c: &mut Ctx, input: &ValidateInput, est: &Estimates) {
         };
         c.add(rule, Some(&format!("{}:{n}", i.line)), sev, "spec", i.message, None, FixLink::line(i.line));
     }
-    if intent_needs_cta(p.intent.kind) && !spec::has_call_to_action(&p.spec) && p.intent.cta.as_deref().unwrap_or("").trim().is_empty() {
+    if intent_needs_cta(p.intent.kind)
+        && !spec::has_call_to_action(&p.spec)
+        && p.intent.cta.as_deref().unwrap_or("").trim().is_empty()
+    {
         c.add("spec_missing_section", Some("cta"), Severity::Warning, "spec", format!("A {} video usually has a call to action", p.intent.kind.label().to_lowercase()), Some("Add a \"Call to action\" section (type /cta), or set the primary call to action in the Project inspector.".into()), FixLink::line(1));
     }
     if est.duration_s.is_none() {
-        c.add("spec_no_length", None, Severity::Info, "spec", "No target length is set".into(), Some("Without a target length, platform duration limits and voice-over length can't be checked.".into()), FixLink::to("project"));
+        c.add(
+            "spec_no_length",
+            None,
+            Severity::Info,
+            "spec",
+            "No target length is set".into(),
+            Some("Without a target length, platform duration limits and voice-over length can't be checked.".into()),
+            FixLink::to("project"),
+        );
     }
 }
 
 fn check_brand(c: &mut Ctx, input: &ValidateInput) {
     let Some(b) = &input.project.brand else {
-        c.add("brand_none", None, Severity::Info, "brand", "No brand preset is selected".into(), Some("Claude will choose neutral colors and fonts.".into()), FixLink::to("brand"));
+        c.add(
+            "brand_none",
+            None,
+            Severity::Info,
+            "brand",
+            "No brand preset is selected".into(),
+            Some("Claude will choose neutral colors and fonts.".into()),
+            FixLink::to("brand"),
+        );
         return;
     };
     let s = &b.snapshot;
     for (label, asset) in s.assets() {
         if !asset.exists() {
-            c.add("brand_asset_missing", Some(label), Severity::Blocker, "brand", format!("Brand asset missing: {label}"), Some(format!("{} wasn't found. Relink it in the brand preset.", asset.path)), FixLink::to("brand"));
+            c.add(
+                "brand_asset_missing",
+                Some(label),
+                Severity::Blocker,
+                "brand",
+                format!("Brand asset missing: {label}"),
+                Some(format!("{} wasn't found. Relink it in the brand preset.", asset.path)),
+                FixLink::to("brand"),
+            );
         } else if label.ends_with("font") {
-            let ok = asset.resolved().extension().map(|e| matches!(e.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc")).unwrap_or(false);
+            let ok = asset
+                .resolved()
+                .extension()
+                .map(|e| matches!(e.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc"))
+                .unwrap_or(false);
             if !ok {
-                c.add("brand_font_unloadable", Some(label), Severity::Warning, "brand", format!("{label}: {} isn't a TrueType or OpenType font", asset.resolved().file_name().unwrap_or("")), Some("cutline loads .ttf, .otf and .ttc files.".into()), FixLink::to("brand"));
+                c.add(
+                    "brand_font_unloadable",
+                    Some(label),
+                    Severity::Warning,
+                    "brand",
+                    format!(
+                        "{label}: {} isn't a TrueType or OpenType font",
+                        asset.resolved().file_name().unwrap_or("")
+                    ),
+                    Some("cutline loads .ttf, .otf and .ttc files.".into()),
+                    FixLink::to("brand"),
+                );
             }
         }
     }
@@ -410,13 +650,29 @@ fn check_brand(c: &mut Ctx, input: &ValidateInput) {
             Some(rgb) => {
                 parsed.insert(role, rgb);
             }
-            None => c.add("brand_color_invalid", Some(role), Severity::Blocker, "brand", format!("The {role} color \"{value}\" isn't a hex color"), Some("Use #RRGGBB.".into()), FixLink::to("brand")),
+            None => c.add(
+                "brand_color_invalid",
+                Some(role),
+                Severity::Blocker,
+                "brand",
+                format!("The {role} color \"{value}\" isn't a hex color"),
+                Some("Use #RRGGBB.".into()),
+                FixLink::to("brand"),
+            ),
         }
     }
     if let (Some(text), Some(bg)) = (parsed.get("text"), parsed.get("background")) {
         let ratio = brand::contrast(*text, *bg);
         if ratio < 4.5 {
-            c.add("brand_text_contrast", None, Severity::Warning, "brand", format!("Text color has low contrast on the background ({ratio:.1}:1)"), Some("Captions and titles need at least 4.5:1 to stay readable.".into()), FixLink::to("brand"));
+            c.add(
+                "brand_text_contrast",
+                None,
+                Severity::Warning,
+                "brand",
+                format!("Text color has low contrast on the background ({ratio:.1}:1)"),
+                Some("Captions and titles need at least 4.5:1 to stay readable.".into()),
+                FixLink::to("brand"),
+            );
         }
     }
     if let Some(bg) = parsed.get("background") {
@@ -426,19 +682,49 @@ fn check_brand(c: &mut Ctx, input: &ValidateInput) {
         if let Some(avg) = logo.filter(|l| l.exists()).and_then(|l| brand::logo_average_color(&l.resolved())) {
             let ratio = brand::contrast(avg, *bg);
             if ratio < 1.6 {
-                c.add("brand_logo_contrast", None, Severity::Warning, "brand", format!("The logo barely stands out from the background color ({ratio:.1}:1)"), Some("Add a logo variant for this background, or change the background color.".into()), FixLink::to("brand"));
+                c.add(
+                    "brand_logo_contrast",
+                    None,
+                    Severity::Warning,
+                    "brand",
+                    format!("The logo barely stands out from the background color ({ratio:.1}:1)"),
+                    Some("Add a logo variant for this background, or change the background color.".into()),
+                    FixLink::to("brand"),
+                );
             }
         }
     }
     if brand::library_is_newer(input.library, b) {
-        c.add("brand_outdated", None, Severity::Info, "brand", format!("The brand preset \"{}\" has been updated in the library", s.name), Some("The project uses its snapshot. Choose Update to Latest to take the changes.".into()), FixLink::to("brand"));
+        c.add(
+            "brand_outdated",
+            None,
+            Severity::Info,
+            "brand",
+            format!("The brand preset \"{}\" has been updated in the library", s.name),
+            Some("The project uses its snapshot. Choose Update to Latest to take the changes.".into()),
+            FixLink::to("brand"),
+        );
     }
 }
 
-fn check_outputs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput], out_root: Option<&Utf8PathBuf>, est: &mut Estimates) {
+fn check_outputs(
+    c: &mut Ctx,
+    input: &ValidateInput,
+    outputs: &[ResolvedOutput],
+    out_root: Option<&Utf8PathBuf>,
+    est: &mut Estimates,
+) {
     let Some(rc) = input.run_config else { return };
     if rc.outputs.is_empty() {
-        c.add("outputs_none", None, Severity::Blocker, "outputs", format!("The run config \"{}\" has no outputs selected", rc.name), Some("Select at least one output config.".into()), FixLink::target("run_config", &rc.id));
+        c.add(
+            "outputs_none",
+            None,
+            Severity::Blocker,
+            "outputs",
+            format!("The run config \"{}\" has no outputs selected", rc.name),
+            Some("Select at least one output config.".into()),
+            FixLink::target("run_config", &rc.id),
+        );
     }
     let duration = est.duration_s;
     // The main footage's aspect: the largest video by pixel count.
@@ -455,24 +741,70 @@ fn check_outputs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput],
         if let Some(d) = duration {
             if let Some(max) = o.limits.max_duration_s {
                 if d > max + 0.01 {
-                    c.add("output_duration_limit", Some(&o.id), Severity::Blocker, "outputs", format!("{}: the target length is over the {} limit", o.name, o.platform), Some(format!("The video is planned at {} and {} allows at most {}.", format_duration(d), o.name, format_duration(max))), fix.clone());
+                    c.add(
+                        "output_duration_limit",
+                        Some(&o.id),
+                        Severity::Blocker,
+                        "outputs",
+                        format!("{}: the target length is over the {} limit", o.name, o.platform),
+                        Some(format!(
+                            "The video is planned at {} and {} allows at most {}.",
+                            format_duration(d),
+                            o.name,
+                            format_duration(max)
+                        )),
+                        fix.clone(),
+                    );
                 }
             }
             if let Some(min) = o.limits.min_duration_s {
                 if d + 0.01 < min {
-                    c.add("output_duration_limit", Some(&o.id), Severity::Blocker, "outputs", format!("{}: the target length is under the {} minimum", o.name, o.platform), Some(format!("The video is planned at {} and {} needs at least {}.", format_duration(d), o.name, format_duration(min))), fix.clone());
+                    c.add(
+                        "output_duration_limit",
+                        Some(&o.id),
+                        Severity::Blocker,
+                        "outputs",
+                        format!("{}: the target length is under the {} minimum", o.name, o.platform),
+                        Some(format!(
+                            "The video is planned at {} and {} needs at least {}.",
+                            format_duration(d),
+                            o.name,
+                            format_duration(min)
+                        )),
+                        fix.clone(),
+                    );
                 }
             }
             if let Some(max_bytes) = o.limits.max_bytes {
                 let bytes = estimate_output_bytes(o, d) / o.exports.len().max(1) as u64;
                 if bytes > max_bytes {
-                    c.add("output_size_limit", Some(&o.id), Severity::Warning, "outputs", format!("{}: the file may exceed the {} size limit", o.name, o.platform), Some(format!("About {} is expected and the limit is {}. Set a size cap on this output.", paths::format_bytes(bytes), paths::format_bytes(max_bytes))), fix.clone());
+                    c.add(
+                        "output_size_limit",
+                        Some(&o.id),
+                        Severity::Warning,
+                        "outputs",
+                        format!("{}: the file may exceed the {} size limit", o.name, o.platform),
+                        Some(format!(
+                            "About {} is expected and the limit is {}. Set a size cap on this output.",
+                            paths::format_bytes(bytes),
+                            paths::format_bytes(max_bytes)
+                        )),
+                        fix.clone(),
+                    );
                 }
             }
         }
         if let (Some(fps), Some(max)) = (o.fps, o.limits.max_fps) {
             if fps > max + 0.01 {
-                c.add("output_fps_limit", Some(&o.id), Severity::Blocker, "outputs", format!("{}: {fps} fps is over the {} limit of {max} fps", o.name, o.platform), None, fix.clone());
+                c.add(
+                    "output_fps_limit",
+                    Some(&o.id),
+                    Severity::Blocker,
+                    "outputs",
+                    format!("{}: {fps} fps is over the {} limit of {max} fps", o.name, o.platform),
+                    None,
+                    fix.clone(),
+                );
             }
         }
         if let Some(src) = source_aspect {
@@ -491,16 +823,48 @@ fn check_outputs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput],
         } else if let Some(free) = input.env.free_space(root) {
             est.free_bytes = Some(free);
             if free < est.disk_bytes {
-                c.add("disk_space", None, Severity::Blocker, "environment", "Not enough free disk space for this run".into(), Some(format!("About {} is needed in {root} and {} is free.", paths::format_bytes(est.disk_bytes), paths::format_bytes(free))), FixLink::target("run_config", &rc.id));
+                c.add(
+                    "disk_space",
+                    None,
+                    Severity::Blocker,
+                    "environment",
+                    "Not enough free disk space for this run".into(),
+                    Some(format!(
+                        "About {} is needed in {root} and {} is free.",
+                        paths::format_bytes(est.disk_bytes),
+                        paths::format_bytes(free)
+                    )),
+                    FixLink::target("run_config", &rc.id),
+                );
             } else if free < est.disk_bytes * 2 {
-                c.add("disk_space", None, Severity::Warning, "environment", "Free disk space is tight".into(), Some(format!("About {} is needed and {} is free.", paths::format_bytes(est.disk_bytes), paths::format_bytes(free))), FixLink::target("run_config", &rc.id));
+                c.add(
+                    "disk_space",
+                    None,
+                    Severity::Warning,
+                    "environment",
+                    "Free disk space is tight".into(),
+                    Some(format!(
+                        "About {} is needed and {} is free.",
+                        paths::format_bytes(est.disk_bytes),
+                        paths::format_bytes(free)
+                    )),
+                    FixLink::target("run_config", &rc.id),
+                );
             }
         }
     }
 }
 
 fn aspect_text(a: f64) -> String {
-    for (label, v) in [("16:9", 16.0 / 9.0), ("9:16", 9.0 / 16.0), ("1:1", 1.0), ("4:5", 0.8), ("4:3", 4.0 / 3.0), ("3:4", 0.75), ("21:9", 21.0 / 9.0)] {
+    for (label, v) in [
+        ("16:9", 16.0 / 9.0),
+        ("9:16", 9.0 / 16.0),
+        ("1:1", 1.0),
+        ("4:5", 0.8),
+        ("4:3", 4.0 / 3.0),
+        ("3:4", 0.75),
+        ("21:9", 21.0 / 9.0),
+    ] {
         if (a - v).abs() < 0.03 {
             return label.to_string();
         }
@@ -517,12 +881,35 @@ fn check_budget(c: &mut Ctx, input: &ValidateInput, est: &Estimates, outputs: us
         if est.claude_usd_low > cap {
             c.add("budget_claude_cap", None, Severity::Blocker, "budget", "The Claude spend limit is below the estimated cost".into(), Some(format!("The estimate is about ${:.2}–${:.2} (approximate) and the limit is ${cap:.2}. The run would stop before finishing.", est.claude_usd_low, est.claude_usd_high)), FixLink::target("run_config", &rc.id));
         } else if est.claude_usd_high > cap {
-            c.add("budget_claude_cap", None, Severity::Warning, "budget", "The Claude spend limit may be reached".into(), Some(format!("The estimate is about ${:.2}–${:.2} (approximate) and the limit is ${cap:.2}.", est.claude_usd_low, est.claude_usd_high)), FixLink::target("run_config", &rc.id));
+            c.add(
+                "budget_claude_cap",
+                None,
+                Severity::Warning,
+                "budget",
+                "The Claude spend limit may be reached".into(),
+                Some(format!(
+                    "The estimate is about ${:.2}–${:.2} (approximate) and the limit is ${cap:.2}.",
+                    est.claude_usd_low, est.claude_usd_high
+                )),
+                FixLink::target("run_config", &rc.id),
+            );
         }
     }
     let dry = &input.project.models.dry_run;
     if rc.dry_run_first && input.models.is_cheaper(dry, &rc.production_model) == Some(false) && outputs > 0 {
-        c.add("dry_run_model", None, Severity::Info, "budget", "The dry run model isn't cheaper than the production model".into(), Some(format!("Dry runs use {} and production uses {}.", input.models.display_name(dry), input.models.display_name(&rc.production_model))), FixLink::to("project"));
+        c.add(
+            "dry_run_model",
+            None,
+            Severity::Info,
+            "budget",
+            "The dry run model isn't cheaper than the production model".into(),
+            Some(format!(
+                "Dry runs use {} and production uses {}.",
+                input.models.display_name(dry),
+                input.models.display_name(&rc.production_model)
+            )),
+            FixLink::to("project"),
+        );
     }
 }
 
@@ -539,10 +926,26 @@ pub fn validate(input: &ValidateInput) -> Report {
         let mut taken = HashSet::new();
         for id in &rc.outputs {
             match p.output_config(id) {
-                None => c.add("output_preset_missing", Some(id), Severity::Blocker, "outputs", format!("The output \"{id}\" no longer exists"), None, FixLink::target("run_config", &rc.id)),
+                None => c.add(
+                    "output_preset_missing",
+                    Some(id),
+                    Severity::Blocker,
+                    "outputs",
+                    format!("The output \"{id}\" no longer exists"),
+                    None,
+                    FixLink::target("run_config", &rc.id),
+                ),
                 Some(cfg) => match resolve_output(cfg, input.platforms, &mut taken) {
                     Ok(o) => outputs.push(o),
-                    Err(e) => c.add("output_preset_missing", Some(id), Severity::Blocker, "outputs", e.to_string(), None, FixLink::target("outputs", id)),
+                    Err(e) => c.add(
+                        "output_preset_missing",
+                        Some(id),
+                        Severity::Blocker,
+                        "outputs",
+                        e.to_string(),
+                        None,
+                        FixLink::target("outputs", id),
+                    ),
                 },
             }
         }
@@ -572,7 +975,10 @@ pub fn validate(input: &ValidateInput) -> Report {
     }
     let model = match input.kind {
         RunKind::DryRun => p.models.dry_run.clone(),
-        RunKind::Production => input.run_config.map(|r| r.production_model.clone()).unwrap_or_else(|| input.settings.default_production_model.clone()),
+        RunKind::Production => input
+            .run_config
+            .map(|r| r.production_model.clone())
+            .unwrap_or_else(|| input.settings.default_production_model.clone()),
     };
     let (lo, hi) = estimate_claude_cost(p, outputs.len(), &model, input.models, input.kind);
     est.claude_usd_low = lo;
@@ -589,7 +995,14 @@ pub fn validate(input: &ValidateInput) -> Report {
         check_budget(&mut c, input, &est, outputs.len());
     }
 
-    let mut report = Report { generated: crate::timeutil::now_rfc3339(), project_id: p.id.clone(), run_config: input.run_config.map(|r| r.id.clone()), issues: c.issues, estimates: est, ..Report::default() };
+    let mut report = Report {
+        generated: crate::timeutil::now_rfc3339(),
+        project_id: p.id.clone(),
+        run_config: input.run_config.map(|r| r.id.clone()),
+        issues: c.issues,
+        estimates: est,
+        ..Report::default()
+    };
     report.recount();
     report
 }
@@ -610,7 +1023,14 @@ pub struct FakeEnv {
 impl Default for FakeEnv {
     fn default() -> Self {
         FakeEnv {
-            claude: Some(ClaudeInfo { path: "/bin/claude".into(), version: "2.1.311".into(), version_text: "2.1.311 (Claude Code)".into(), effort_levels: vec![], login_path: None, supported: true }),
+            claude: Some(ClaudeInfo {
+                path: "/bin/claude".into(),
+                version: "2.1.311".into(),
+                version_text: "2.1.311 (Claude Code)".into(),
+                effort_levels: vec![],
+                login_path: None,
+                supported: true,
+            }),
             signed_in: Some(true),
             cutline: Some(CutlineInfo { path: "/bin/cutline".into(), version: "0.1.0".into() }),
             doctor: Some(DoctorSummary { ok: true, ..Default::default() }),
@@ -679,15 +1099,34 @@ mod tests {
             project.intent.target_length_s = Some(45.0);
             let mut m = MediaItem::with_path("m-hero", MediaKind::Video, hero.as_str());
             m.role = Some(MediaRole::Footage);
-            m.probe = Some(Probe { duration_s: Some(32.0), width: Some(1920), height: Some(1080), fps: Some("30/1".into()), video_codec: Some("h264".into()), ..Probe::default() });
+            m.probe = Some(Probe {
+                duration_s: Some(32.0),
+                width: Some(1920),
+                height: Some(1080),
+                fps: Some("30/1".into()),
+                video_codec: Some("h264".into()),
+                ..Probe::default()
+            });
             project.media.push(m);
-            project.output_configs.push(OutputConfig { id: "out_yt".into(), preset: "youtube_1080p".into(), name: None, overrides: OutputOverrides::default() });
+            project.output_configs.push(OutputConfig {
+                id: "out_yt".into(),
+                preset: "youtube_1080p".into(),
+                name: None,
+                overrides: OutputOverrides::default(),
+            });
             let mut rc = RunConfig::new("YouTube final");
             rc.id = "rc_yt".into();
             rc.outputs = vec!["out_yt".into()];
             rc.output_folder = root.join("out").to_string();
             project.run_configs.push(rc);
-            Fx { dir, project, settings: Settings::default(), platforms: Platforms::bundled(), models: ModelList::bundled(), env: FakeEnv::default() }
+            Fx {
+                dir,
+                project,
+                settings: Settings::default(),
+                platforms: Platforms::bundled(),
+                models: ModelList::bundled(),
+                env: FakeEnv::default(),
+            }
         }
         fn root(&self) -> Utf8PathBuf {
             Utf8Path::from_path(self.dir.path()).unwrap().to_owned()
@@ -695,7 +1134,19 @@ mod tests {
         fn run_kind(&self, kind: RunKind) -> Report {
             let res = crate::media::resolve_all(&self.project, None, &[], &crate::platform::NoFileRefs);
             let lib = self.root().join("lib");
-            validate(&ValidateInput { project: &self.project, project_path: None, run_config: self.project.run_configs.first(), kind, settings: &self.settings, platforms: &self.platforms, models: &self.models, library: &lib, resolutions: &res, env: &self.env, output_override: None })
+            validate(&ValidateInput {
+                project: &self.project,
+                project_path: None,
+                run_config: self.project.run_configs.first(),
+                kind,
+                settings: &self.settings,
+                platforms: &self.platforms,
+                models: &self.models,
+                library: &lib,
+                resolutions: &res,
+                env: &self.env,
+                output_override: None,
+            })
         }
         fn run(&self) -> Report {
             self.run_kind(RunKind::Production)
@@ -741,13 +1192,23 @@ mod tests {
         f.env.cutline = None;
         assert!(has(&f.run(), "cutline_missing", Severity::Blocker));
         f.env = FakeEnv::default();
-        f.env.doctor = Some(DoctorSummary { ok: false, missing_required: vec!["filter xfade".into()], ..Default::default() });
+        f.env.doctor =
+            Some(DoctorSummary { ok: false, missing_required: vec!["filter xfade".into()], ..Default::default() });
         let r = f.run();
         assert!(has(&r, "cutline_doctor", Severity::Blocker));
-        assert!(r.issues.iter().find(|i| i.rule == "cutline_doctor").unwrap().detail.as_ref().unwrap().contains("filter xfade"));
+        assert!(r
+            .issues
+            .iter()
+            .find(|i| i.rule == "cutline_doctor")
+            .unwrap()
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("filter xfade"));
         f.env.doctor = None;
         assert!(has(&f.run(), "cutline_doctor", Severity::Blocker));
-        f.env.doctor = Some(DoctorSummary { ok: true, missing_optional: vec!["tool chrome".into()], ..Default::default() });
+        f.env.doctor =
+            Some(DoctorSummary { ok: true, missing_optional: vec!["tool chrome".into()], ..Default::default() });
         assert!(has(&f.run(), "cutline_optional", Severity::Info));
         f.env = FakeEnv::default();
         f.env.free = Some(1_000);
@@ -765,7 +1226,10 @@ mod tests {
         let mut f = Fx::new();
         f.env.eleven_key = false;
         assert!(has(&f.run(), "eleven_key_missing", Severity::Blocker));
-        assert!(!has(&f.run_kind(RunKind::DryRun), "eleven_key_missing", Severity::Blocker), "a dry run generates no audio");
+        assert!(
+            !has(&f.run_kind(RunKind::DryRun), "eleven_key_missing", Severity::Blocker),
+            "a dry run generates no audio"
+        );
         // a recorded voice file means no generated voice is needed
         let voice = f.root().join("vo.wav");
         std::fs::write(&voice, b"wav").unwrap();
@@ -803,10 +1267,30 @@ mod tests {
         // probe failures and notes
         f.project.media[0].probe = Some(Probe { error: Some("Invalid data found".into()), ..Probe::default() });
         assert!(has(&f.run(), "media_probe_failed", Severity::Blocker));
-        f.project.media[0].probe = Some(Probe { duration_s: Some(10.0), width: Some(480), height: Some(270), video_codec: Some("h264".into()), vfr: Some(true), rotation: Some(90), ..Probe::default() });
+        f.project.media[0].probe = Some(Probe {
+            duration_s: Some(10.0),
+            width: Some(480),
+            height: Some(270),
+            video_codec: Some("h264".into()),
+            vfr: Some(true),
+            rotation: Some(90),
+            ..Probe::default()
+        });
         let r = f.run();
-        assert!(has(&r, "media_vfr", Severity::Info) && has(&r, "media_rotation", Severity::Info) && has(&r, "media_low_res", Severity::Warning), "{:?}", rules(&r));
-        f.project.media[0].probe = Some(Probe { duration_s: Some(0.0), width: Some(1920), height: Some(1080), video_codec: Some("h264".into()), ..Probe::default() });
+        assert!(
+            has(&r, "media_vfr", Severity::Info)
+                && has(&r, "media_rotation", Severity::Info)
+                && has(&r, "media_low_res", Severity::Warning),
+            "{:?}",
+            rules(&r)
+        );
+        f.project.media[0].probe = Some(Probe {
+            duration_s: Some(0.0),
+            width: Some(1920),
+            height: Some(1080),
+            video_codec: Some("h264".into()),
+            ..Probe::default()
+        });
         assert!(has(&f.run(), "media_zero_length", Severity::Blocker));
         // missing: a blocker when the spec uses it, a warning otherwise
         std::fs::remove_file(&hero).unwrap();
@@ -844,7 +1328,10 @@ mod tests {
         f.project.spec = GOOD_SPEC.replace("media:m-hero", "media:m-nope");
         let r = f.run();
         assert!(has(&r, "spec_unresolved_media", Severity::Blocker));
-        assert_eq!(r.issues.iter().find(|i| i.rule == "spec_unresolved_media").unwrap().fix.as_ref().unwrap().line, Some(5));
+        assert_eq!(
+            r.issues.iter().find(|i| i.rule == "spec_unresolved_media").unwrap().fix.as_ref().unwrap().line,
+            Some(5)
+        );
         f.project.spec = GOOD_SPEC.replace("Start a free trial.", "{{what next}}");
         assert!(has(&f.run(), "spec_placeholder", Severity::Warning));
         f.project.spec = GOOD_SPEC.replace("## Call to action\nStart a free trial.\n", "");
@@ -911,12 +1398,22 @@ mod tests {
         assert!(has(&f.run(), "outputs_none", Severity::Blocker));
         f.rc().outputs = vec!["out_gone".into()];
         assert!(has(&f.run(), "output_preset_missing", Severity::Blocker));
-        f.project.output_configs.push(OutputConfig { id: "out_bad".into(), preset: "no_such_preset".into(), name: None, overrides: OutputOverrides::default() });
+        f.project.output_configs.push(OutputConfig {
+            id: "out_bad".into(),
+            preset: "no_such_preset".into(),
+            name: None,
+            overrides: OutputOverrides::default(),
+        });
         f.rc().outputs = vec!["out_bad".into()];
         assert!(has(&f.run(), "output_preset_missing", Severity::Blocker));
         // duration limits: 45 s is over Reels' 90? no — over the App Store's 30 s, and X is fine
         let add = |f: &mut Fx, id: &str, preset: &str| {
-            f.project.output_configs.push(OutputConfig { id: id.into(), preset: preset.into(), name: None, overrides: OutputOverrides::default() });
+            f.project.output_configs.push(OutputConfig {
+                id: id.into(),
+                preset: preset.into(),
+                name: None,
+                overrides: OutputOverrides::default(),
+            });
             f.project.run_configs[0].outputs = vec![id.into()];
         };
         add(&mut f, "out_app", "app_store_preview");
@@ -959,7 +1456,21 @@ mod tests {
         // past runs of the same model family replace the heuristic
         f.rc().production_model = "opus".into();
         for cost in [4.0, 6.0] {
-            f.project.runs.push(crate::project::RunRecord { id: format!("r{cost}"), run_config: "rc_yt".into(), run_config_name: None, kind: RunKind::Production, folder: "/x".into(), status: crate::project::RunStatus::Succeeded, started: "2026-01-01T00:00:00Z".into(), finished: None, claude_session: None, model: Some("claude-opus-5-5".into()), previous_run: None, cost_usd: Some(cost), eleven_credits: None });
+            f.project.runs.push(crate::project::RunRecord {
+                id: format!("r{cost}"),
+                run_config: "rc_yt".into(),
+                run_config_name: None,
+                kind: RunKind::Production,
+                folder: "/x".into(),
+                status: crate::project::RunStatus::Succeeded,
+                started: "2026-01-01T00:00:00Z".into(),
+                finished: None,
+                claude_session: None,
+                model: Some("claude-opus-5-5".into()),
+                previous_run: None,
+                cost_usd: Some(cost),
+                eleven_credits: None,
+            });
         }
         let e = f.run().estimates;
         assert!((e.claude_usd_low - 3.0).abs() < 1e-9 && (e.claude_usd_high - 8.0).abs() < 1e-9);
@@ -973,12 +1484,31 @@ mod tests {
         let unack = r.unacknowledged_warnings(&[]);
         assert_eq!(unack.len(), 1);
         let id = unack[0].id.clone();
-        assert!(r.unacknowledged_warnings(&[id.clone()]).is_empty());
-        assert_eq!(f.run().issues.iter().find(|i| i.rule == "spec_placeholder").unwrap().id, id, "issue IDs are stable between validations");
-        let readiness = ReadinessReport { ambiguities: vec![crate::run::readiness::Finding { text: "Which logo opens the video?".into(), spec_line: Some(3), detail: None }], assumptions: vec![crate::run::readiness::Finding { text: "Used the primary logo".into(), spec_line: None, detail: None }], ..Default::default() };
+        assert!(r.unacknowledged_warnings(std::slice::from_ref(&id)).is_empty());
+        assert_eq!(
+            f.run().issues.iter().find(|i| i.rule == "spec_placeholder").unwrap().id,
+            id,
+            "issue IDs are stable between validations"
+        );
+        let readiness = ReadinessReport {
+            ambiguities: vec![crate::run::readiness::Finding {
+                text: "Which logo opens the video?".into(),
+                spec_line: Some(3),
+                detail: None,
+            }],
+            assumptions: vec![crate::run::readiness::Finding {
+                text: "Used the primary logo".into(),
+                spec_line: None,
+                detail: None,
+            }],
+            ..Default::default()
+        };
         r.add_dry_run(&readiness);
         assert_eq!(r.issues.iter().filter(|i| i.category == "dry_run").count(), 2);
-        assert_eq!(r.issues.iter().find(|i| i.rule == "dry_run_ambiguity").unwrap().fix.as_ref().unwrap().line, Some(3));
+        assert_eq!(
+            r.issues.iter().find(|i| i.rule == "dry_run_ambiguity").unwrap().fix.as_ref().unwrap().line,
+            Some(3)
+        );
         assert_eq!(r.warnings, 3);
         r.add_dry_run(&readiness);
         assert_eq!(r.warnings, 3, "adding again replaces the old findings");

@@ -45,7 +45,7 @@ fn redactions(manifest: &Value) -> Vec<(String, String)> {
             }
         }
     }
-    v.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    v.sort_by_key(|r| std::cmp::Reverse(r.0.len()));
     v
 }
 
@@ -80,8 +80,15 @@ pub fn export_logs(run_folder: &Utf8Path, dest: &Utf8Path, redact: bool) -> Resu
         let mut zip = zip::ZipWriter::new(&mut buf);
         let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         let mut add = |name: &str, bytes: Vec<u8>| -> Result<()> {
-            let is_text = matches!(Utf8Path::new(name).extension(), Some("json" | "ndjson" | "jsonl" | "log" | "md" | "json5" | "txt" | "srt" | "vtt"));
-            let bytes = if redact && is_text { redact_text(&String::from_utf8_lossy(&bytes), &rules).into_bytes() } else { bytes };
+            let is_text = matches!(
+                Utf8Path::new(name).extension(),
+                Some("json" | "ndjson" | "jsonl" | "log" | "md" | "json5" | "txt" | "srt" | "vtt")
+            );
+            let bytes = if redact && is_text {
+                redact_text(&String::from_utf8_lossy(&bytes), &rules).into_bytes()
+            } else {
+                bytes
+            };
             zip.start_file(name, opts).map_err(|e| Error::other(e.to_string()))?;
             zip.write_all(&bytes)?;
             count += 1;
@@ -115,14 +122,31 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
     let run: Value = paths::read_json(&run_folder.join("logs/run.json")).unwrap_or(Value::Null);
     let mut s = String::from("# cutline issue report\n\n");
     let get = |v: &Value| v.as_str().unwrap_or("unknown").to_string();
-    s.push_str(&format!("- Run: `{}` ({}, status **{}**)\n", get(&run["run_id"]), get(&run["kind"]).replace('_', " "), get(&run["status"]).replace('_', " ")));
+    s.push_str(&format!(
+        "- Run: `{}` ({}, status **{}**)\n",
+        get(&run["run_id"]),
+        get(&run["kind"]).replace('_', " "),
+        get(&run["status"]).replace('_', " ")
+    ));
     s.push_str(&format!("- cutline: {} at `{}`\n", get(&run["cutline"]["version"]), get(&run["cutline"]["path"])));
     s.push_str(&format!("- Claude Code: {} · model {}\n", get(&run["claude"]["version"]), get(&run["model_used"])));
-    s.push_str(&format!("- OS: {} {}\n- App core: {}\n", get(&run["os"]["family"]), get(&run["os"]["arch"]), get(&run["app"]["core_version"])));
+    s.push_str(&format!(
+        "- OS: {} {}\n- App core: {}\n",
+        get(&run["os"]["family"]),
+        get(&run["os"]["arch"]),
+        get(&run["app"]["core_version"])
+    ));
     if let Some(m) = run["message"].as_str() {
         s.push_str(&format!("- Outcome: {m}\n"));
     }
-    let outputs: Vec<String> = run["outputs"].as_array().map(|a| a.iter().map(|o| format!("{} ({}, {}×{})", get(&o["name"]), get(&o["target"]), o["width"], o["height"])).collect()).unwrap_or_default();
+    let outputs: Vec<String> = run["outputs"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|o| format!("{} ({}, {}×{})", get(&o["name"]), get(&o["target"]), o["width"], o["height"]))
+                .collect()
+        })
+        .unwrap_or_default();
     if !outputs.is_empty() {
         s.push_str(&format!("- Outputs: {}\n", outputs.join("; ")));
     }
@@ -131,16 +155,28 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
     let dir = run_folder.join("logs/cutline");
     let mut failed = 0;
     let mut warn_lines: Vec<String> = Vec::new();
-    let mut logs: Vec<Utf8PathBuf> = std::fs::read_dir(&dir).map(|rd| rd.flatten().filter_map(|e| paths::utf8(e.path()).ok()).filter(|p| p.extension() == Some("log")).collect()).unwrap_or_default();
+    let mut logs: Vec<Utf8PathBuf> = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.flatten().filter_map(|e| paths::utf8(e.path()).ok()).filter(|p| p.extension() == Some("log")).collect()
+        })
+        .unwrap_or_default();
     logs.sort();
     let total = logs.len();
     for log in &logs {
         let Ok(text) = std::fs::read_to_string(log) else { continue };
-        let code = text.lines().rev().find_map(|l| l.strip_prefix("# exit: ")).and_then(|c| c.trim().parse::<i32>().ok()).unwrap_or(0);
+        let code = text
+            .lines()
+            .rev()
+            .find_map(|l| l.strip_prefix("# exit: "))
+            .and_then(|c| c.trim().parse::<i32>().ok())
+            .unwrap_or(0);
         for l in text.lines() {
             let body = l.trim_start_matches("[err] ").trim_start_matches("[out] ");
             let lower = body.to_ascii_lowercase();
-            if (lower.contains("warning") || body.contains("W_")) && warn_lines.len() < 40 && !warn_lines.iter().any(|w| w == body) {
+            if (lower.contains("warning") || body.contains("W_"))
+                && warn_lines.len() < 40
+                && !warn_lines.iter().any(|w| w == body)
+            {
                 warn_lines.push(body.to_string());
             }
         }
@@ -152,7 +188,12 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
             let argv = text.lines().find_map(|l| l.strip_prefix("# argv: ")).unwrap_or("");
             let args: Vec<String> = serde_json::from_str(argv).unwrap_or_default();
             let body: String = text.lines().filter(|l| !l.starts_with("# ")).collect::<Vec<_>>().join("\n");
-            s.push_str(&format!("\n### `cutline {}` — exit {code}\n\nLog: `logs/cutline/{}`\n\n```\n{}\n```\n", args.iter().skip(1).cloned().collect::<Vec<_>>().join(" "), log.file_name().unwrap_or(""), tail_lines(&body, 40)));
+            s.push_str(&format!(
+                "\n### `cutline {}` — exit {code}\n\nLog: `logs/cutline/{}`\n\n```\n{}\n```\n",
+                args.iter().skip(1).cloned().collect::<Vec<_>>().join(" "),
+                log.file_name().unwrap_or(""),
+                tail_lines(&body, 40)
+            ));
         }
     }
     if failed == 0 {
@@ -166,7 +207,14 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
 
     // QA checks that didn't pass
     let qa_dir = run_folder.join("logs/qa");
-    let mut qa_files: Vec<Utf8PathBuf> = std::fs::read_dir(&qa_dir).map(|rd| rd.flatten().filter_map(|e| paths::utf8(e.path()).ok()).filter(|p| p.as_str().ends_with(".qa.json")).collect()).unwrap_or_default();
+    let mut qa_files: Vec<Utf8PathBuf> = std::fs::read_dir(&qa_dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| paths::utf8(e.path()).ok())
+                .filter(|p| p.as_str().ends_with(".qa.json"))
+                .collect()
+        })
+        .unwrap_or_default();
     qa_files.sort();
     let mut any_qa = false;
     for f in qa_files {
@@ -178,19 +226,34 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
             s.push_str("\n## QA findings\n");
             any_qa = true;
         }
-        s.push_str(&format!("\n### {} — {verdict} ({errors} errors, {warnings} warnings)\n\n", f.file_name().unwrap_or("")));
+        s.push_str(&format!(
+            "\n### {} — {verdict} ({errors} errors, {warnings} warnings)\n\n",
+            f.file_name().unwrap_or("")
+        ));
         for x in findings {
             s.push_str(&format!("- **{}** ({}): {}\n", x.check, x.severity, x.message));
         }
     }
 
     // What the broker refused: often a sign the workflow guide and the tool disagree
-    let denied: Vec<Value> = std::fs::read_to_string(run_folder.join("logs/permissions.ndjson")).map(|t| t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["decision"] == "deny").collect()).unwrap_or_default();
+    let denied: Vec<Value> = std::fs::read_to_string(run_folder.join("logs/permissions.ndjson"))
+        .map(|t| {
+            t.lines()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .filter(|v| v["decision"] == "deny")
+                .collect()
+        })
+        .unwrap_or_default();
     if !denied.is_empty() {
         s.push_str("\n## Blocked tool calls\n\n");
         for d in denied.iter().take(20) {
             let what = d["input"]["command"].as_str().or(d["input"]["file_path"].as_str()).unwrap_or("");
-            s.push_str(&format!("- {} `{}` — {}\n", get(&d["tool"]), what.chars().take(160).collect::<String>(), get(&d["reason"])));
+            s.push_str(&format!(
+                "- {} `{}` — {}\n",
+                get(&d["tool"]),
+                what.chars().take(160).collect::<String>(),
+                get(&d["reason"])
+            ));
         }
     }
     if let Ok(summary) = std::fs::read_to_string(run_folder.join("summary.md")) {
@@ -202,7 +265,13 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
 }
 
 fn dir_size(dir: &Utf8Path) -> u64 {
-    walkdir::WalkDir::new(dir).into_iter().flatten().filter(|e| e.file_type().is_file()).filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum()
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -228,7 +297,14 @@ pub fn storage_info(library: &Utf8Path, run_folders: &[String]) -> StorageInfo {
     let mut runs: Vec<RunStorage> = Vec::new();
     let mut add = |folder: &Utf8Path| {
         let run: Value = paths::read_json(&folder.join("logs/run.json")).unwrap_or(Value::Null);
-        runs.push(RunStorage { folder: folder.to_string(), exists: folder.is_dir(), total_bytes: dir_size(folder), logs_bytes: dir_size(&folder.join("logs")), started: run["started"].as_str().map(str::to_string), kind: run["kind"].as_str().map(str::to_string) });
+        runs.push(RunStorage {
+            folder: folder.to_string(),
+            exists: folder.is_dir(),
+            total_bytes: dir_size(folder),
+            logs_bytes: dir_size(&folder.join("logs")),
+            started: run["started"].as_str().map(str::to_string),
+            kind: run["kind"].as_str().map(str::to_string),
+        });
     };
     for f in run_folders {
         add(Utf8Path::new(f));
@@ -237,7 +313,11 @@ pub fn storage_info(library: &Utf8Path, run_folders: &[String]) -> StorageInfo {
     for f in dry_run_folders(library) {
         add(&f);
     }
-    StorageInfo { eleven_cache_bytes: crate::eleven::cache_size(&crate::eleven::cache_dir(library)), dry_runs_bytes: dir_size(&dry), runs }
+    StorageInfo {
+        eleven_cache_bytes: crate::eleven::cache_size(&crate::eleven::cache_dir(library)),
+        dry_runs_bytes: dir_size(&dry),
+        runs,
+    }
 }
 
 fn dry_run_folders(library: &Utf8Path) -> Vec<Utf8PathBuf> {
@@ -295,7 +375,10 @@ mod tests {
             std::fs::write(p, text).unwrap();
         };
         w("logs/run.json", &json!({"run_id": "run_1", "kind": "production", "status": "failed", "started": "2020-01-01T00:00:00Z", "cutline": {"version": "0.1.0", "path": "/bin/cutline"}, "claude": {"version": "2.1.311 (Claude Code)"}, "model_used": "claude-opus-5-5", "os": {"family": "macos", "arch": "aarch64"}, "app": {"core_version": "0.1.0"}, "message": "Claude finished without producing this output: shorts", "outputs": [{"name": "YouTube Shorts", "target": "shorts", "width": 1080, "height": 1920}]}).to_string());
-        w("logs/events.ndjson", "{\"event\":\"warning\",\"message\":\"Media at /Users/ana/Footage/secret-launch.mov\"}\n");
+        w(
+            "logs/events.ndjson",
+            "{\"event\":\"warning\",\"message\":\"Media at /Users/ana/Footage/secret-launch.mov\"}\n",
+        );
         w("logs/claude.jsonl", "{\"type\":\"assistant\",\"path\":\"/Users/ana/Footage/secret-launch.mov\"}\n");
         w("logs/cutline/001-validate.log", "# argv: [\"/bin/cutline\",\"validate\",\"--json\",\"project.json5\"]\n# cwd: /r\n[out] {\"ok\":true}\n# exit: 0\n# duration: 0.10 s\n");
         w("logs/cutline/002-render.log", "# argv: [\"/bin/cutline\",\"render\",\"project.json5\"]\n# cwd: /r\n[err] warning: W_MAX_BYTES_TIGHT the cap leaves little for video\n[err] error: E_ASSET_MISSING /Users/ana/Footage/secret-launch.mov\n# exit: 1\n# duration: 4.20 s\n");
@@ -328,7 +411,16 @@ mod tests {
         let n = export_logs(&run, &plain, false).unwrap();
         let files = unzip(&plain);
         assert_eq!(n as usize, files.len());
-        for name in ["logs/run.json", "logs/events.ndjson", "logs/claude.jsonl", "logs/cutline/001-validate.log", "logs/cutline/002-render.log", "logs/qa/shorts.qa.json", "project.json5", "media-manifest.json"] {
+        for name in [
+            "logs/run.json",
+            "logs/events.ndjson",
+            "logs/claude.jsonl",
+            "logs/cutline/001-validate.log",
+            "logs/cutline/002-render.log",
+            "logs/qa/shorts.qa.json",
+            "project.json5",
+            "media-manifest.json",
+        ] {
             assert!(files.contains_key(name), "missing {name}: {:?}", files.keys());
         }
         assert!(files["project.json5"].contains("secret-launch.mov"));
@@ -336,7 +428,10 @@ mod tests {
         export_logs(&run, &redacted, true).unwrap();
         let files = unzip(&redacted);
         for (name, text) in &files {
-            assert!(!text.contains("secret-launch") && !text.contains("/Users/ana"), "{name} still names the media: {text}");
+            assert!(
+                !text.contains("secret-launch") && !text.contains("/Users/ana"),
+                "{name} still names the media: {text}"
+            );
         }
         assert!(files["project.json5"].contains("<media-1.mov>"));
         assert!(files["logs/cutline/002-render.log"].contains("E_ASSET_MISSING <media-1.mov>"));
@@ -352,7 +447,23 @@ mod tests {
         let root = Utf8Path::from_path(d.path()).unwrap();
         let run = run_fixture(root);
         let r = issue_report(&run);
-        for needle in ["# cutline issue report", "status **failed**", "cutline: 0.1.0", "model claude-opus-5-5", "### `cutline render project.json5` — exit 1", "E_ASSET_MISSING", "logs/cutline/002-render.log", "## cutline warnings", "W_MAX_BYTES_TIGHT", "## QA findings", "**black_frames** (error): 0.8 s of black at 12.4 s", "## Blocked tool calls", "`ls -la`", "## Claude's summary", "Nothing rendered."] {
+        for needle in [
+            "# cutline issue report",
+            "status **failed**",
+            "cutline: 0.1.0",
+            "model claude-opus-5-5",
+            "### `cutline render project.json5` — exit 1",
+            "E_ASSET_MISSING",
+            "logs/cutline/002-render.log",
+            "## cutline warnings",
+            "W_MAX_BYTES_TIGHT",
+            "## QA findings",
+            "**black_frames** (error): 0.8 s of black at 12.4 s",
+            "## Blocked tool calls",
+            "`ls -la`",
+            "## Claude's summary",
+            "Nothing rendered.",
+        ] {
             assert!(r.contains(needle), "missing {needle:?} in\n{r}");
         }
         assert!(!r.contains("cutline validate --json project.json5` — exit"), "passing commands aren't listed");
@@ -368,7 +479,11 @@ mod tests {
         // a recent dry run in the library, and a folder that isn't a run
         let fresh = lib.join("dry-runs/prj_1/2026-11-14-0900-x");
         std::fs::create_dir_all(fresh.join("logs")).unwrap();
-        std::fs::write(fresh.join("logs/run.json"), json!({"kind": "dry_run", "status": "succeeded", "started": timeutil::now_rfc3339()}).to_string()).unwrap();
+        std::fs::write(
+            fresh.join("logs/run.json"),
+            json!({"kind": "dry_run", "status": "succeeded", "started": timeutil::now_rfc3339()}).to_string(),
+        )
+        .unwrap();
         let not_a_run = root.join("holiday-photos");
         std::fs::create_dir_all(&not_a_run).unwrap();
         std::fs::write(not_a_run.join("a.jpg"), b"x").unwrap();

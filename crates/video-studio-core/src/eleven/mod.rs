@@ -38,7 +38,11 @@ impl Pricing {
         serde_json::from_str(BUNDLED_PRICING).expect("bundled eleven-pricing.json is valid")
     }
     pub fn tts_rate(&self, model: Option<&str>) -> f64 {
-        model.and_then(|m| self.tts_credits_per_char.get(m)).or_else(|| self.tts_credits_per_char.get("default")).copied().unwrap_or(1.0)
+        model
+            .and_then(|m| self.tts_credits_per_char.get(m))
+            .or_else(|| self.tts_credits_per_char.get("default"))
+            .copied()
+            .unwrap_or(1.0)
     }
 }
 
@@ -76,8 +80,15 @@ impl HelperContext {
     /// Loads the context named by `VIDEO_STUDIO_RUN_CONTEXT`. Without it the helper refuses to
     /// run, so it can't be used outside a run.
     pub fn from_env() -> Result<Self> {
-        let path = std::env::var(CONTEXT_ENV).ok().filter(|p| !p.is_empty()).ok_or_else(|| Error::Denied("This command only works inside a Syncfusion Video Studio run.".into()))?;
-        let ctx: HelperContext = paths::read_json(Utf8Path::new(&path)).map_err(|_| Error::Denied("This command only works inside a Syncfusion Video Studio run (the run context is missing).".into()))?;
+        let path = std::env::var(CONTEXT_ENV)
+            .ok()
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| Error::Denied("This command only works inside a Syncfusion Video Studio run.".into()))?;
+        let ctx: HelperContext = paths::read_json(Utf8Path::new(&path)).map_err(|_| {
+            Error::Denied(
+                "This command only works inside a Syncfusion Video Studio run (the run context is missing).".into(),
+            )
+        })?;
         if !ctx.run_folder.is_dir() {
             return Err(Error::Denied("The run this command belongs to no longer exists.".into()));
         }
@@ -134,7 +145,9 @@ impl Request {
     /// The request as logged and hashed: everything that changes the result, and never the key.
     pub fn describe(&self) -> Value {
         match self {
-            Request::Tts { voice, text, model, settings } => json!({"command": "tts", "voice": voice, "model": model, "settings": settings, "text": text}),
+            Request::Tts { voice, text, model, settings } => {
+                json!({"command": "tts", "voice": voice, "model": model, "settings": settings, "text": text})
+            }
             Request::Music { prompt, length_s } => json!({"command": "music", "prompt": prompt, "length_s": length_s}),
             Request::Sfx { prompt, length_s } => json!({"command": "sfx", "prompt": prompt, "length_s": length_s}),
             Request::Scribe { input } => {
@@ -170,7 +183,13 @@ pub fn quote(req: &Request, pricing: &Pricing, audio_seconds: Option<f64>) -> u6
 /// Credits this run has spent so far: the sum over the call log.
 pub fn spent(log: &Utf8Path) -> u64 {
     std::fs::read_to_string(log)
-        .map(|t| t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["ok"].as_bool() == Some(true)).filter_map(|v| v["credits"].as_u64()).sum())
+        .map(|t| {
+            t.lines()
+                .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .filter(|v| v["ok"].as_bool() == Some(true))
+                .filter_map(|v| v["credits"].as_u64())
+                .sum()
+        })
         .unwrap_or(0)
 }
 
@@ -199,7 +218,10 @@ pub fn resolve_out(ctx: &HelperContext, out: &str, extension: &str) -> Result<Ut
         p.set_extension(extension);
     }
     if !paths::is_inside(&p, &ctx.run_folder) {
-        return Err(Error::Denied(format!("--out must be inside the run folder ({}); audio normally goes in audio/.", ctx.run_folder)));
+        return Err(Error::Denied(format!(
+            "--out must be inside the run folder ({}); audio normally goes in audio/.",
+            ctx.run_folder
+        )));
     }
     Ok(p)
 }
@@ -207,14 +229,25 @@ pub fn resolve_out(ctx: &HelperContext, out: &str, extension: &str) -> Result<Ut
 fn with_lock<T>(ctx: &HelperContext, f: impl FnOnce() -> Result<T>) -> Result<T> {
     use fs2::FileExt;
     std::fs::create_dir_all(&ctx.logs_dir)?;
-    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(ctx.logs_dir.join(".eleven.lock"))?;
+    let lock =
+        std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(ctx.logs_dir.join(".eleven.lock"))?;
     lock.lock_exclusive()?;
     let r = f();
     let _ = FileExt::unlock(&lock);
     r
 }
 
-fn log_call(ctx: &HelperContext, req: &Request, out: Option<&Utf8Path>, quoted: u64, credits: u64, cached: bool, bytes: u64, error: Option<&str>, summary: Value) {
+fn log_call(
+    ctx: &HelperContext,
+    req: &Request,
+    out: Option<&Utf8Path>,
+    quoted: u64,
+    credits: u64,
+    cached: bool,
+    bytes: u64,
+    error: Option<&str>,
+    summary: Value,
+) {
     let entry = json!({
         "ts": timeutil::now_rfc3339(),
         "command": req.command(),
@@ -234,7 +267,9 @@ fn log_call(ctx: &HelperContext, req: &Request, out: Option<&Utf8Path>, quoted: 
 /// Runs one generation request: quote, budget check, cache lookup, API call, log.
 pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secrets) -> Result<CallResult> {
     if ctx.mode != Mode::Production {
-        return Err(Error::Denied("Audio isn't generated in a dry run. Use `video-studio eleven quote …` to estimate credits.".into()));
+        return Err(Error::Denied(
+            "Audio isn't generated in a dry run. Use `video-studio eleven quote …` to estimate credits.".into(),
+        ));
     }
     let dest = resolve_out(ctx, out, req.extension())?;
     let pricing = Pricing::bundled();
@@ -266,7 +301,14 @@ pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secr
             let bytes = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
             log_call(ctx, req, Some(&dest), quoted, 0, true, bytes, None, json!({"source": "cache"}));
             let total = spent(&ctx.log_path());
-            return Ok(CallResult { out: dest.clone(), credits: 0, cached: true, bytes, spent: total, cap: ctx.credit_cap });
+            return Ok(CallResult {
+                out: dest.clone(),
+                credits: 0,
+                cached: true,
+                bytes,
+                spent: total,
+                cap: ctx.credit_cap,
+            });
         }
         let so_far = spent(&ctx.log_path());
         if so_far + quoted > ctx.credit_cap {
@@ -280,7 +322,9 @@ pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secr
         }
         let client = ctx.client(secrets)?;
         let result = match req {
-            Request::Tts { voice, text, model, settings } => client.tts(voice, text, model.as_deref().or(ctx.default_model.as_deref()), settings.as_ref()),
+            Request::Tts { voice, text, model, settings } => {
+                client.tts(voice, text, model.as_deref().or(ctx.default_model.as_deref()), settings.as_ref())
+            }
             Request::Music { prompt, length_s } => client.music(prompt, *length_s),
             Request::Sfx { prompt, length_s } => client.sfx(prompt, *length_s),
             Request::Scribe { input } => client.scribe(input),
@@ -296,11 +340,28 @@ pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secr
                 paths::write_atomic(&dest, &resp.bytes)?;
                 paths::write_atomic(&cache_file, &resp.bytes)?;
                 let bytes = resp.bytes.len() as u64;
-                log_call(ctx, req, Some(&dest), quoted, credits, false, bytes, None, json!({"status": resp.status, "content_type": resp.content_type, "request_id": resp.request_id}));
+                log_call(
+                    ctx,
+                    req,
+                    Some(&dest),
+                    quoted,
+                    credits,
+                    false,
+                    bytes,
+                    None,
+                    json!({"status": resp.status, "content_type": resp.content_type, "request_id": resp.request_id}),
+                );
                 if ctx.cache_limit_bytes > 0 {
                     prune_cache(&ctx.cache_dir, ctx.cache_limit_bytes);
                 }
-                Ok(CallResult { out: dest.clone(), credits, cached: false, bytes, spent: so_far + credits, cap: ctx.credit_cap })
+                Ok(CallResult {
+                    out: dest.clone(),
+                    credits,
+                    cached: false,
+                    bytes,
+                    spent: so_far + credits,
+                    cap: ctx.credit_cap,
+                })
             }
         }
     })
@@ -314,13 +375,23 @@ fn filetime_touch(path: &Utf8Path) -> std::io::Result<()> {
 
 /// Total size of the cache in bytes.
 pub fn cache_size(dir: &Utf8Path) -> u64 {
-    std::fs::read_dir(dir).map(|rd| rd.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum()).unwrap_or(0)
+    std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum())
+        .unwrap_or(0)
 }
 
 /// Removes the least recently used cache entries until the cache fits in `limit` bytes.
 pub fn prune_cache(dir: &Utf8Path, limit: u64) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
-    let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = rd.flatten().filter_map(|e| e.metadata().ok().filter(|m| m.is_file()).map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len(), e.path()))).collect();
+    let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = rd
+        .flatten()
+        .filter_map(|e| {
+            e.metadata()
+                .ok()
+                .filter(|m| m.is_file())
+                .map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len(), e.path()))
+        })
+        .collect();
     let mut total: u64 = files.iter().map(|f| f.1).sum();
     files.sort();
     for (_, size, path) in files {
@@ -359,7 +430,21 @@ mod tests {
     fn ctx(dir: &Utf8Path, mode: Mode, cap: u64) -> HelperContext {
         let run = dir.join("run");
         std::fs::create_dir_all(run.join("logs")).unwrap();
-        HelperContext { run_id: "run_1".into(), run_folder: run.clone(), mode, logs_dir: run.join("logs"), cutline: None, credit_cap: cap, cache_dir: dir.join("cache"), cache_limit_bytes: 0, default_voice: None, default_voice_settings: None, default_model: None, base_url: Some("http://127.0.0.1:9".into()), test_api_key: None }
+        HelperContext {
+            run_id: "run_1".into(),
+            run_folder: run.clone(),
+            mode,
+            logs_dir: run.join("logs"),
+            cutline: None,
+            credit_cap: cap,
+            cache_dir: dir.join("cache"),
+            cache_limit_bytes: 0,
+            default_voice: None,
+            default_voice_settings: None,
+            default_model: None,
+            base_url: Some("http://127.0.0.1:9".into()),
+            test_api_key: None,
+        }
     }
 
     fn tts(text: &str) -> Request {
@@ -370,7 +455,19 @@ mod tests {
     fn quotes() {
         let p = Pricing::bundled();
         assert_eq!(quote(&tts("Hello world"), &p, None), 11);
-        assert_eq!(quote(&Request::Tts { voice: "v".into(), text: "Hello world".into(), model: Some("eleven_flash_v2_5".into()), settings: None }, &p, None), 6);
+        assert_eq!(
+            quote(
+                &Request::Tts {
+                    voice: "v".into(),
+                    text: "Hello world".into(),
+                    model: Some("eleven_flash_v2_5".into()),
+                    settings: None
+                },
+                &p,
+                None
+            ),
+            6
+        );
         assert_eq!(quote(&Request::Sfx { prompt: "whoosh".into(), length_s: 2.0 }, &p, None), 80);
         assert_eq!(quote(&Request::Music { prompt: "calm".into(), length_s: 30.0 }, &p, None), 900);
         assert_eq!(quote(&Request::Scribe { input: "a.mp3".into() }, &p, Some(90.0)), 150);
@@ -381,8 +478,20 @@ mod tests {
         let a = tts("Hello");
         assert_eq!(a.cache_key(), tts("Hello").cache_key());
         assert_ne!(a.cache_key(), tts("Hello!").cache_key());
-        assert_ne!(a.cache_key(), Request::Tts { voice: "v2".into(), text: "Hello".into(), model: None, settings: None }.cache_key());
-        assert_ne!(a.cache_key(), Request::Tts { voice: "v1".into(), text: "Hello".into(), model: None, settings: Some(json!({"stability": 0.3})) }.cache_key());
+        assert_ne!(
+            a.cache_key(),
+            Request::Tts { voice: "v2".into(), text: "Hello".into(), model: None, settings: None }.cache_key()
+        );
+        assert_ne!(
+            a.cache_key(),
+            Request::Tts {
+                voice: "v1".into(),
+                text: "Hello".into(),
+                model: None,
+                settings: Some(json!({"stability": 0.3}))
+            }
+            .cache_key()
+        );
         assert_eq!(a.cache_key().len(), 64);
     }
 
@@ -393,7 +502,10 @@ mod tests {
         let c = ctx(dir, Mode::Production, 100);
         assert_eq!(resolve_out(&c, "vo/scene1", "mp3").unwrap(), c.run_folder.join("audio/vo/scene1.mp3"));
         assert_eq!(resolve_out(&c, "audio/music.mp3", "mp3").unwrap(), c.run_folder.join("audio/music.mp3"));
-        assert_eq!(resolve_out(&c, c.run_folder.join("work/x.mp3").as_str(), "mp3").unwrap(), c.run_folder.join("work/x.mp3"));
+        assert_eq!(
+            resolve_out(&c, c.run_folder.join("work/x.mp3").as_str(), "mp3").unwrap(),
+            c.run_folder.join("work/x.mp3")
+        );
         assert!(matches!(resolve_out(&c, "../../escape.mp3", "mp3"), Err(Error::Denied(_))));
         assert!(matches!(resolve_out(&c, "/tmp/x.mp3", "mp3"), Err(Error::Denied(_))));
     }
@@ -418,10 +530,17 @@ mod tests {
         let secrets = MemorySecrets::with(ELEVEN_KEY, "k");
         // 26 characters against a cap of 10: refused with a message Claude can act on, and logged
         let err = execute(&c, &tts("This sentence is too long."), "a.mp3", &secrets).unwrap_err();
-        assert!(matches!(&err, Error::Budget(m) if m.contains("about 26 credits") && m.contains("Shorten the text")), "{err}");
-        let log: Vec<Value> = std::fs::read_to_string(c.log_path()).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert!(
+            matches!(&err, Error::Budget(m) if m.contains("about 26 credits") && m.contains("Shorten the text")),
+            "{err}"
+        );
+        let log: Vec<Value> =
+            std::fs::read_to_string(c.log_path()).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(log.len(), 1);
-        assert_eq!((log[0]["ok"].as_bool(), log[0]["credits"].as_u64(), log[0]["quoted"].as_u64()), (Some(false), Some(0), Some(26)));
+        assert_eq!(
+            (log[0]["ok"].as_bool(), log[0]["credits"].as_u64(), log[0]["quoted"].as_u64()),
+            (Some(false), Some(0), Some(26))
+        );
         assert!(!log[0].to_string().contains("\"k\""), "the key is never logged");
         assert_eq!(spent(&c.log_path()), 0);
     }
@@ -438,8 +557,12 @@ mod tests {
         let r = execute(&c, &req, "vo.mp3", &MemorySecrets::default()).unwrap();
         assert!(r.cached && r.credits == 0 && r.spent == 0);
         assert_eq!(std::fs::read(c.run_folder.join("audio/vo.mp3")).unwrap(), b"cached-audio");
-        let log: Value = serde_json::from_str(std::fs::read_to_string(c.log_path()).unwrap().lines().next().unwrap()).unwrap();
-        assert_eq!((log["cache"].as_str(), log["credits"].as_u64(), log["ok"].as_bool()), (Some("hit"), Some(0), Some(true)));
+        let log: Value =
+            serde_json::from_str(std::fs::read_to_string(c.log_path()).unwrap().lines().next().unwrap()).unwrap();
+        assert_eq!(
+            (log["cache"].as_str(), log["credits"].as_u64(), log["ok"].as_bool()),
+            (Some("hit"), Some(0), Some(true))
+        );
     }
 
     #[test]
@@ -449,8 +572,12 @@ mod tests {
         let c = ctx(dir, Mode::Production, 1000);
         let err = execute(&c, &tts("Hello"), "a.mp3", &MemorySecrets::default()).unwrap_err();
         assert!(matches!(&err, Error::Environment(m) if m.contains("No ElevenLabs API key")), "{err}");
-        assert!(matches!(execute(&c, &tts("  "), "a.mp3", &MemorySecrets::default()), Err(Error::Other(m)) if m.contains("empty")));
-        assert!(matches!(execute(&c, &Request::Tts { voice: "".into(), text: "Hi".into(), model: None, settings: None }, "a.mp3", &MemorySecrets::default()), Err(Error::Other(m)) if m.contains("No voice")));
+        assert!(
+            matches!(execute(&c, &tts("  "), "a.mp3", &MemorySecrets::default()), Err(Error::Other(m)) if m.contains("empty"))
+        );
+        assert!(
+            matches!(execute(&c, &Request::Tts { voice: "".into(), text: "Hi".into(), model: None, settings: None }, "a.mp3", &MemorySecrets::default()), Err(Error::Other(m)) if m.contains("No voice"))
+        );
     }
 
     #[test]

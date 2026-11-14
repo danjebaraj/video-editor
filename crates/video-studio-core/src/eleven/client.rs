@@ -56,8 +56,15 @@ pub struct VoiceInfo {
 
 impl Client {
     pub fn new(key: &str, base_url: Option<&str>) -> Self {
-        let config = ureq::Agent::config_builder().http_status_as_error(false).timeout_global(Some(Duration::from_secs(600))).build();
-        Client { key: key.to_string(), base: base_url.unwrap_or(DEFAULT_BASE).trim_end_matches('/').to_string(), agent: config.into() }
+        let config = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_global(Some(Duration::from_secs(600)))
+            .build();
+        Client {
+            key: key.to_string(),
+            base: base_url.unwrap_or(DEFAULT_BASE).trim_end_matches('/').to_string(),
+            agent: config.into(),
+        }
     }
 
     fn url(&self, path: &str) -> String {
@@ -69,7 +76,9 @@ impl Client {
         let text = String::from_utf8_lossy(body);
         let message = serde_json::from_str::<Value>(&text)
             .ok()
-            .and_then(|v| v["detail"]["message"].as_str().or(v["detail"].as_str()).or(v["message"].as_str()).map(str::to_string))
+            .and_then(|v| {
+                v["detail"]["message"].as_str().or(v["detail"].as_str()).or(v["message"].as_str()).map(str::to_string)
+            })
             .unwrap_or_else(|| text.chars().take(300).collect());
         let hint = match status {
             401 => " (the API key was rejected)",
@@ -81,11 +90,18 @@ impl Client {
 
     fn finish(mut resp: ureq::http::Response<ureq::Body>) -> Result<Generated> {
         let status = resp.status().as_u16();
-        let header = |resp: &ureq::http::Response<ureq::Body>, name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string);
+        let header = |resp: &ureq::http::Response<ureq::Body>, name: &str| {
+            resp.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string)
+        };
         let content_type = header(&resp, "content-type");
         let request_id = header(&resp, "request-id");
         let credits = header(&resp, "character-cost").and_then(|v| v.parse::<u64>().ok());
-        let bytes = resp.body_mut().with_config().limit(MAX_BODY).read_to_vec().map_err(|e| Error::Http(format!("reading the ElevenLabs response failed: {e}")))?;
+        let bytes = resp
+            .body_mut()
+            .with_config()
+            .limit(MAX_BODY)
+            .read_to_vec()
+            .map_err(|e| Error::Http(format!("reading the ElevenLabs response failed: {e}")))?;
         if !(200..300).contains(&status) {
             return Err(Self::fail(status, &bytes));
         }
@@ -93,12 +109,22 @@ impl Client {
     }
 
     fn get(&self, path: &str) -> Result<Generated> {
-        let resp = self.agent.get(self.url(path)).header("xi-api-key", &self.key).call().map_err(|e| Error::Http(format!("couldn't reach ElevenLabs: {e}")))?;
+        let resp = self
+            .agent
+            .get(self.url(path))
+            .header("xi-api-key", &self.key)
+            .call()
+            .map_err(|e| Error::Http(format!("couldn't reach ElevenLabs: {e}")))?;
         Self::finish(resp)
     }
 
     fn post_json(&self, path: &str, body: &Value) -> Result<Generated> {
-        let resp = self.agent.post(self.url(path)).header("xi-api-key", &self.key).send_json(body).map_err(|e| Error::Http(format!("couldn't reach ElevenLabs: {e}")))?;
+        let resp = self
+            .agent
+            .post(self.url(path))
+            .header("xi-api-key", &self.key)
+            .send_json(body)
+            .map_err(|e| Error::Http(format!("couldn't reach ElevenLabs: {e}")))?;
         Self::finish(resp)
     }
 
@@ -115,8 +141,12 @@ impl Client {
             path.push_str(&urlencode(s.trim()));
         }
         let r = self.get(&path)?;
-        let v: Value = serde_json::from_slice(&r.bytes).map_err(|e| Error::Http(format!("unexpected voices response: {e}")))?;
-        Ok(v["voices"].as_array().map(|a| a.iter().filter_map(|x| serde_json::from_value(x.clone()).ok()).collect()).unwrap_or_default())
+        let v: Value =
+            serde_json::from_slice(&r.bytes).map_err(|e| Error::Http(format!("unexpected voices response: {e}")))?;
+        Ok(v["voices"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| serde_json::from_value(x.clone()).ok()).collect())
+            .unwrap_or_default())
     }
 
     pub fn tts(&self, voice: &str, text: &str, model: Option<&str>, settings: Option<&Value>) -> Result<Generated> {
@@ -128,11 +158,17 @@ impl Client {
     }
 
     pub fn music(&self, prompt: &str, length_s: f64) -> Result<Generated> {
-        self.post_json("/v1/music?output_format=mp3_44100_128", &json!({"prompt": prompt, "music_length_ms": (length_s * 1000.0).round() as u64}))
+        self.post_json(
+            "/v1/music?output_format=mp3_44100_128",
+            &json!({"prompt": prompt, "music_length_ms": (length_s * 1000.0).round() as u64}),
+        )
     }
 
     pub fn sfx(&self, prompt: &str, length_s: f64) -> Result<Generated> {
-        self.post_json("/v1/sound-generation?output_format=mp3_44100_128", &json!({"text": prompt, "duration_seconds": length_s}))
+        self.post_json(
+            "/v1/sound-generation?output_format=mp3_44100_128",
+            &json!({"text": prompt, "duration_seconds": length_s}),
+        )
     }
 
     /// Scribe speech-to-text with word timestamps; the JSON is what `cutline transcribe` imports.
@@ -141,7 +177,10 @@ impl Client {
         let boundary = format!("----videostudio{}", crate::ids::new_id("b"));
         let mut body: Vec<u8> = Vec::with_capacity(audio.len() + 512);
         let mut field = |name: &str, value: &str| {
-            body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
+                    .as_bytes(),
+            );
         };
         field("model_id", "scribe_v1");
         field("timestamps_granularity", "word");
@@ -178,9 +217,12 @@ mod tests {
 
     #[test]
     fn error_messages_come_from_the_response() {
-        let e = Client::fail(401, br#"{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}"#).to_string();
+        let e =
+            Client::fail(401, br#"{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}"#).to_string();
         assert_eq!(e, "ElevenLabs returned 401 (the API key was rejected): Invalid API key");
-        assert!(Client::fail(429, br#"{"detail":"Too many requests"}"#).to_string().contains("quota or rate limit): Too many requests"));
+        assert!(Client::fail(429, br#"{"detail":"Too many requests"}"#)
+            .to_string()
+            .contains("quota or rate limit): Too many requests"));
         assert!(Client::fail(500, b"<html>oops</html>").to_string().contains("oops"));
         assert_eq!(urlencode("a b/ç"), "a%20b%2F%C3%A7");
         assert_eq!(Subscription { tier: "pro".into(), character_count: 400, character_limit: 1000 }.remaining(), 600);

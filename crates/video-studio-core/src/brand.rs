@@ -58,13 +58,25 @@ pub struct Palette {
 
 impl Default for Palette {
     fn default() -> Self {
-        Palette { primary: "#F26B21".into(), secondary: "#1F2A44".into(), accent: "#2D9CDB".into(), background: "#FFFFFF".into(), text: "#111827".into() }
+        Palette {
+            primary: "#F26B21".into(),
+            secondary: "#1F2A44".into(),
+            accent: "#2D9CDB".into(),
+            background: "#FFFFFF".into(),
+            text: "#111827".into(),
+        }
     }
 }
 
 impl Palette {
     pub fn roles(&self) -> [(&'static str, &str); 5] {
-        [("primary", &self.primary), ("secondary", &self.secondary), ("accent", &self.accent), ("background", &self.background), ("text", &self.text)]
+        [
+            ("primary", &self.primary),
+            ("secondary", &self.secondary),
+            ("accent", &self.accent),
+            ("background", &self.background),
+            ("text", &self.text),
+        ]
     }
 }
 
@@ -173,7 +185,18 @@ impl BrandPreset {
     pub fn assets(&self) -> Vec<(&'static str, &AssetRef)> {
         let mut v = Vec::new();
         let l = &self.logos;
-        for (label, a) in [("Primary logo", &l.primary), ("Horizontal logo", &l.horizontal), ("Icon", &l.icon), ("Logo for light backgrounds", &l.light), ("Logo for dark backgrounds", &l.dark), ("Intro bumper", &self.intro), ("Outro bumper", &self.outro), ("Watermark", &self.watermark.asset), ("Heading font", &self.fonts.heading.file), ("Body font", &self.fonts.body.file)] {
+        for (label, a) in [
+            ("Primary logo", &l.primary),
+            ("Horizontal logo", &l.horizontal),
+            ("Icon", &l.icon),
+            ("Logo for light backgrounds", &l.light),
+            ("Logo for dark backgrounds", &l.dark),
+            ("Intro bumper", &self.intro),
+            ("Outro bumper", &self.outro),
+            ("Watermark", &self.watermark.asset),
+            ("Heading font", &self.fonts.heading.file),
+            ("Body font", &self.fonts.body.file),
+        ] {
             if let Some(a) = a {
                 v.push((label, a));
             }
@@ -184,7 +207,18 @@ impl BrandPreset {
     fn assets_mut(&mut self) -> Vec<(&'static str, &mut AssetRef)> {
         let mut v = Vec::new();
         let l = &mut self.logos;
-        for (label, a) in [("primary", &mut l.primary), ("horizontal", &mut l.horizontal), ("icon", &mut l.icon), ("light", &mut l.light), ("dark", &mut l.dark), ("intro", &mut self.intro), ("outro", &mut self.outro), ("watermark", &mut self.watermark.asset), ("font-heading", &mut self.fonts.heading.file), ("font-body", &mut self.fonts.body.file)] {
+        for (label, a) in [
+            ("primary", &mut l.primary),
+            ("horizontal", &mut l.horizontal),
+            ("icon", &mut l.icon),
+            ("light", &mut l.light),
+            ("dark", &mut l.dark),
+            ("intro", &mut self.intro),
+            ("outro", &mut self.outro),
+            ("watermark", &mut self.watermark.asset),
+            ("font-heading", &mut self.fonts.heading.file),
+            ("font-body", &mut self.fonts.body.file),
+        ] {
             if let Some(a) = a {
                 v.push((label, a));
             }
@@ -225,12 +259,15 @@ pub fn list(library: &Utf8Path) -> Vec<BrandPreset> {
                 .collect()
         })
         .unwrap_or_default();
-    v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    v.sort_by_key(|p| p.name.to_lowercase());
     v
 }
 
 pub fn get(library: &Utf8Path, id: &str) -> Option<BrandPreset> {
-    paths::read_json::<BrandPreset>(&preset_file(library, id)).ok().filter(|p| p.id == id).or_else(|| list(library).into_iter().find(|p| p.id == id))
+    paths::read_json::<BrandPreset>(&preset_file(library, id))
+        .ok()
+        .filter(|p| p.id == id)
+        .or_else(|| list(library).into_iter().find(|p| p.id == id))
 }
 
 /// Saves a preset to the library, stamping `modified`.
@@ -369,17 +406,26 @@ pub fn import_cutbrand(library: &Utf8Path, file: &Utf8Path, replace: bool) -> Re
     let f = std::fs::File::open(file).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{file}: {e}"))))?;
     let mut zip = zip::ZipArchive::new(f).map_err(|e| Error::other(format!("{file} isn't a brand file: {e}")))?;
     let mut json = String::new();
-    zip.by_name("brand.json").map_err(|_| Error::other(format!("{file} has no brand.json")))?.read_to_string(&mut json)?;
-    let mut preset: BrandPreset = serde_json::from_str(&json).map_err(|e| Error::other(format!("{file}: brand.json is invalid: {e}")))?;
+    zip.by_name("brand.json")
+        .map_err(|_| Error::other(format!("{file} has no brand.json")))?
+        .read_to_string(&mut json)?;
+    let mut preset: BrandPreset =
+        serde_json::from_str(&json).map_err(|e| Error::other(format!("{file}: brand.json is invalid: {e}")))?;
     if !replace && get(library, &preset.id).is_some() {
         preset.id = ids::new_id("brd");
     }
     let assets_dir = brands_dir(library).join(format!("{}.assets", ids::slug(&preset.id).replace('-', "_")));
     for (_, a) in preset.assets_mut() {
         // Only plain names under assets/ are accepted (no traversal out of the library).
-        let name = a.path.strip_prefix("assets/").filter(|n| !n.is_empty() && !n.contains(['/', '\\']) && *n != "..").map(str::to_string);
+        let name = a
+            .path
+            .strip_prefix("assets/")
+            .filter(|n| !n.is_empty() && !n.contains(['/', '\\']) && *n != "..")
+            .map(str::to_string);
         let Some(name) = name else { continue };
-        let mut entry = zip.by_name(&format!("assets/{name}")).map_err(|_| Error::other(format!("{file} is missing assets/{name}")))?;
+        let mut entry = zip
+            .by_name(&format!("assets/{name}"))
+            .map_err(|_| Error::other(format!("{file} is missing assets/{name}")))?;
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes)?;
         let dest = assets_dir.join(&name);
@@ -473,10 +519,13 @@ mod tests {
         assert_eq!(imported.voice.voice_id, "voice123");
         let a = imported.logos.primary.as_ref().unwrap();
         assert!(a.exists() && a.path.starts_with(other.as_str()), "{}", a.path);
-        assert_eq!(a.fingerprint, p.logos.primary.as_ref().unwrap().fingerprint.clone().map(|mut f| {
-            f.mtime = a.fingerprint.as_ref().unwrap().mtime.clone();
-            f
-        }));
+        assert_eq!(
+            a.fingerprint,
+            p.logos.primary.as_ref().unwrap().fingerprint.clone().map(|mut f| {
+                f.mtime = a.fingerprint.as_ref().unwrap().mtime.clone();
+                f
+            })
+        );
         // importing again without replace makes a second preset
         let again = import_cutbrand(&other, &file, false).unwrap();
         assert_ne!(again.id, p.id);

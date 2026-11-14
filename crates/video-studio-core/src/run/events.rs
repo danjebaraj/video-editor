@@ -23,7 +23,10 @@ pub enum EventKind {
     },
     /// A stage became current: `prepare`, `audio`, `authoring`, `validate`, `review`, `render`,
     /// `qa` or `done`.
-    StageStarted { stage: String, label: String },
+    StageStarted {
+        stage: String,
+        label: String,
+    },
     Progress {
         stage: String,
         /// 0–1 when cutline reports frames or segments.
@@ -42,7 +45,9 @@ pub enum EventKind {
         detail: Option<String>,
     },
     /// Streaming assistant text for the live transcript. Not written to `events.ndjson`.
-    TextDelta { text: String },
+    TextDelta {
+        text: String,
+    },
     /// Claude asked the user something; the run waits for an answer.
     Question {
         id: String,
@@ -66,7 +71,9 @@ pub enum EventKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bytes: Option<u64>,
     },
-    Warning { message: String },
+    Warning {
+        message: String,
+    },
     /// Live cost (spec §12.3): Claude usage from the stream, ElevenLabs credits from the helper.
     Cost {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,7 +85,11 @@ pub enum EventKind {
         eleven_credits: u64,
         eleven_cap: u64,
     },
-    StageFinished { stage: String, ok: bool, seconds: f64 },
+    StageFinished {
+        stage: String,
+        ok: bool,
+        seconds: f64,
+    },
     RunFinished {
         status: RunStatus,
         exit_code: i32,
@@ -195,7 +206,9 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
                         }
                     }
                     "qa" => s("qa", "QA"),
-                    "transcribe" | "probe" | "record" | "init" | "templates" | "guide" | "doctor" => s("authoring", "Authoring"),
+                    "transcribe" | "probe" | "record" | "init" | "templates" | "guide" | "doctor" => {
+                        s("authoring", "Authoring")
+                    }
                     _ => None,
                 }
             } else if args.first() == Some(&"eleven") {
@@ -252,20 +265,53 @@ mod tests {
 
     #[test]
     fn event_schema_is_stable() {
-        let e = Event { ts: "2026-11-14T12:00:00Z".into(), kind: EventKind::StageStarted { stage: "render".into(), label: "Render shorts".into() } };
-        assert_eq!(e.to_json(), r#"{"ts":"2026-11-14T12:00:00Z","event":"stage_started","stage":"render","label":"Render shorts"}"#);
-        let p = Event { ts: "t".into(), kind: EventKind::Progress { stage: "render".into(), fraction: Some(0.25), detail: None } };
+        let e = Event {
+            ts: "2026-11-14T12:00:00Z".into(),
+            kind: EventKind::StageStarted { stage: "render".into(), label: "Render shorts".into() },
+        };
+        assert_eq!(
+            e.to_json(),
+            r#"{"ts":"2026-11-14T12:00:00Z","event":"stage_started","stage":"render","label":"Render shorts"}"#
+        );
+        let p = Event {
+            ts: "t".into(),
+            kind: EventKind::Progress { stage: "render".into(), fraction: Some(0.25), detail: None },
+        };
         assert_eq!(p.to_json(), r#"{"ts":"t","event":"progress","stage":"render","fraction":0.25}"#);
-        let f = Event { ts: "t".into(), kind: EventKind::RunFinished { status: RunStatus::SucceededWithWarnings, exit_code: 1, cost_usd: Some(1.5), eleven_credits: 420, seconds: 61.0, message: None } };
+        let f = Event {
+            ts: "t".into(),
+            kind: EventKind::RunFinished {
+                status: RunStatus::SucceededWithWarnings,
+                exit_code: 1,
+                cost_usd: Some(1.5),
+                eleven_credits: 420,
+                seconds: 61.0,
+                message: None,
+            },
+        };
         let v: serde_json::Value = serde_json::from_str(&f.to_json()).unwrap();
-        assert_eq!(v, json!({"ts": "t", "event": "run_finished", "status": "succeeded_with_warnings", "exit_code": 1, "cost_usd": 1.5, "eleven_credits": 420, "seconds": 61.0}));
+        assert_eq!(
+            v,
+            json!({"ts": "t", "event": "run_finished", "status": "succeeded_with_warnings", "exit_code": 1, "cost_usd": 1.5, "eleven_credits": 420, "seconds": 61.0})
+        );
         // every event name the spec lists round-trips
-        for name in ["stage_started", "progress", "message", "question", "artifact", "warning", "stage_finished", "run_finished"] {
+        for name in [
+            "stage_started",
+            "progress",
+            "message",
+            "question",
+            "artifact",
+            "warning",
+            "stage_finished",
+            "run_finished",
+        ] {
             let sample = match name {
                 "stage_started" => json!({"stage": "audio", "label": "Audio"}),
                 "progress" => json!({"stage": "render"}),
                 "message" => json!({"role": "assistant", "text": "hi"}),
-                "question" => json!({"id": "q1", "questions": [{"question": "Tone?", "options": [], "multi_select": false}]}),
+                "question" => {
+                    json!({"id": "q1", "questions": [{"question": "Tone?", "options": [], "multi_select": false}]})
+                }
                 "artifact" => json!({"kind": "output", "path": "/x.mp4"}),
                 "warning" => json!({"message": "careful"}),
                 "stage_finished" => json!({"stage": "audio", "ok": true, "seconds": 2.0}),
@@ -274,7 +320,8 @@ mod tests {
             let mut obj = sample.as_object().unwrap().clone();
             obj.insert("ts".into(), json!("t"));
             obj.insert("event".into(), json!(name));
-            let parsed: Event = serde_json::from_value(serde_json::Value::Object(obj.clone())).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let parsed: Event = serde_json::from_value(serde_json::Value::Object(obj.clone()))
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(serde_json::from_str::<serde_json::Value>(&parsed.to_json()).unwrap()["event"], name);
         }
     }

@@ -59,7 +59,24 @@ pub struct Policy {
 /// cutline subcommands a run may use. `deps`, `cache` and `selftest` change or exercise the
 /// installation and are never needed to make a video.
 const CUTLINE_ALLOWED: [&str; 18] = [
-    "validate", "schema", "init", "expand", "cues", "beats", "render", "preview", "templates", "review", "thumbnail", "chapters", "guide", "qa", "probe", "transcribe", "doctor", "record",
+    "validate",
+    "schema",
+    "init",
+    "expand",
+    "cues",
+    "beats",
+    "render",
+    "preview",
+    "templates",
+    "review",
+    "thumbnail",
+    "chapters",
+    "guide",
+    "qa",
+    "probe",
+    "transcribe",
+    "doctor",
+    "record",
 ];
 /// Not available in a dry run: final renders and anything that records or renders deliverables.
 const CUTLINE_DRY_RUN_DENIED: [&str; 3] = ["render", "thumbnail", "record"];
@@ -120,7 +137,9 @@ impl Policy {
     }
 
     fn decide_write(&self, input: &Value) -> Decision {
-        let Some(path) = ["file_path", "notebook_path", "path"].iter().find_map(|k| input[*k].as_str()).filter(|p| !p.is_empty()) else {
+        let Some(path) =
+            ["file_path", "notebook_path", "path"].iter().find_map(|k| input[*k].as_str()).filter(|p| !p.is_empty())
+        else {
             return Decision::Deny("The edit has no file path.".into());
         };
         let target = self.resolve(path);
@@ -138,7 +157,10 @@ impl Policy {
             }
         }
         if !paths::is_inside(&target, &self.work_dir) {
-            return Decision::Deny(format!("Writing {target} isn't allowed: only files in {} can be written.", self.work_dir));
+            return Decision::Deny(format!(
+                "Writing {target} isn't allowed: only files in {} can be written.",
+                self.work_dir
+            ));
         }
         if let Some(files) = &self.write_files {
             let t = paths::canonical_or_normal_deep(&target);
@@ -154,7 +176,9 @@ impl Policy {
         if self.mode == Mode::Assistant {
             return Decision::Deny("Shell commands aren't available in the spec assistant.".into());
         }
-        let Some(command) = input["command"].as_str() else { return Decision::Deny("The shell command is empty.".into()) };
+        let Some(command) = input["command"].as_str() else {
+            return Decision::Deny("The shell command is empty.".into());
+        };
         if input["run_in_background"].as_bool() == Some(true) {
             return Decision::Deny("Background commands aren't allowed; run cutline in the foreground.".into());
         }
@@ -192,8 +216,11 @@ impl Policy {
     fn check_command(&self, argv: &[String]) -> Result<(), String> {
         let arg0 = &argv[0];
         let only = "Only cutline and `video-studio eleven` can be run here.";
-        let Some(exe) = self.resolve_executable(arg0) else { return Err(format!("`{arg0}` isn't an allowed command. {only}")) };
-        let is = |bin: &Option<Utf8PathBuf>| bin.as_ref().map(|b| paths::canonical_or_normal(b) == exe).unwrap_or(false);
+        let Some(exe) = self.resolve_executable(arg0) else {
+            return Err(format!("`{arg0}` isn't an allowed command. {only}"));
+        };
+        let is =
+            |bin: &Option<Utf8PathBuf>| bin.as_ref().map(|b| paths::canonical_or_normal(b) == exe).unwrap_or(false);
         // The helper is also installed as `.bin/cutline`, a logging proxy for the real cutline;
         // the name it is called by decides which it acts as.
         let called_as = Utf8Path::new(arg0).file_stem().unwrap_or("").to_ascii_lowercase();
@@ -259,10 +286,15 @@ impl Policy {
         }
         let sub = args.get(1).map(String::as_str).unwrap_or("");
         if !["tts", "music", "sfx", "scribe", "voices", "quote", "--help", "-h", "help"].contains(&sub) {
-            return Err(format!("`video-studio eleven {sub}` isn't a helper command (tts, music, sfx, scribe, voices, quote)."));
+            return Err(format!(
+                "`video-studio eleven {sub}` isn't a helper command (tts, music, sfx, scribe, voices, quote)."
+            ));
         }
         if self.mode == Mode::DryRun && !["voices", "quote", "--help", "-h", "help"].contains(&sub) {
-            return Err("Audio isn't generated in a dry run. Use `video-studio eleven quote …` to estimate credits instead.".into());
+            return Err(
+                "Audio isn't generated in a dry run. Use `video-studio eleven quote …` to estimate credits instead."
+                    .into(),
+            );
         }
         Ok(())
     }
@@ -365,7 +397,12 @@ pub fn split_commands(command: &str) -> Result<Vec<Vec<String>>, String> {
             '|' => return reject(if chars.get(i + 1) == Some(&'|') { "`||`" } else { "a pipe" }),
             '>' | '<' => {
                 // `2>&1` is harmless and Claude adds it out of habit: accept and drop it.
-                let merges_stderr = c == '>' && cur == "2" && has_cur && chars.get(i + 1) == Some(&'&') && chars.get(i + 2) == Some(&'1') && chars.get(i + 3).map(|n| n.is_whitespace() || *n == ';' || *n == '&').unwrap_or(true);
+                let merges_stderr = c == '>'
+                    && cur == "2"
+                    && has_cur
+                    && chars.get(i + 1) == Some(&'&')
+                    && chars.get(i + 2) == Some(&'1')
+                    && chars.get(i + 3).map(|n| n.is_whitespace() || *n == ';' || *n == '&').unwrap_or(true);
                 if merges_stderr {
                     cur.clear();
                     has_cur = false;
@@ -521,11 +558,30 @@ mod tests {
 
     #[test]
     fn splits_plain_commands() {
-        assert_eq!(split_commands("cutline validate --json project.json5").unwrap(), vec![vec!["cutline", "validate", "--json", "project.json5"]]);
-        assert_eq!(split_commands("cutline validate 'my project.json5' && cutline review \"a b\" 2>&1").unwrap(), vec![vec!["cutline", "validate", "my project.json5"], vec!["cutline", "review", "a b"]]);
+        assert_eq!(
+            split_commands("cutline validate --json project.json5").unwrap(),
+            vec![vec!["cutline", "validate", "--json", "project.json5"]]
+        );
+        assert_eq!(
+            split_commands("cutline validate 'my project.json5' && cutline review \"a b\" 2>&1").unwrap(),
+            vec![vec!["cutline", "validate", "my project.json5"], vec!["cutline", "review", "a b"]]
+        );
         assert_eq!(split_commands("cutline render p.json5; cutline qa out.mp4\n").unwrap().len(), 2);
         assert_eq!(split_commands("video-studio eleven tts --text 'it''s $5 & more'").unwrap()[0][4], "its $5 & more");
-        for bad in ["cutline validate | head", "cutline render > log.txt", "cutline render $(pwd)", "cutline `id`", "cutline render &", "X=1 cutline render", "cutline a || rm b", "(cutline a)", "cutline \"$HOME\"", "cutline 'open", "cutline render 2>err.txt", "cat < f"] {
+        for bad in [
+            "cutline validate | head",
+            "cutline render > log.txt",
+            "cutline render $(pwd)",
+            "cutline `id`",
+            "cutline render &",
+            "X=1 cutline render",
+            "cutline a || rm b",
+            "(cutline a)",
+            "cutline \"$HOME\"",
+            "cutline 'open",
+            "cutline render 2>err.txt",
+            "cat < f",
+        ] {
             assert!(split_commands(bad).is_err(), "{bad} should be rejected");
         }
     }
@@ -536,23 +592,46 @@ mod tests {
         let f = fx(Mode::Production);
         let p = &f.policy;
         assert_eq!(bash(p, "cutline validate --json project.json5"), Decision::Allow);
-        assert_eq!(bash(p, "cutline --json --variant teaser render project.json5 --out outputs/x.mp4"), Decision::Allow);
-        assert_eq!(bash(p, &format!("{} review project.json5 2>&1", p.cutline.as_ref().unwrap())), Decision::Allow, "the real binary by full path");
+        assert_eq!(
+            bash(p, "cutline --json --variant teaser render project.json5 --out outputs/x.mp4"),
+            Decision::Allow
+        );
+        assert_eq!(
+            bash(p, &format!("{} review project.json5 2>&1", p.cutline.as_ref().unwrap())),
+            Decision::Allow,
+            "the real binary by full path"
+        );
         assert_eq!(bash(p, "cutline validate project.json5 && cutline review project.json5"), Decision::Allow);
-        assert_eq!(bash(p, "video-studio eleven tts --voice v1 --text-file vo.txt --out audio/vo.mp3"), Decision::Allow);
+        assert_eq!(
+            bash(p, "video-studio eleven tts --voice v1 --text-file vo.txt --out audio/vo.mp3"),
+            Decision::Allow
+        );
         assert_eq!(bash(p, "cutline --version"), Decision::Allow);
-        for cmd in ["ls", "ls -la", "rm -rf outputs", "cat project.json5", "python3 -c 'print(1)'", "cd /tmp && cutline render p.json5", "ffmpeg -i a b", "./rm x", "curl https://example.com", "bash -c 'cutline render p.json5'"] {
+        for cmd in [
+            "ls",
+            "ls -la",
+            "rm -rf outputs",
+            "cat project.json5",
+            "python3 -c 'print(1)'",
+            "cd /tmp && cutline render p.json5",
+            "ffmpeg -i a b",
+            "./rm x",
+            "curl https://example.com",
+            "bash -c 'cutline render p.json5'",
+        ] {
             let why = denied(bash(p, cmd));
             assert!(why.contains("Only cutline") || why.contains("isn't allowed"), "{cmd}: {why}");
         }
         assert!(denied(bash(p, "cutline validate p.json5 | tail -5")).contains("pipe"));
         assert!(denied(bash(p, "cutline deps install --all")).contains("isn't available during a run"));
         assert!(denied(bash(p, "cutline selftest")).contains("isn't available"));
-        assert!(denied(bash(p, &format!("cutline render p.json5 --out {}/x.mp4", f.outside))).contains("inside the run folder"));
+        assert!(denied(bash(p, &format!("cutline render p.json5 --out {}/x.mp4", f.outside)))
+            .contains("inside the run folder"));
         assert!(denied(bash(p, "cutline render p.json5 -o ../x.mp4")).contains("inside the run folder"));
         assert!(denied(bash(p, "video-studio run other.cutproj")).contains("eleven"));
         assert!(denied(bash(p, "video-studio secret get")).contains("eleven"));
-        assert!(denied(p.decide("Bash", &json!({"command": "cutline render p.json5", "run_in_background": true}))).contains("Background"));
+        assert!(denied(p.decide("Bash", &json!({"command": "cutline render p.json5", "run_in_background": true})))
+            .contains("Background"));
         // a look-alike binary elsewhere isn't cutline
         let fake = f.outside.join("cutline");
         std::fs::write(&fake, "#!/bin/sh\n").unwrap();
@@ -564,14 +643,26 @@ mod tests {
     fn dry_run_cannot_render_or_generate_audio() {
         let f = fx(Mode::DryRun);
         let p = &f.policy;
-        for ok in ["cutline validate --json project.json5", "cutline expand project.json5", "cutline cues project.json5", "cutline review project.json5", "video-studio eleven quote tts --text-file vo.txt", "video-studio eleven voices"] {
+        for ok in [
+            "cutline validate --json project.json5",
+            "cutline expand project.json5",
+            "cutline cues project.json5",
+            "cutline review project.json5",
+            "video-studio eleven quote tts --text-file vo.txt",
+            "video-studio eleven voices",
+        ] {
             assert_eq!(bash(p, ok), Decision::Allow, "{ok}");
         }
         assert!(denied(bash(p, "cutline render project.json5")).contains("dry run"));
         assert!(denied(bash(p, "cutline --json render --draft project.json5")).contains("dry run"));
         assert!(denied(bash(p, "cutline validate p.json5 && cutline render p.json5")).contains("dry run"));
         assert!(denied(bash(p, "cutline thumbnail project.json5")).contains("dry run"));
-        for cmd in ["video-studio eleven tts --voice v --text-file t --out a.mp3", "video-studio eleven music --prompt x --length 10 --out m.mp3", "video-studio eleven sfx --prompt x --length 2 --out s.mp3", "video-studio eleven scribe --in a.mp3 --out a.json"] {
+        for cmd in [
+            "video-studio eleven tts --voice v --text-file t --out a.mp3",
+            "video-studio eleven music --prompt x --length 10 --out m.mp3",
+            "video-studio eleven sfx --prompt x --length 2 --out s.mp3",
+            "video-studio eleven scribe --in a.mp3 --out a.json",
+        ] {
             assert!(denied(bash(p, cmd)).contains("dry run"), "{cmd}");
         }
     }
@@ -592,7 +683,10 @@ mod tests {
         assert!(matches!(p.decide("Grep", &json!({"pattern": "key", "path": "/etc"})), Decision::Deny(_)));
         assert_eq!(write("project.json5".into()), Decision::Allow);
         assert_eq!(write(f.run.join("work/notes.md").to_string()), Decision::Allow);
-        assert_eq!(p.decide("Edit", &json!({"file_path": "summary.md", "old_string": "a", "new_string": "b"})), Decision::Allow);
+        assert_eq!(
+            p.decide("Edit", &json!({"file_path": "summary.md", "old_string": "a", "new_string": "b"})),
+            Decision::Allow
+        );
         assert!(denied(write(f.media.join("hero.mov").to_string())).contains("only files in"), "media is read-only");
         assert!(denied(write(f.outside.join("x.txt").to_string())).contains("only files in"));
         assert!(denied(write("../escape.txt".into())).contains("only files in"));
@@ -613,12 +707,21 @@ mod tests {
     fn assistant_edits_only_the_spec_and_has_no_shell() {
         let f = fx(Mode::Assistant);
         let p = &f.policy;
-        assert_eq!(p.decide("Edit", &json!({"file_path": "spec.md", "old_string": "a", "new_string": "b"})), Decision::Allow);
-        assert_eq!(p.decide("Write", &json!({"file_path": f.run.join("spec.md").to_string(), "content": "x"})), Decision::Allow);
+        assert_eq!(
+            p.decide("Edit", &json!({"file_path": "spec.md", "old_string": "a", "new_string": "b"})),
+            Decision::Allow
+        );
+        assert_eq!(
+            p.decide("Write", &json!({"file_path": f.run.join("spec.md").to_string(), "content": "x"})),
+            Decision::Allow
+        );
         assert!(denied(p.decide("Write", &json!({"file_path": "other.md", "content": "x"}))).contains("Only spec.md"));
         assert!(denied(bash(p, "cutline validate project.json5")).contains("spec assistant"));
         assert_eq!(p.decide("Read", &json!({"file_path": f.media.join("hero.mov").to_string()})), Decision::Allow);
-        assert!(matches!(p.decide("Read", &json!({"file_path": f.outside.join("secret.txt").to_string()})), Decision::Deny(_)));
+        assert!(matches!(
+            p.decide("Read", &json!({"file_path": f.outside.join("secret.txt").to_string()})),
+            Decision::Deny(_)
+        ));
     }
 
     #[cfg(unix)]
@@ -627,18 +730,31 @@ mod tests {
         let mut f = fx(Mode::Production);
         let log = f.run.join("logs/permissions.ndjson");
         f.policy.log = Some(log.clone());
-        let allow = hook_response(&f.policy, &json!({"tool_name": "Bash", "tool_input": {"command": "cutline validate project.json5"}}));
+        let allow = hook_response(
+            &f.policy,
+            &json!({"tool_name": "Bash", "tool_input": {"command": "cutline validate project.json5"}}),
+        );
         assert_eq!(allow["hookSpecificOutput"]["permissionDecision"], "allow");
         let deny = hook_response(&f.policy, &json!({"tool_name": "Bash", "tool_input": {"command": "ls"}}));
         assert_eq!(deny["hookSpecificOutput"]["permissionDecision"], "deny");
-        assert!(deny["hookSpecificOutput"]["permissionDecisionReason"].as_str().unwrap().contains("blocked by Syncfusion Video Studio"));
+        assert!(deny["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .unwrap()
+            .contains("blocked by Syncfusion Video Studio"));
         let ask = hook_response(&f.policy, &json!({"tool_name": "AskUserQuestion", "tool_input": {}}));
         assert_eq!(ask, json!({}), "questions pass through to the host");
-        let lines: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-        assert_eq!(lines.iter().map(|l| l["decision"].as_str().unwrap()).collect::<Vec<_>>(), vec!["allow", "deny", "ask_user"]);
+        let lines: Vec<Value> =
+            std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(
+            lines.iter().map(|l| l["decision"].as_str().unwrap()).collect::<Vec<_>>(),
+            vec!["allow", "deny", "ask_user"]
+        );
         assert!(lines[1]["reason"].as_str().unwrap().contains("Only cutline"));
         let settings = hook_settings("/Apps/Video Studio/video-studio".into(), "/lib/ctx/policy.json".into());
-        assert_eq!(settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "'/Apps/Video Studio/video-studio' hook --policy /lib/ctx/policy.json");
+        assert_eq!(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            "'/Apps/Video Studio/video-studio' hook --policy /lib/ctx/policy.json"
+        );
         // the policy survives the trip through its file
         let text = serde_json::to_string(&f.policy).unwrap();
         assert_eq!(serde_json::from_str::<Policy>(&text).unwrap(), f.policy);

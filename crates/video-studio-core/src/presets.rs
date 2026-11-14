@@ -121,7 +121,7 @@ impl Platforms {
                 .filter(|f| f.extension() == Some("json"))
                 .filter_map(|f| paths::read_json::<OutputPreset>(&f).ok())
                 .collect();
-            user.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            user.sort_by_key(|p| p.name.to_lowercase());
             for mut u in user {
                 u.user = true;
                 p.presets.retain(|x| x.id != u.id);
@@ -216,7 +216,12 @@ pub struct OutputConfig {
 
 impl OutputConfig {
     pub fn from_preset(preset: &OutputPreset, taken: &HashSet<String>) -> Self {
-        OutputConfig { id: ids::unique_slug_id("out", &preset.id, taken).replace('-', "_"), preset: preset.id.clone(), name: None, overrides: OutputOverrides::default() }
+        OutputConfig {
+            id: ids::unique_slug_id("out", &preset.id, taken).replace('-', "_"),
+            preset: preset.id.clone(),
+            name: None,
+            overrides: OutputOverrides::default(),
+        }
     }
 }
 
@@ -263,7 +268,9 @@ impl ResolvedOutput {
     }
     pub fn aspect_label(&self) -> String {
         let a = self.aspect();
-        for (label, v) in [("16:9", 16.0 / 9.0), ("9:16", 9.0 / 16.0), ("1:1", 1.0), ("4:5", 0.8), ("4:3", 4.0 / 3.0), ("3:4", 0.75)] {
+        for (label, v) in
+            [("16:9", 16.0 / 9.0), ("9:16", 9.0 / 16.0), ("1:1", 1.0), ("4:5", 0.8), ("4:3", 4.0 / 3.0), ("3:4", 0.75)]
+        {
             if (a - v).abs() < 0.02 {
                 return label.to_string();
             }
@@ -277,14 +284,28 @@ impl ResolvedOutput {
 }
 
 /// Applies a preset and the config's overrides. `taken_slugs` keeps folder names unique.
-pub fn resolve_output(config: &OutputConfig, platforms: &Platforms, taken_slugs: &mut HashSet<String>) -> Result<ResolvedOutput> {
-    let preset = platforms
-        .preset(&config.preset)
-        .ok_or_else(|| Error::NotFound(format!("output \"{}\" uses the preset \"{}\", which doesn't exist", config.name.as_deref().unwrap_or(&config.id), config.preset)))?;
+pub fn resolve_output(
+    config: &OutputConfig,
+    platforms: &Platforms,
+    taken_slugs: &mut HashSet<String>,
+) -> Result<ResolvedOutput> {
+    let preset = platforms.preset(&config.preset).ok_or_else(|| {
+        Error::NotFound(format!(
+            "output \"{}\" uses the preset \"{}\", which doesn't exist",
+            config.name.as_deref().unwrap_or(&config.id),
+            config.preset
+        ))
+    })?;
     let o = &config.overrides;
-    let target_name = o.target.clone().unwrap_or_else(|| preset.targets.first().cloned().unwrap_or_else(|| "long_1080p".into()));
-    let target = parse_target(&target_name).ok_or_else(|| Error::other(format!("\"{target_name}\" isn't a cutline target")))?;
-    let (w, h) = if target == TargetName::Custom { (o.width.or(preset.width), o.height.or(preset.height)) } else { (None, None) };
+    let target_name =
+        o.target.clone().unwrap_or_else(|| preset.targets.first().cloned().unwrap_or_else(|| "long_1080p".into()));
+    let target =
+        parse_target(&target_name).ok_or_else(|| Error::other(format!("\"{target_name}\" isn't a cutline target")))?;
+    let (w, h) = if target == TargetName::Custom {
+        (o.width.or(preset.width), o.height.or(preset.height))
+    } else {
+        (None, None)
+    };
     let spec = cutline_core::target::resolve(target, None, None, w, h);
     let fps = o.fps.or(preset.fps);
     let mut limits = preset.limits.clone();
@@ -341,7 +362,9 @@ pub fn resolve_run_outputs(project: &Project, rc: &RunConfig, platforms: &Platfo
     let mut taken = HashSet::new();
     let mut out = Vec::new();
     for id in &rc.outputs {
-        let cfg = project.output_config(id).ok_or_else(|| Error::NotFound(format!("run config \"{}\" selects the output \"{id}\", which doesn't exist", rc.name)))?;
+        let cfg = project.output_config(id).ok_or_else(|| {
+            Error::NotFound(format!("run config \"{}\" selects the output \"{id}\", which doesn't exist", rc.name))
+        })?;
         out.push(resolve_output(cfg, platforms, &mut taken)?);
     }
     Ok(out)
@@ -423,8 +446,19 @@ mod tests {
     fn bundled_data_is_complete() {
         let p = Platforms::bundled();
         for id in [
-            "youtube_1080p", "youtube_4k", "youtube_shorts", "tiktok", "instagram_reels", "instagram_feed", "linkedin", "x", "facebook",
-            "app_store_preview", "google_play_promo", "website_hero_loop", "custom",
+            "youtube_1080p",
+            "youtube_4k",
+            "youtube_shorts",
+            "tiktok",
+            "instagram_reels",
+            "instagram_feed",
+            "linkedin",
+            "x",
+            "facebook",
+            "app_store_preview",
+            "google_play_promo",
+            "website_hero_loop",
+            "custom",
         ] {
             let preset = p.preset(id).unwrap_or_else(|| panic!("missing preset {id}"));
             assert!(preset.targets.iter().all(|t| parse_target(t).is_some()), "{id} has an unknown target");
@@ -479,7 +513,12 @@ mod tests {
     fn maps_run_config_to_cutline_exports() {
         let p = Platforms::bundled();
         let mut project = Project::new("Launch");
-        project.output_configs = vec![cfg("out_yt", "youtube_1080p"), cfg("out_shorts", "youtube_shorts"), cfg("out_loop", "website_hero_loop"), cfg("out_app", "app_store_preview")];
+        project.output_configs = vec![
+            cfg("out_yt", "youtube_1080p"),
+            cfg("out_shorts", "youtube_shorts"),
+            cfg("out_loop", "website_hero_loop"),
+            cfg("out_app", "app_store_preview"),
+        ];
         let mut rc = RunConfig::new("Everything");
         rc.outputs = project.output_configs.iter().map(|o| o.id.clone()).collect();
         let outs = resolve_run_outputs(&project, &rc, &p).unwrap();
@@ -487,14 +526,24 @@ mod tests {
         assert_eq!(v["target"], "long_1080p");
         let ex = v["exports"].as_array().unwrap();
         assert_eq!(ex.len(), 5, "the hero loop exports MP4 and WebM");
-        assert_eq!(ex[0], json!({"name": "youtube-1080p", "target": "long_1080p", "captions": "sidecar", "out": "outputs/youtube-1080p/youtube-1080p.mp4"}));
+        assert_eq!(
+            ex[0],
+            json!({"name": "youtube-1080p", "target": "long_1080p", "captions": "sidecar", "out": "outputs/youtube-1080p/youtube-1080p.mp4"})
+        );
         assert_eq!(ex[1]["target"], "shorts");
-        assert_eq!(ex[2], json!({"name": "website-hero-loop", "target": "long_1080p", "audio": false, "loop": true, "max_bytes": 8000000, "captions": "none", "out": "outputs/website-hero-loop/website-hero-loop.mp4"}));
+        assert_eq!(
+            ex[2],
+            json!({"name": "website-hero-loop", "target": "long_1080p", "audio": false, "loop": true, "max_bytes": 8000000, "captions": "none", "out": "outputs/website-hero-loop/website-hero-loop.mp4"})
+        );
         assert_eq!(ex[3]["format"], "webm");
         assert_eq!(ex[3]["out"], "outputs/website-hero-loop/website-hero-loop-webm.webm");
-        assert_eq!((ex[4]["target"].as_str(), ex[4]["width"].as_u64(), ex[4]["height"].as_u64(), ex[4]["fps"].as_f64()), (Some("custom"), Some(886), Some(1920), Some(30.0)));
+        assert_eq!(
+            (ex[4]["target"].as_str(), ex[4]["width"].as_u64(), ex[4]["height"].as_u64(), ex[4]["fps"].as_f64()),
+            (Some("custom"), Some(886), Some(1920), Some(30.0))
+        );
         // what cutline accepts: the export section parses as cutline exports
-        let exports: Vec<cutline_core::model::Export> = serde_json::from_value(v["exports"].clone()).expect("cutline accepts the exports");
+        let exports: Vec<cutline_core::model::Export> =
+            serde_json::from_value(v["exports"].clone()).expect("cutline accepts the exports");
         assert_eq!(exports.len(), 5);
         // a dangling output is an error
         rc.outputs.push("nope".into());

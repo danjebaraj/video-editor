@@ -52,7 +52,12 @@ pub fn manifest_summary(manifest: &[ManifestEntry]) -> String {
             _ => {}
         }
         let name = m.path.as_deref().and_then(|p| p.rsplit(['/', '\\']).next()).unwrap_or("");
-        s.push_str(&format!("- `{}` — {}{}", m.id, bits.join(", "), if name.is_empty() { String::new() } else { format!(" — {name}") }));
+        s.push_str(&format!(
+            "- `{}` — {}{}",
+            m.id,
+            bits.join(", "),
+            if name.is_empty() { String::new() } else { format!(" — {name}") }
+        ));
         if let Some(n) = m.notes.as_deref().filter(|n| !n.trim().is_empty()) {
             s.push_str(&format!(" — note: {}", n.trim().replace('\n', " ")));
         }
@@ -90,7 +95,14 @@ pub fn project_summary(project: &Project, outputs: &[ResolvedOutput], manifest: 
         s.push_str("Outputs:\n");
         for o in outputs {
             let cap = o.limits.max_duration_s.map(|d| format!(", at most {}", format_duration(d))).unwrap_or_default();
-            s.push_str(&format!("- {} ({}, {}×{}, {}{cap})\n", o.name, o.platform, o.width, o.height, o.aspect_label()));
+            s.push_str(&format!(
+                "- {} ({}, {}×{}, {}{cap})\n",
+                o.name,
+                o.platform,
+                o.width,
+                o.height,
+                o.aspect_label()
+            ));
         }
     }
     s.push_str("Media (refer to items by ID, as `media:<id>`):\n");
@@ -99,11 +111,17 @@ pub fn project_summary(project: &Project, outputs: &[ResolvedOutput], manifest: 
 }
 
 fn brand_section(project: &Project) -> String {
-    let Some(b) = &project.brand else { return "No brand preset is selected. Choose restrained, neutral colors and one clean sans-serif typeface.\n".into() };
+    let Some(b) = &project.brand else {
+        return "No brand preset is selected. Choose restrained, neutral colors and one clean sans-serif typeface.\n"
+            .into();
+    };
     let b = &b.snapshot;
     let mut s = format!("Brand preset: {} (full details in brand.json).\n", b.name);
     let c = &b.colors;
-    s.push_str(&format!("- Colors: primary {}, secondary {}, accent {}, background {}, text {}.\n", c.primary, c.secondary, c.accent, c.background, c.text));
+    s.push_str(&format!(
+        "- Colors: primary {}, secondary {}, accent {}, background {}, text {}.\n",
+        c.primary, c.secondary, c.accent, c.background, c.text
+    ));
     let font = |f: &crate::brand::FontRef| f.family.clone().or_else(|| f.file.as_ref().map(|a| a.path.clone()));
     if let Some(h) = font(&b.fonts.heading) {
         s.push_str(&format!("- Heading font: {h}\n"));
@@ -117,9 +135,17 @@ fn brand_section(project: &Project) -> String {
         }
     }
     if b.watermark.asset.is_some() {
-        s.push_str(&format!("- Watermark position {}, opacity {}.\n", b.watermark.position.replace('_', " "), b.watermark.opacity));
+        s.push_str(&format!(
+            "- Watermark position {}, opacity {}.\n",
+            b.watermark.position.replace('_', " "),
+            b.watermark.opacity
+        ));
     }
-    for (label, v) in [("Lower-third style", &b.lower_third_style), ("Caption style", &b.caption_style), ("Music mood", &b.music_mood)] {
+    for (label, v) in [
+        ("Lower-third style", &b.lower_third_style),
+        ("Caption style", &b.caption_style),
+        ("Music mood", &b.music_mood),
+    ] {
         if !v.trim().is_empty() {
             s.push_str(&format!("- {label}: {}\n", v.trim()));
         }
@@ -230,7 +256,17 @@ pub fn system_prompt(input: &PromptInput) -> String {
             limits.push(format!("under {}", crate::paths::format_bytes(b)));
         }
         let limits = if limits.is_empty() { String::new() } else { format!(" Limits: {}.", limits.join(", ")) };
-        s.push_str(&format!("- **{}** → outputs/{}/ — {}×{} ({}), captions {}{}.{limits} {}\n", o.name, o.slug, o.width, o.height, o.aspect_label(), o.captions, if o.audio { "" } else { ", no audio" }, o.notes));
+        s.push_str(&format!(
+            "- **{}** → outputs/{}/ — {}×{} ({}), captions {}{}.{limits} {}\n",
+            o.name,
+            o.slug,
+            o.width,
+            o.height,
+            o.aspect_label(),
+            o.captions,
+            if o.audio { "" } else { ", no audio" },
+            o.notes
+        ));
     }
     s.push_str("The same edit serves every export; cutline re-fits framing and text per target. If an output needs a shorter cut (a platform limit), use `variants` rather than a second project.\n");
     if !locales.is_empty() {
@@ -249,7 +285,11 @@ pub fn system_prompt(input: &PromptInput) -> String {
          - Files: you may write only inside the run folder, and may read the run folder, the media listed in the manifest, the brand assets and cutline's own folder. Reference media in project.json5 by the absolute paths in media-manifest.json; never copy media.\n\
          - Keep scratch files under work/. logs/ belongs to the app.\n",
     );
-    s.push_str(if rc.web_access { "- Web search and fetch are available for this run.\n" } else { "- There is no web access in this run.\n" });
+    s.push_str(if rc.web_access {
+        "- Web search and fetch are available for this run.\n"
+    } else {
+        "- There is no web access in this run.\n"
+    });
     s.push_str(
         "- Questions: when something only the user can decide would change the video, and guessing wrong would waste the run, ask with the AskUserQuestion tool. Give two to four concrete options and put the one you recommend first. The user may be away: if the answer says to proceed on your assumption, take your first option and record the question and the assumption in summary.md. Do not ask about things the spec, the brand or common sense already settle.\n\
          - Don't stop early. Finish every output, or explain in summary.md exactly what blocked it.\n\n",
@@ -276,8 +316,17 @@ pub fn user_prompt(kind: RunKind, revise: Option<&Revise>, previous: Option<&Run
 }
 
 /// The spec assistant's system prompt (spec §4.3).
-pub fn assistant_system_prompt(folder: &Utf8Path, project_summary: &str, read_paths: &[String], web_access: bool) -> String {
-    let extra = if read_paths.is_empty() { String::new() } else { format!("\n- You may also read (never edit) the media folders: {}.", read_paths.join(", ")) };
+pub fn assistant_system_prompt(
+    folder: &Utf8Path,
+    project_summary: &str,
+    read_paths: &[String],
+    web_access: bool,
+) -> String {
+    let extra = if read_paths.is_empty() {
+        String::new()
+    } else {
+        format!("\n- You may also read (never edit) the media folders: {}.", read_paths.join(", "))
+    };
     format!(
         "You are helping the user write the spec for a video in Syncfusion Video Studio. The spec is the Markdown file spec.md in your working folder {folder}. When it is complete, another Claude session turns it into a finished video with cutline (a declarative video editor) and ElevenLabs (voice and music), so the spec must say clearly what the video shows and says.\n\
          - Edit only spec.md. The user reviews every change you make as a diff and accepts or rejects each hunk, so keep edits focused and leave the rest of the file exactly as it is.{extra}\n\
@@ -314,15 +363,47 @@ mod tests {
         b.rules = "Do: lead with the product.\nDon't: use stock music.".into();
         b.voice.voice_id = "voice-abc".into();
         p.brand = Some(BrandRef::of(&b));
-        p.output_configs = vec![OutputConfig { id: "o1".into(), preset: "youtube_shorts".into(), name: None, overrides: Default::default() }, OutputConfig { id: "o2".into(), preset: "linkedin".into(), name: None, overrides: Default::default() }];
+        p.output_configs = vec![
+            OutputConfig {
+                id: "o1".into(),
+                preset: "youtube_shorts".into(),
+                name: None,
+                overrides: Default::default(),
+            },
+            OutputConfig { id: "o2".into(), preset: "linkedin".into(), name: None, overrides: Default::default() },
+        ];
         let mut rc = RunConfig::new("Social pack");
         rc.outputs = vec!["o1".into(), "o2".into()];
         rc.eleven_credit_cap = 7000;
         let outs = resolve_run_outputs(&p, &rc, &platforms).unwrap();
         let ex = cutline_exports(&outs);
         let manifest = vec![
-            ManifestEntry { id: "m-hero".into(), kind: "video".into(), role: Some("footage".into()), path: Some("/footage/hero.mov".into()), status: MediaStatus::Ok, probe: Some(Probe { duration_s: Some(32.1), width: Some(3840), height: Some(2160), fps: Some("30/1".into()), ..Probe::default() }), notes: Some("Use the second half".into()), tags: vec![] },
-            ManifestEntry { id: "m-gone".into(), kind: "audio".into(), role: None, path: None, status: MediaStatus::Missing, probe: None, notes: None, tags: vec![] },
+            ManifestEntry {
+                id: "m-hero".into(),
+                kind: "video".into(),
+                role: Some("footage".into()),
+                path: Some("/footage/hero.mov".into()),
+                status: MediaStatus::Ok,
+                probe: Some(Probe {
+                    duration_s: Some(32.1),
+                    width: Some(3840),
+                    height: Some(2160),
+                    fps: Some("30/1".into()),
+                    ..Probe::default()
+                }),
+                notes: Some("Use the second half".into()),
+                tags: vec![],
+            },
+            ManifestEntry {
+                id: "m-gone".into(),
+                kind: "audio".into(),
+                role: None,
+                path: None,
+                status: MediaStatus::Missing,
+                probe: None,
+                notes: None,
+                tags: vec![],
+            },
         ];
         (p, rc, outs, ex, manifest, platforms)
     }
@@ -330,11 +411,40 @@ mod tests {
     #[test]
     fn production_prompt_carries_everything_the_spec_lists() {
         let (p, rc, outs, ex, manifest, platforms) = fixture();
-        let s = system_prompt(&PromptInput { project: &p, run_config: &rc, kind: RunKind::Production, folder: "/runs/r1".into(), outputs: &outs, exports: &ex, manifest: &manifest, cutline_guide: "GUIDE TEXT", eleven_available: true, default_voice: Some("voice-abc"), platforms: &platforms });
+        let s = system_prompt(&PromptInput {
+            project: &p,
+            run_config: &rc,
+            kind: RunKind::Production,
+            folder: "/runs/r1".into(),
+            outputs: &outs,
+            exports: &ex,
+            manifest: &manifest,
+            cutline_guide: "GUIDE TEXT",
+            eleven_available: true,
+            default_voice: Some("voice-abc"),
+            platforms: &platforms,
+        });
         for needle in [
-            "/runs/r1", "media-manifest.json", "`m-hero` — video, footage, 32.1 s, 3840×2160, 30/1 fps — hero.mov — note: Use the second half", "`m-gone` — audio, MISSING",
-            "Intent: Marketing", "Audience: Engineering managers", "Target length: 45.0 s", "\"name\": \"youtube-shorts\"", "outputs/linkedin/linkedin.mp4", "at most 3:00",
-            "> Don't: use stock music.", "default voice is `voice-abc`", "at most 7000 ElevenLabs credits", "Languages: en, de", "no web access", "AskUserQuestion", "summary.md", "Before publishing", "GUIDE TEXT", "cutline render project.json5",
+            "/runs/r1",
+            "media-manifest.json",
+            "`m-hero` — video, footage, 32.1 s, 3840×2160, 30/1 fps — hero.mov — note: Use the second half",
+            "`m-gone` — audio, MISSING",
+            "Intent: Marketing",
+            "Audience: Engineering managers",
+            "Target length: 45.0 s",
+            "\"name\": \"youtube-shorts\"",
+            "outputs/linkedin/linkedin.mp4",
+            "at most 3:00",
+            "> Don't: use stock music.",
+            "default voice is `voice-abc`",
+            "at most 7000 ElevenLabs credits",
+            "Languages: en, de",
+            "no web access",
+            "AskUserQuestion",
+            "summary.md",
+            "Before publishing",
+            "GUIDE TEXT",
+            "cutline render project.json5",
         ] {
             assert!(s.contains(needle), "missing {needle:?} in:\n{s}");
         }
@@ -342,19 +452,56 @@ mod tests {
         let mut draft = rc.clone();
         draft.quality = Quality::Draft;
         draft.web_access = true;
-        let d = system_prompt(&PromptInput { project: &p, run_config: &draft, kind: RunKind::Production, folder: "/r".into(), outputs: &outs, exports: &ex, manifest: &manifest, cutline_guide: "", eleven_available: false, default_voice: None, platforms: &platforms });
-        assert!(d.contains("cutline render project.json5 --draft") && d.contains("Web search and fetch are available") && d.contains("no ElevenLabs key is configured"));
+        let d = system_prompt(&PromptInput {
+            project: &p,
+            run_config: &draft,
+            kind: RunKind::Production,
+            folder: "/r".into(),
+            outputs: &outs,
+            exports: &ex,
+            manifest: &manifest,
+            cutline_guide: "",
+            eleven_available: false,
+            default_voice: None,
+            platforms: &platforms,
+        });
+        assert!(
+            d.contains("cutline render project.json5 --draft")
+                && d.contains("Web search and fetch are available")
+                && d.contains("no ElevenLabs key is configured")
+        );
     }
 
     #[test]
     fn dry_run_prompt_forbids_rendering_and_asks_for_the_report() {
         let (p, rc, outs, ex, manifest, platforms) = fixture();
-        let s = system_prompt(&PromptInput { project: &p, run_config: &rc, kind: RunKind::DryRun, folder: "/r".into(), outputs: &outs, exports: &ex, manifest: &manifest, cutline_guide: "", eleven_available: true, default_voice: None, platforms: &platforms });
-        assert!(s.contains("DRY RUN") && s.contains("readiness.json") && s.contains("cannot render finals") && s.contains("no audio is generated"));
+        let s = system_prompt(&PromptInput {
+            project: &p,
+            run_config: &rc,
+            kind: RunKind::DryRun,
+            folder: "/r".into(),
+            outputs: &outs,
+            exports: &ex,
+            manifest: &manifest,
+            cutline_guide: "",
+            eleven_available: true,
+            default_voice: None,
+            platforms: &platforms,
+        });
+        assert!(
+            s.contains("DRY RUN")
+                && s.contains("readiness.json")
+                && s.contains("cannot render finals")
+                && s.contains("no audio is generated")
+        );
         assert!(s.contains("\"exports\""), "the same outputs as production");
         assert!(user_prompt(RunKind::DryRun, None, None).contains("readiness.json"));
         assert!(user_prompt(RunKind::Production, None, None).contains("summary.md"));
-        let rev = user_prompt(RunKind::Production, Some(&Revise { previous_run: "run_1".into(), feedback: " make the hook faster ".into() }), None);
+        let rev = user_prompt(
+            RunKind::Production,
+            Some(&Revise { previous_run: "run_1".into(), feedback: " make the hook faster ".into() }),
+            None,
+        );
         assert!(rev.contains("make the hook faster") && rev.contains("previous-summary.md"));
     }
 
@@ -363,7 +510,13 @@ mod tests {
         let (p, _, outs, _, manifest, _) = fixture();
         let summary = project_summary(&p, &outs, &manifest);
         let s = assistant_system_prompt("/scratch/s1".into(), &summary, &["/footage".to_string()], false);
-        assert!(s.contains("Edit only spec.md") && s.contains("/footage") && s.contains("`m-hero`") && s.contains("{{…}}") && s.contains("Brand preset: Acme"));
+        assert!(
+            s.contains("Edit only spec.md")
+                && s.contains("/footage")
+                && s.contains("`m-hero`")
+                && s.contains("{{…}}")
+                && s.contains("Brand preset: Acme")
+        );
         assert!(!s.contains("Web search"));
         assert!(assistant_system_prompt("/s".into(), "", &[], true).contains("Web search"));
     }

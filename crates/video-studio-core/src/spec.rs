@@ -105,7 +105,9 @@ fn lines(spec: &str) -> Vec<Line<'_>> {
                 fence = None;
                 out.push(Line { number: i + 1, text, fence: Some(info), is_fence_marker: true });
             }
-            (Some((info, _, _)), _) => out.push(Line { number: i + 1, text, fence: Some(info), is_fence_marker: false }),
+            (Some((info, _, _)), _) => {
+                out.push(Line { number: i + 1, text, fence: Some(info), is_fence_marker: false })
+            }
             (None, _) => out.push(Line { number: i + 1, text, fence: None, is_fence_marker: false }),
         }
     }
@@ -148,7 +150,12 @@ pub fn outline(spec: &str) -> Vec<OutlineItem> {
         .filter(|l| l.fence.is_none())
         .filter_map(|l| {
             let (level, title) = heading(l.text)?;
-            Some(OutlineItem { level, title: title.to_string(), line: l.number, kind: if is_scene_title(title) { "scene" } else { "heading" }.to_string() })
+            Some(OutlineItem {
+                level,
+                title: title.to_string(),
+                line: l.number,
+                kind: if is_scene_title(title) { "scene" } else { "heading" }.to_string(),
+            })
         })
         .collect()
 }
@@ -258,7 +265,17 @@ pub fn scenes(spec: &str) -> Vec<Scene> {
                     if let Some((s, _)) = current.take() {
                         out.push(s);
                     }
-                    current = Some((Scene { title: title.to_string(), line: l.number, duration_s: None, has_media: false, has_narration: false, has_text: false }, level));
+                    current = Some((
+                        Scene {
+                            title: title.to_string(),
+                            line: l.number,
+                            duration_s: None,
+                            has_media: false,
+                            has_narration: false,
+                            has_text: false,
+                        },
+                        level,
+                    ));
                 }
                 continue;
             }
@@ -325,7 +342,9 @@ pub fn voice_overs(spec: &str) -> Vec<VoiceOver> {
             }
             (None, _) => {
                 if let Some((key, value)) = field(l.text) {
-                    if matches!(key.as_str(), "vo" | "voice-over" | "voice over" | "voiceover" | "narration") && !is_placeholder_value(value) {
+                    if matches!(key.as_str(), "vo" | "voice-over" | "voice over" | "voiceover" | "narration")
+                        && !is_placeholder_value(value)
+                    {
                         out.push(VoiceOver { text: value.to_string(), line: l.number });
                     }
                 }
@@ -350,7 +369,12 @@ pub fn has_call_to_action(spec: &str) -> bool {
     lines(spec).iter().any(|l| match l.fence {
         Some("cta") => !l.is_fence_marker && !is_placeholder_value(l.text),
         Some(_) => false,
-        None => heading(l.text).map(|(_, t)| is_cta_title(t)).unwrap_or(false) || field(l.text).map(|(k, v)| (k == "cta" || k == "call to action") && !is_placeholder_value(v)).unwrap_or(false),
+        None => {
+            heading(l.text).map(|(_, t)| is_cta_title(t)).unwrap_or(false)
+                || field(l.text)
+                    .map(|(k, v)| (k == "cta" || k == "call to action") && !is_placeholder_value(v))
+                    .unwrap_or(false)
+        }
     })
 }
 
@@ -417,13 +441,23 @@ pub fn lint(spec: &str, ctx: &LintContext) -> Vec<LintIssue> {
     let mut reported: HashSet<(String, usize)> = HashSet::new();
     for r in media_refs(spec) {
         if !ctx.media_ids.contains(&r.id) && reported.insert((r.id.clone(), r.line)) {
-            out.push(LintIssue { rule: "unresolved_media".into(), severity: "warning".into(), message: format!("media:{} isn't in the project's media list", r.id), line: r.line });
+            out.push(LintIssue {
+                rule: "unresolved_media".into(),
+                severity: "warning".into(),
+                message: format!("media:{} isn't in the project's media list", r.id),
+                line: r.line,
+            });
         }
     }
     let all_scenes = scenes(spec);
     for s in &all_scenes {
         if !s.has_media && !s.has_narration && !s.has_text {
-            out.push(LintIssue { rule: "scene_empty".into(), severity: "warning".into(), message: format!("\"{}\" has no media, narration or on-screen text", s.title), line: s.line });
+            out.push(LintIssue {
+                rule: "scene_empty".into(),
+                severity: "warning".into(),
+                message: format!("\"{}\" has no media, narration or on-screen text", s.title),
+                line: s.line,
+            });
         }
     }
     let vos = voice_overs(spec);
@@ -449,7 +483,12 @@ pub fn lint(spec: &str, ctx: &LintContext) -> Vec<LintIssue> {
         }
     }
     for (line, text) in placeholders(spec) {
-        out.push(LintIssue { rule: "placeholder".into(), severity: "warning".into(), message: format!("Placeholder text: {text}"), line });
+        out.push(LintIssue {
+            rule: "placeholder".into(),
+            severity: "warning".into(),
+            message: format!("Placeholder text: {text}"),
+            line,
+        });
     }
     out.sort_by_key(|i| i.line);
     out
@@ -525,7 +564,9 @@ mod tests {
 
     #[test]
     fn rewrites_links_for_export() {
-        let out = rewrite_media_links("![a](media:m-a) ![b](media:m-b) see media:m-a", |id| (id == "m-a").then(|| "/My Footage/a (1).mov".to_string()));
+        let out = rewrite_media_links("![a](media:m-a) ![b](media:m-b) see media:m-a", |id| {
+            (id == "m-a").then(|| "/My Footage/a (1).mov".to_string())
+        });
         assert_eq!(out, "![a](</My Footage/a (1).mov>) ![b](media:m-b) see /My Footage/a (1).mov");
     }
 
@@ -533,7 +574,16 @@ mod tests {
     fn outline_marks_scenes_and_skips_code() {
         let o = outline(SPEC);
         let v: Vec<(u8, &str, &str)> = o.iter().map(|i| (i.level, i.title.as_str(), i.kind.as_str())).collect();
-        assert_eq!(v, vec![(1, "Launch teaser", "heading"), (2, "Scene 1: Hook", "scene"), (2, "Scene 2: Empty", "scene"), (3, "Notes", "heading"), (2, "Call to action", "heading")]);
+        assert_eq!(
+            v,
+            vec![
+                (1, "Launch teaser", "heading"),
+                (2, "Scene 1: Hook", "scene"),
+                (2, "Scene 2: Empty", "scene"),
+                (3, "Notes", "heading"),
+                (2, "Call to action", "heading")
+            ]
+        );
         assert_eq!(o[1].line, 5);
     }
 
@@ -549,7 +599,18 @@ mod tests {
 
     #[test]
     fn durations() {
-        for (t, v) in [("5 s", 5.0), ("5s", 5.0), ("45 seconds", 45.0), ("0:30", 30.0), ("1:05", 65.0), ("1m 20s", 80.0), ("2 min", 120.0), ("~8 s", 8.0), ("12", 12.0), ("1:00:00", 3600.0)] {
+        for (t, v) in [
+            ("5 s", 5.0),
+            ("5s", 5.0),
+            ("45 seconds", 45.0),
+            ("0:30", 30.0),
+            ("1:05", 65.0),
+            ("1m 20s", 80.0),
+            ("2 min", 120.0),
+            ("~8 s", 8.0),
+            ("12", 12.0),
+            ("1:00:00", 3600.0),
+        ] {
             assert_eq!(parse_duration(t), Some(v), "{t}");
         }
         assert_eq!(parse_duration("soon"), None);
@@ -574,7 +635,8 @@ mod tests {
     fn lint_reports_each_rule() {
         let ids: HashSet<String> = ["m-hero".to_string()].into_iter().collect();
         let long_vo = format!("{SPEC}\n```vo\n{}\n```\n", "word ".repeat(200));
-        let issues = lint(&long_vo, &LintContext { media_ids: &ids, target_length_s: Some(30.0), words_per_minute: 150 });
+        let issues =
+            lint(&long_vo, &LintContext { media_ids: &ids, target_length_s: Some(30.0), words_per_minute: 150 });
         let rules: Vec<(&str, usize)> = issues.iter().map(|i| (i.rule.as_str(), i.line)).collect();
         assert!(rules.contains(&("unresolved_media", 19)), "{rules:?}");
         assert!(rules.contains(&("unresolved_media", 25)));
@@ -583,16 +645,25 @@ mod tests {
         assert!(rules.iter().any(|(r, _)| *r == "scene_length"));
         assert!(!rules.iter().any(|(r, l)| *r == "placeholder" && *l == 25), "TODO inside a code block is ignored");
         // a scene with nothing in it
-        let empty = lint("## Scene 1\n- **Duration:** 5 s\n\n## Scene 2\n- **On-screen text:** Hi\n", &LintContext { media_ids: &ids, target_length_s: None, words_per_minute: 150 });
+        let empty = lint(
+            "## Scene 1\n- **Duration:** 5 s\n\n## Scene 2\n- **On-screen text:** Hi\n",
+            &LintContext { media_ids: &ids, target_length_s: None, words_per_minute: 150 },
+        );
         assert_eq!(empty.iter().filter(|i| i.rule == "scene_empty").map(|i| i.line).collect::<Vec<_>>(), vec![1]);
         // a clean spec has no issues
-        let clean = "# T\n\n## Scene 1\n- **Duration:** 5 s\n- **Media:** ![h](media:m-hero)\n\n## Call to action\nGo.\n";
-        assert!(lint(clean, &LintContext { media_ids: &ids, target_length_s: Some(5.0), words_per_minute: 150 }).is_empty());
+        let clean =
+            "# T\n\n## Scene 1\n- **Duration:** 5 s\n- **Media:** ![h](media:m-hero)\n\n## Call to action\nGo.\n";
+        assert!(
+            lint(clean, &LintContext { media_ids: &ids, target_length_s: Some(5.0), words_per_minute: 150 }).is_empty()
+        );
     }
 
     #[test]
     fn placeholder_markers_need_word_boundaries() {
-        assert_eq!(placeholders("Our TODO app\nTODOs\nlorem IPSUM dolor\n[TBD]").iter().map(|p| p.0).collect::<Vec<_>>(), vec![1, 3, 4]);
+        assert_eq!(
+            placeholders("Our TODO app\nTODOs\nlorem IPSUM dolor\n[TBD]").iter().map(|p| p.0).collect::<Vec<_>>(),
+            vec![1, 3, 4]
+        );
     }
 
     #[test]

@@ -325,11 +325,17 @@ pub struct AssistantSessionRef {
 
 /// Replaces characters that can't be used in a file name on macOS or Windows.
 pub fn safe_file_name(name: &str) -> String {
-    let cleaned: String = name
-        .trim()
-        .chars()
-        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '-' } else { c })
-        .collect();
+    let cleaned: String =
+        name.trim()
+            .chars()
+            .map(|c| {
+                if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                    '-'
+                } else {
+                    c
+                }
+            })
+            .collect();
     let cleaned = cleaned.trim_matches(|c| c == '.' || c == ' ').to_string();
     if cleaned.is_empty() {
         "Untitled".into()
@@ -364,15 +370,18 @@ impl Project {
 
     /// Parses project JSON, migrating older versions.
     pub fn from_json(text: &str) -> Result<Self> {
-        let mut value: Value = serde_json::from_str(text).map_err(|e| Error::InvalidProject(format!("not valid JSON: {e}")))?;
+        let mut value: Value =
+            serde_json::from_str(text).map_err(|e| Error::InvalidProject(format!("not valid JSON: {e}")))?;
         migrate(&mut value)?;
-        let mut p: Project = serde_json::from_value(value).map_err(|e| Error::InvalidProject(format!("not a valid project: {e}")))?;
+        let mut p: Project =
+            serde_json::from_value(value).map_err(|e| Error::InvalidProject(format!("not a valid project: {e}")))?;
         p.normalize();
         Ok(p)
     }
 
     pub fn load(path: &Utf8Path) -> Result<Self> {
-        let text = std::fs::read_to_string(path).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{path}: {e}"))))?;
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{path}: {e}"))))?;
         Self::from_json(&text).map_err(|e| match e {
             Error::InvalidProject(m) => Error::InvalidProject(format!("{path}: {m}")),
             other => other,
@@ -491,10 +500,13 @@ pub fn external_change(base: &Project, disk: &Project) -> ExternalChange {
 
 /// Upgrades older project JSON in place. Version 1 is the first format, so this only checks.
 fn migrate(value: &mut Value) -> Result<()> {
-    let obj = value.as_object_mut().ok_or_else(|| Error::InvalidProject("the project file must be a JSON object".into()))?;
+    let obj =
+        value.as_object_mut().ok_or_else(|| Error::InvalidProject("the project file must be a JSON object".into()))?;
     match obj.get("format").and_then(Value::as_str) {
         Some(FORMAT) => {}
-        Some(other) => return Err(Error::InvalidProject(format!("unknown format \"{other}\" (expected \"{FORMAT}\")"))),
+        Some(other) => {
+            return Err(Error::InvalidProject(format!("unknown format \"{other}\" (expected \"{FORMAT}\")")))
+        }
         None => return Err(Error::InvalidProject(format!("missing \"format\": \"{FORMAT}\""))),
     }
     let version = obj.get("version").and_then(Value::as_u64).unwrap_or(0);
@@ -548,8 +560,13 @@ pub fn sidecar_dir(project_path: &Utf8Path) -> Utf8PathBuf {
 /// and returns its path. Pasting the same picture twice stores it once.
 pub fn store_pasted_image(project_path: &Utf8Path, bytes: &[u8]) -> Result<Utf8PathBuf> {
     use sha2::{Digest, Sha256};
-    let img = image::load_from_memory(bytes).map_err(|e| Error::other(format!("the pasted image couldn't be read: {e}")))?;
-    let img = if img.width().max(img.height()) > 4096 { img.resize(4096, 4096, image::imageops::FilterType::Lanczos3) } else { img };
+    let img =
+        image::load_from_memory(bytes).map_err(|e| Error::other(format!("the pasted image couldn't be read: {e}")))?;
+    let img = if img.width().max(img.height()) > 4096 {
+        img.resize(4096, 4096, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
     let mut png = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
         .map_err(|e| Error::other(format!("the pasted image couldn't be converted to PNG: {e}")))?;
@@ -580,7 +597,9 @@ pub fn unused_sidecar_images(project: &Project, project_path: &Utf8Path) -> Vec<
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
             if let Ok(p) = paths::utf8(e.path()) {
-                if p.extension().map(|x| x.eq_ignore_ascii_case("png")).unwrap_or(false) && !used_files.contains(&paths::canonical_or_normal(&p)) {
+                if p.extension().map(|x| x.eq_ignore_ascii_case("png")).unwrap_or(false)
+                    && !used_files.contains(&paths::canonical_or_normal(&p))
+                {
                     out.push(p);
                 }
             }
@@ -730,7 +749,11 @@ pub fn record_run(project_path: &Utf8Path, record: &RunRecord) -> Result<()> {
     std::fs::create_dir_all(&lock_dir)?;
     let key = ids::slug(paths::canonical_or_normal(project_path).as_str());
     let key = if key.len() > 120 { key[key.len() - 120..].to_string() } else { key };
-    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(lock_dir.join(format!("{key}.lock")))?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(lock_dir.join(format!("{key}.lock")))?;
     lock.lock_exclusive()?;
     let result = (|| {
         let mut p = Project::load(project_path)?;
@@ -757,7 +780,12 @@ mod tests {
         p.media.push(MediaItem::with_path("m-hero", MediaKind::Video, "/footage/hero.mov"));
         let mut rc = RunConfig::new("Social pack");
         rc.outputs = vec!["out_shorts".into(), "gone".into()];
-        p.output_configs.push(OutputConfig { id: "out_shorts".into(), preset: "youtube_shorts".into(), name: None, overrides: Default::default() });
+        p.output_configs.push(OutputConfig {
+            id: "out_shorts".into(),
+            preset: "youtube_shorts".into(),
+            name: None,
+            overrides: Default::default(),
+        });
         p.run_configs.push(rc);
         p
     }
@@ -821,7 +849,9 @@ mod tests {
         p.media[0].paths.relative = Some("footage/hero.mov".into());
         // a pasted image in the sidecar
         let mut png = Vec::new();
-        image::DynamicImage::new_rgba8(4, 4).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        image::DynamicImage::new_rgba8(4, 4)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
         let stored = store_pasted_image(&path, &png).unwrap();
         assert_eq!(store_pasted_image(&path, &png).unwrap(), stored, "same picture is stored once");
         let mut pasted = MediaItem::with_path("m-pasted", MediaKind::Image, stored.as_str());

@@ -37,6 +37,8 @@ pub struct RunEnv {
     pub eleven_test_key: Option<String>,
     /// Whether an ElevenLabs key is stored (the caller checks through the helper binary).
     pub eleven_key_present: bool,
+    /// Extra environment for the Claude Code process (proxies, test doubles).
+    pub extra_env: std::collections::HashMap<String, String>,
     pub file_refs: std::sync::Arc<dyn FileRefs>,
 }
 
@@ -47,11 +49,23 @@ impl RunEnv {
         let settings = Settings::load(library);
         let claude = locate::find_claude(&settings.claude_path).ok_or_else(|| Error::Environment("Claude Code isn't installed. Install the Claude Code CLI (https://claude.com/claude-code), then try again.".into()))?;
         if !claude.supported {
-            return Err(Error::Environment(format!("Claude Code {} is too old; this app needs {} or later. Update the CLI and try again.", claude.version, locate::min_version_text())));
+            return Err(Error::Environment(format!(
+                "Claude Code {} is too old; this app needs {} or later. Update the CLI and try again.",
+                claude.version,
+                locate::min_version_text()
+            )));
         }
-        let cutline = locate::find_cutline(&settings.cutline_path, &settings.cutline_repo).ok_or_else(|| Error::Environment("cutline wasn't found. Set its path in Settings › cutline, or put `cutline` on your PATH.".into()))?;
+        let cutline = locate::find_cutline(&settings.cutline_path, &settings.cutline_repo).ok_or_else(|| {
+            Error::Environment(
+                "cutline wasn't found. Set its path in Settings › cutline, or put `cutline` on your PATH.".into(),
+            )
+        })?;
         let doctor = locate::cutline_doctor(Utf8Path::new(&cutline.path)).ok();
-        let cutline_home = doctor.as_ref().and_then(|d| d.raw["home"].as_str()).map(Utf8PathBuf::from).or_else(|| std::env::var("CUTLINE_HOME").ok().map(Utf8PathBuf::from));
+        let cutline_home = doctor
+            .as_ref()
+            .and_then(|d| d.raw["home"].as_str())
+            .map(Utf8PathBuf::from)
+            .or_else(|| std::env::var("CUTLINE_HOME").ok().map(Utf8PathBuf::from));
         Ok(RunEnv {
             platforms: Platforms::load(library),
             models: ModelList::load(library),
@@ -65,6 +79,7 @@ impl RunEnv {
             eleven_base_url: std::env::var("VIDEO_STUDIO_ELEVEN_BASE_URL").ok().filter(|s| !s.is_empty()),
             eleven_test_key: None,
             eleven_key_present: false,
+            extra_env: Default::default(),
             file_refs: std::sync::Arc::new(NoFileRefs),
         })
     }
@@ -218,10 +233,15 @@ fn copy_tree(from: &Utf8Path, to: &Utf8Path) {
 
 /// Builds the run folder and everything in it. Nothing is launched yet.
 pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
-    let project = Project::load(&request.project_path)?;
+    let mut project = Project::load(&request.project_path)?;
     let rc = project.run_config(&request.run_config).cloned().ok_or_else(|| {
         let names: Vec<&str> = project.run_configs.iter().map(|r| r.name.as_str()).collect();
-        Error::NotFound(format!("no run config \"{}\" in {} (it has: {})", request.run_config, request.project_path, if names.is_empty() { "none".to_string() } else { names.join(", ") }))
+        Error::NotFound(format!(
+            "no run config \"{}\" in {} (it has: {})",
+            request.run_config,
+            request.project_path,
+            if names.is_empty() { "none".to_string() } else { names.join(", ") }
+        ))
     })?;
     let outputs = resolve_run_outputs(&project, &rc, &env.platforms)?;
     if outputs.is_empty() {
@@ -241,7 +261,9 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         (RunKind::Production, Some(o)) => o.clone(),
         (RunKind::Production, None) => rc.output_root(&project.name, Some(&env.settings.default_output_folder)),
     };
-    std::fs::create_dir_all(&parent).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("couldn't create the output folder {parent}: {e}"))))?;
+    std::fs::create_dir_all(&parent).map_err(|e| {
+        Error::Io(std::io::Error::new(e.kind(), format!("couldn't create the output folder {parent}: {e}")))
+    })?;
     let folder = paths::canonical_or_normal(&unique_folder(&parent, &folder_name));
     let logs = folder.join("logs");
     for d in [&folder, &logs, &folder.join("outputs"), &folder.join("audio"), &folder.join(".bin")] {
@@ -249,7 +271,10 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     }
 
     // Media: resolve in place, then describe for Claude.
-    let resolutions = media::resolve_all(&project, Some(&request.project_path), &env.settings.media_roots, env.file_refs.as_ref());
+    let resolutions =
+        media::resolve_all(&project, Some(&request.project_path), &env.settings.media_roots, env.file_refs.as_ref());
+    // Probe data is a cache in the project; fill what is missing so the manifest is complete.
+    media::probe_all(&mut project, &resolutions, Utf8Path::new(&env.cutline.path));
     let manifest_entries = manifest(&project, &resolutions);
     paths::write_json_atomic(&folder.join("media-manifest.json"), &manifest_entries)?;
     paths::write_atomic(&folder.join("spec.md"), project.spec.replace("\r\n", "\n").as_bytes())?;
@@ -263,10 +288,17 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     // Revise: start from the previous run's edit and audio.
     let mut previous: Option<RunRecord> = None;
     if let Some(rev) = &request.revise {
-        let prev = project.runs.iter().find(|r| r.id == rev.previous_run).cloned().ok_or_else(|| Error::NotFound(format!("no run \"{}\" to revise", rev.previous_run)))?;
+        let prev = project
+            .runs
+            .iter()
+            .find(|r| r.id == rev.previous_run)
+            .cloned()
+            .ok_or_else(|| Error::NotFound(format!("no run \"{}\" to revise", rev.previous_run)))?;
         let prev_folder = Utf8PathBuf::from(&prev.folder);
         if !prev_folder.is_dir() {
-            return Err(Error::NotFound(format!("the run to revise is no longer at {prev_folder}; use Locate in the run history first")));
+            return Err(Error::NotFound(format!(
+                "the run to revise is no longer at {prev_folder}; use Locate in the run history first"
+            )));
         }
         for name in ["project.json5", "audio", "work", "summary.md"] {
             let dest = if name == "summary.md" { folder.join("previous-summary.md") } else { folder.join(name) };
@@ -317,7 +349,10 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         credit_cap: rc.eleven_credit_cap,
         cache_dir: eleven::cache_dir(&env.library),
         cache_limit_bytes: env.settings.eleven_cache_limit_bytes,
-        default_voice: brand.map(|b| b.voice.voice_id.clone()).filter(|v| !v.is_empty()).or_else(|| Some(env.settings.eleven_default_voice.clone()).filter(|v| !v.is_empty())),
+        default_voice: brand
+            .map(|b| b.voice.voice_id.clone())
+            .filter(|v| !v.is_empty())
+            .or_else(|| Some(env.settings.eleven_default_voice.clone()).filter(|v| !v.is_empty())),
         default_voice_settings: brand.and_then(|b| b.voice.settings.clone()),
         default_model: brand.and_then(|b| b.voice.model.clone()),
         base_url: env.eleven_base_url.clone(),
@@ -348,8 +383,12 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     let sep = if cfg!(windows) { ";" } else { ":" };
     child_env.insert("PATH".into(), format!("{bin}{sep}{base_path}"));
     child_env.insert(CONTEXT_ENV.into(), context_file.to_string());
+    child_env.extend(env.extra_env.clone());
 
-    let mut tools: Vec<String> = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "AskUserQuestion", "TodoWrite"].iter().map(|s| s.to_string()).collect();
+    let mut tools: Vec<String> = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "AskUserQuestion", "TodoWrite"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     if rc.web_access {
         tools.extend(["WebSearch".to_string(), "WebFetch".to_string()]);
     }
@@ -374,7 +413,11 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         working_dir: folder.clone(),
         env: child_env,
         model: model.clone(),
-        effort: rc.effort.clone().or_else(|| Some(env.settings.effort.clone()).filter(|e| !e.is_empty())).filter(|e| env.claude.effort_levels.contains(e)),
+        effort: rc
+            .effort
+            .clone()
+            .or_else(|| Some(env.settings.effort.clone()).filter(|e| !e.is_empty()))
+            .filter(|e| env.claude.effort_levels.contains(e)),
         tools,
         resume_session: previous.as_ref().and_then(|p| p.claude_session.clone()),
         system_prompt_append: system,
@@ -431,13 +474,41 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         paths::write_json_atomic(&logs.join("validation.json"), v)?;
     }
 
-    Ok(Prepared { run_id, folder, logs, context_dir, mode, project, run_config: rc, outputs, manifest: manifest_entries, policy, options, prompt, record, helper_context, request: request.clone() })
+    Ok(Prepared {
+        run_id,
+        folder,
+        logs,
+        context_dir,
+        mode,
+        project,
+        run_config: rc,
+        outputs,
+        manifest: manifest_entries,
+        policy,
+        options,
+        prompt,
+        record,
+        helper_context,
+        request: request.clone(),
+    })
 }
 
 /// The parts of `cutline doctor --json` worth keeping in every run log.
 fn doctor_brief(d: &Value) -> Value {
     let mut out = serde_json::Map::new();
-    for k in ["ok", "errors", "warnings", "home", "home_source", "platform", "chrome", "whisper_cli", "whisper_models", "face_model", "fixes"] {
+    for k in [
+        "ok",
+        "errors",
+        "warnings",
+        "home",
+        "home_source",
+        "platform",
+        "chrome",
+        "whisper_cli",
+        "whisper_models",
+        "face_model",
+        "fixes",
+    ] {
         if let Some(v) = d.get(k) {
             out.insert(k.into(), v.clone());
         }
@@ -445,7 +516,10 @@ fn doctor_brief(d: &Value) -> Value {
     if let Some(ff) = d.get("ffmpeg") {
         out.insert("ffmpeg".into(), ff.clone());
     }
-    let missing: Vec<Value> = d["capabilities"].as_array().map(|a| a.iter().filter(|c| c["present"] == false && c["required"] == true).cloned().collect()).unwrap_or_default();
+    let missing: Vec<Value> = d["capabilities"]
+        .as_array()
+        .map(|a| a.iter().filter(|c| c["present"] == false && c["required"] == true).cloned().collect())
+        .unwrap_or_default();
     out.insert("missing_required".into(), Value::Array(missing));
     Value::Object(out)
 }

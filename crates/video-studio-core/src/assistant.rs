@@ -44,23 +44,60 @@ pub struct AssistantRequest {
     /// The `video-studio` binary, for the pre-tool hook. Without it only the stdio broker runs.
     #[serde(default)]
     pub helper: Option<Utf8PathBuf>,
+    /// Extra environment for the Claude Code process (proxies, test doubles).
+    #[serde(default)]
+    pub extra_env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum AssistantEvent {
-    Started { session_id: String, model: Option<String> },
-    TextDelta { text: String },
-    Text { text: String },
-    Tool { id: String, name: String, summary: String, detail: Option<String> },
-    ToolResult { id: String, is_error: bool, detail: Option<String> },
-    Blocked { reason: String },
-    Question { id: String, questions: Vec<Question> },
+    Started {
+        session_id: String,
+        model: Option<String>,
+    },
+    TextDelta {
+        text: String,
+    },
+    Text {
+        text: String,
+    },
+    Tool {
+        id: String,
+        name: String,
+        summary: String,
+        detail: Option<String>,
+    },
+    ToolResult {
+        id: String,
+        is_error: bool,
+        detail: Option<String>,
+    },
+    Blocked {
+        reason: String,
+    },
+    Question {
+        id: String,
+        questions: Vec<Question>,
+    },
     /// Claude changed `spec.md`: the whole new text, to diff against the editor's.
-    SpecChanged { spec: String },
-    Usage { input_tokens: u64, output_tokens: u64, cost_usd: Option<f64>, duration_ms: Option<u64> },
-    Error { message: String },
-    Finished { ok: bool, stopped: bool, session_id: Option<String> },
+    SpecChanged {
+        spec: String,
+    },
+    Usage {
+        input_tokens: u64,
+        output_tokens: u64,
+        cost_usd: Option<f64>,
+        duration_ms: Option<u64>,
+    },
+    Error {
+        message: String,
+    },
+    Finished {
+        ok: bool,
+        stopped: bool,
+        session_id: Option<String>,
+    },
 }
 
 pub trait AssistantSink: Send + Sync {
@@ -117,7 +154,17 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     let spec_path = spec_file(&dir);
     paths::write_atomic(&spec_path, request.spec.as_bytes())?;
     let read_paths: Vec<Utf8PathBuf> = request.read_paths.iter().filter(|p| p.exists()).cloned().collect();
-    let policy = Policy { mode: Mode::Assistant, work_dir: dir.clone(), read_paths: read_paths.clone(), write_files: Some(vec![spec_path.clone()]), cutline: None, helper: None, path_dirs: Vec::new(), web_access: request.web_access, log: None };
+    let policy = Policy {
+        mode: Mode::Assistant,
+        work_dir: dir.clone(),
+        read_paths: read_paths.clone(),
+        write_files: Some(vec![spec_path.clone()]),
+        cutline: None,
+        helper: None,
+        path_dirs: Vec::new(),
+        web_access: request.web_access,
+        log: None,
+    };
     // The policy file sits next to the session folder, outside what Claude can read.
     let policy_file = dir.with_file_name(format!("{}.policy.json", dir.file_name().unwrap_or("session")));
     let settings = match &request.helper {
@@ -127,28 +174,48 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         }
         None => None,
     };
-    let mut tools: Vec<String> = ["Read", "Edit", "Write", "Glob", "Grep", "AskUserQuestion"].iter().map(|s| s.to_string()).collect();
+    let mut tools: Vec<String> =
+        ["Read", "Edit", "Write", "Glob", "Grep", "AskUserQuestion"].iter().map(|s| s.to_string()).collect();
     if request.web_access {
         tools.extend(["WebSearch".to_string(), "WebFetch".to_string()]);
     }
     let options = ClaudeOptions {
         executable: Utf8PathBuf::from(&claude.path),
         working_dir: dir.clone(),
-        env: child_env(claude.login_path.as_deref()),
+        env: {
+            let mut e = child_env(claude.login_path.as_deref());
+            e.extend(request.extra_env.clone());
+            e
+        },
         model: request.model.clone(),
         effort: request.effort.clone().filter(|e| claude.effort_levels.contains(e)),
         tools,
         resume_session: request.resume.clone(),
-        system_prompt_append: crate::run::prompt::assistant_system_prompt(&dir, &request.project_summary, &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(), request.web_access),
+        system_prompt_append: crate::run::prompt::assistant_system_prompt(
+            &dir,
+            &request.project_summary,
+            &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+            request.web_access,
+        ),
         settings,
-        add_dirs: read_paths.iter().map(|p| containing_dir(p)).collect::<std::collections::HashSet<_>>().into_iter().collect(),
+        add_dirs: read_paths
+            .iter()
+            .map(|p| containing_dir(p))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect(),
         max_budget_usd: None,
         log: Some(dir.join("claude-last-run.jsonl")),
     };
     // Each turn's log replaces the last one.
     let _ = std::fs::remove_file(dir.join("claude-last-run.jsonl"));
     let (process, rx) = ClaudeProcess::start(&options, &request.prompt)?;
-    let shared = Arc::new(Shared { stop: AtomicBool::new(false), finished: AtomicBool::new(false), process: Mutex::new(Some(process.clone())), answers: Mutex::new(HashMap::new()) });
+    let shared = Arc::new(Shared {
+        stop: AtomicBool::new(false),
+        finished: AtomicBool::new(false),
+        process: Mutex::new(Some(process.clone())),
+        answers: Mutex::new(HashMap::new()),
+    });
     let thread_shared = shared.clone();
     let original = request.spec.clone();
     let thread = std::thread::Builder::new().name("video-studio-assistant".into()).spawn(move || {
@@ -310,7 +377,8 @@ pub fn diff_hunks(old: &str, new: &str) -> Vec<Hunk> {
     let at = |i: usize, j: usize| i * (m + 1) + j;
     for i in (0..n).rev() {
         for j in (0..m).rev() {
-            lcs[at(i, j)] = if am[i] == bm[j] { lcs[at(i + 1, j + 1)] + 1 } else { lcs[at(i + 1, j)].max(lcs[at(i, j + 1)]) };
+            lcs[at(i, j)] =
+                if am[i] == bm[j] { lcs[at(i + 1, j + 1)] + 1 } else { lcs[at(i + 1, j)].max(lcs[at(i, j + 1)]) };
         }
     }
     let mut hunks: Vec<Hunk> = Vec::new();
@@ -325,7 +393,8 @@ pub fn diff_hunks(old: &str, new: &str) -> Vec<Hunk> {
             j += 1;
             continue;
         }
-        let h = open.get_or_insert_with(|| Hunk { old_start: prefix + i, old_lines: Vec::new(), new_lines: Vec::new() });
+        let h =
+            open.get_or_insert_with(|| Hunk { old_start: prefix + i, old_lines: Vec::new(), new_lines: Vec::new() });
         if j < m && (i == n || lcs[at(i, j + 1)] >= lcs[at(i + 1, j)]) {
             h.new_lines.push(bm[j].to_string());
             j += 1;
@@ -373,7 +442,10 @@ pub fn compose_prompt(text: &str, selection: Option<(&str, usize, usize)>, attac
         ctx.push(format!("- Selected text in spec.md (lines {a}–{b}):\n\n```markdown\n{sel}\n```"));
     }
     if !attachments.is_empty() {
-        ctx.push(format!("- Media the user pointed at: {}", attachments.iter().map(|m| format!("media:{m}")).collect::<Vec<_>>().join(", ")));
+        ctx.push(format!(
+            "- Media the user pointed at: {}",
+            attachments.iter().map(|m| format!("media:{m}")).collect::<Vec<_>>().join(", ")
+        ));
     }
     if ctx.is_empty() {
         text.to_string()
@@ -402,8 +474,14 @@ mod tests {
         let new = "# Title\n\nIntro line, sharper\n\n## Scene 1\n- Duration: 5 s\n- Media: media:m-hero\n\nGo.\n";
         let h = diff_hunks(old, new);
         assert_eq!(h.len(), 3, "{h:#?}");
-        assert_eq!(h[0], Hunk { old_start: 2, old_lines: vec!["Intro line".into()], new_lines: vec!["Intro line, sharper".into()] });
-        assert_eq!((h[1].old_start, h[1].old_lines.len(), h[1].new_lines.clone()), (6, 0, vec!["- Media: media:m-hero".to_string()]));
+        assert_eq!(
+            h[0],
+            Hunk { old_start: 2, old_lines: vec!["Intro line".into()], new_lines: vec!["Intro line, sharper".into()] }
+        );
+        assert_eq!(
+            (h[1].old_start, h[1].old_lines.len(), h[1].new_lines.clone()),
+            (6, 0, vec!["- Media: media:m-hero".to_string()])
+        );
         assert_eq!((h[2].old_lines.clone(), h[2].new_lines.len()), (vec!["## Call to action".to_string()], 0));
         // accepting everything gives Claude's text; nothing gives the old text
         assert_eq!(apply_hunks(old, &h, &[true, true, true]), new);
@@ -411,7 +489,10 @@ mod tests {
         assert_eq!(apply_hunks(old, &h, &[]), old);
         // per-hunk: take the media line, reject the others
         let mixed = apply_hunks(old, &h, &[false, true, false]);
-        assert_eq!(mixed, "# Title\n\nIntro line\n\n## Scene 1\n- Duration: 5 s\n- Media: media:m-hero\n\n## Call to action\nGo.\n");
+        assert_eq!(
+            mixed,
+            "# Title\n\nIntro line\n\n## Scene 1\n- Duration: 5 s\n- Media: media:m-hero\n\n## Call to action\nGo.\n"
+        );
         assert!(diff_hunks(old, old).is_empty());
     }
 

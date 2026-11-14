@@ -22,7 +22,13 @@ impl Usage {
     }
     fn from_json(u: &Value) -> Usage {
         let n = |k: &str| u[k].as_u64().unwrap_or(0);
-        Usage { input_tokens: n("input_tokens"), output_tokens: n("output_tokens"), cache_read_tokens: n("cache_read_input_tokens"), cache_creation_tokens: n("cache_creation_input_tokens"), ..Usage::default() }
+        Usage {
+            input_tokens: n("input_tokens"),
+            output_tokens: n("output_tokens"),
+            cache_read_tokens: n("cache_read_input_tokens"),
+            cache_creation_tokens: n("cache_creation_input_tokens"),
+            ..Usage::default()
+        }
     }
 }
 
@@ -47,19 +53,48 @@ pub struct QuestionOption {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StreamEvent {
-    Init { session_id: String, model: Option<String>, tools: Vec<String>, cli_version: Option<String> },
+    Init {
+        session_id: String,
+        model: Option<String>,
+        tools: Vec<String>,
+        cli_version: Option<String>,
+    },
     /// Incremental text of the main conversation (needs `--include-partial-messages`).
     TextDelta(String),
     /// A complete assistant text block.
     AssistantText(String),
-    ToolUse { id: String, name: String, input: Value },
-    ToolResult { tool_use_id: String, content: String, is_error: bool },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
     /// Token usage of one assistant message (`message_id` repeats across its content blocks).
-    MessageUsage { message_id: String, usage: Usage },
+    MessageUsage {
+        message_id: String,
+        usage: Usage,
+    },
     /// The host must answer this `can_use_tool` control request.
-    PermissionRequest { request_id: String, tool_name: String, input: Value, tool_use_id: Option<String> },
-    Result { is_error: bool, text: Option<String>, session_id: Option<String>, subtype: Option<String>, usage: Option<Usage> },
-    ControlResponse { request_id: String },
+    PermissionRequest {
+        request_id: String,
+        tool_name: String,
+        input: Value,
+        tool_use_id: Option<String>,
+    },
+    Result {
+        is_error: bool,
+        text: Option<String>,
+        session_id: Option<String>,
+        subtype: Option<String>,
+        usage: Option<Usage>,
+    },
+    ControlResponse {
+        request_id: String,
+    },
     Ignored(String),
 }
 
@@ -75,8 +110,16 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
         "system" => {
             if obj["subtype"] == "init" {
                 if let Some(sid) = obj["session_id"].as_str() {
-                    let tools = obj["tools"].as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).collect()).unwrap_or_default();
-                    return vec![StreamEvent::Init { session_id: sid.to_string(), model: obj["model"].as_str().map(str::to_string), tools, cli_version: obj["claude_code_version"].as_str().map(str::to_string) }];
+                    let tools = obj["tools"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).collect())
+                        .unwrap_or_default();
+                    return vec![StreamEvent::Init {
+                        session_id: sid.to_string(),
+                        model: obj["model"].as_str().map(str::to_string),
+                        tools,
+                        cli_version: obj["claude_code_version"].as_str().map(str::to_string),
+                    }];
                 }
             }
             vec![StreamEvent::Ignored("system".into())]
@@ -94,7 +137,10 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
             let msg = &obj["message"];
             let mut out = Vec::new();
             if let (Some(id), true) = (msg["id"].as_str(), msg["usage"].is_object()) {
-                out.push(StreamEvent::MessageUsage { message_id: id.to_string(), usage: Usage::from_json(&msg["usage"]) });
+                out.push(StreamEvent::MessageUsage {
+                    message_id: id.to_string(),
+                    usage: Usage::from_json(&msg["usage"]),
+                });
             }
             let main = is_main_thread(&obj);
             for block in msg["content"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
@@ -122,10 +168,16 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
                     .map(|b| {
                         let content = match &b["content"] {
                             Value::String(s) => s.clone(),
-                            Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n"),
+                            Value::Array(parts) => {
+                                parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join("\n")
+                            }
                             _ => String::new(),
                         };
-                        StreamEvent::ToolResult { tool_use_id: b["tool_use_id"].as_str().unwrap_or("").to_string(), content, is_error: b["is_error"].as_bool().unwrap_or(false) }
+                        StreamEvent::ToolResult {
+                            tool_use_id: b["tool_use_id"].as_str().unwrap_or("").to_string(),
+                            content,
+                            is_error: b["is_error"].as_bool().unwrap_or(false),
+                        }
                     })
                     .collect()
             })
@@ -142,7 +194,9 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
                 _ => vec![StreamEvent::Ignored("control_request".into())],
             }
         }
-        "control_response" => vec![StreamEvent::ControlResponse { request_id: obj["response"]["request_id"].as_str().unwrap_or("").to_string() }],
+        "control_response" => vec![StreamEvent::ControlResponse {
+            request_id: obj["response"]["request_id"].as_str().unwrap_or("").to_string(),
+        }],
         "result" => {
             let usage = obj["usage"].is_object().then(|| {
                 let mut u = Usage::from_json(&obj["usage"]);
@@ -175,7 +229,16 @@ pub fn questions(input: &Value) -> Vec<Question> {
                         header: q["header"].as_str().map(str::to_string),
                         options: q["options"]
                             .as_array()
-                            .map(|o| o.iter().filter_map(|x| Some(QuestionOption { label: x["label"].as_str()?.to_string(), description: x["description"].as_str().map(str::to_string) })).collect())
+                            .map(|o| {
+                                o.iter()
+                                    .filter_map(|x| {
+                                        Some(QuestionOption {
+                                            label: x["label"].as_str()?.to_string(),
+                                            description: x["description"].as_str().map(str::to_string),
+                                        })
+                                    })
+                                    .collect()
+                            })
                             .unwrap_or_default(),
                         multi_select: q["multiSelect"].as_bool().unwrap_or(false),
                     })
@@ -222,32 +285,68 @@ mod tests {
 
     #[test]
     fn parses_init_text_tools_and_result() {
-        let init = parse_line(r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5","tools":["Read","Bash"],"claude_code_version":"2.1.311"}"#);
-        assert_eq!(init, vec![StreamEvent::Init { session_id: "s1".into(), model: Some("claude-haiku-5-5".into()), tools: vec!["Read".into(), "Bash".into()], cli_version: Some("2.1.311".into()) }]);
-        let delta = parse_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}},"parent_tool_use_id":null}"#);
+        let init = parse_line(
+            r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5","tools":["Read","Bash"],"claude_code_version":"2.1.311"}"#,
+        );
+        assert_eq!(
+            init,
+            vec![StreamEvent::Init {
+                session_id: "s1".into(),
+                model: Some("claude-haiku-5-5".into()),
+                tools: vec!["Read".into(), "Bash".into()],
+                cli_version: Some("2.1.311".into())
+            }]
+        );
+        let delta = parse_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}},"parent_tool_use_id":null}"#,
+        );
         assert_eq!(delta, vec![StreamEvent::TextDelta("Hi".into())]);
-        let sub = parse_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"x"}},"parent_tool_use_id":"t9"}"#);
+        let sub = parse_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"x"}},"parent_tool_use_id":"t9"}"#,
+        );
         assert_eq!(sub, vec![StreamEvent::Ignored("stream_event".into())], "subagent text isn't shown");
-        let asst = parse_line(r#"{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100},"content":[{"type":"text","text":"Done"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cutline validate project.json5"}}]}}"#);
+        let asst = parse_line(
+            r#"{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100},"content":[{"type":"text","text":"Done"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cutline validate project.json5"}}]}}"#,
+        );
         assert_eq!(asst.len(), 3);
-        assert!(matches!(&asst[0], StreamEvent::MessageUsage { message_id, usage } if message_id == "m1" && usage.total_input() == 110 && usage.output_tokens == 5));
+        assert!(
+            matches!(&asst[0], StreamEvent::MessageUsage { message_id, usage } if message_id == "m1" && usage.total_input() == 110 && usage.output_tokens == 5)
+        );
         assert_eq!(asst[1], StreamEvent::AssistantText("Done".into()));
-        assert!(matches!(&asst[2], StreamEvent::ToolUse { name, input, .. } if name == "Bash" && input["command"] == "cutline validate project.json5"));
-        let res = parse_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"ok"},{"type":"text","text":"2"}],"is_error":true}]}}"#);
-        assert_eq!(res, vec![StreamEvent::ToolResult { tool_use_id: "t1".into(), content: "ok\n2".into(), is_error: true }]);
-        let done = parse_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"fin","session_id":"s1","total_cost_usd":0.25,"duration_ms":1200,"num_turns":4,"usage":{"input_tokens":1,"output_tokens":2}}"#);
-        assert!(matches!(&done[0], StreamEvent::Result { is_error: false, usage: Some(u), .. } if u.cost_usd == Some(0.25) && u.num_turns == Some(4)));
+        assert!(
+            matches!(&asst[2], StreamEvent::ToolUse { name, input, .. } if name == "Bash" && input["command"] == "cutline validate project.json5")
+        );
+        let res = parse_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"ok"},{"type":"text","text":"2"}],"is_error":true}]}}"#,
+        );
+        assert_eq!(
+            res,
+            vec![StreamEvent::ToolResult { tool_use_id: "t1".into(), content: "ok\n2".into(), is_error: true }]
+        );
+        let done = parse_line(
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"fin","session_id":"s1","total_cost_usd":0.25,"duration_ms":1200,"num_turns":4,"usage":{"input_tokens":1,"output_tokens":2}}"#,
+        );
+        assert!(
+            matches!(&done[0], StreamEvent::Result { is_error: false, usage: Some(u), .. } if u.cost_usd == Some(0.25) && u.num_turns == Some(4))
+        );
         assert!(parse_line("not json").is_empty());
     }
 
     #[test]
     fn permission_requests_and_responses() {
-        let req = parse_line(r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Tone?","header":"Tone","multiSelect":true,"options":[{"label":"Calm","description":"Soft"},{"label":"Bold"}]}]},"tool_use_id":"t2"}}"#);
+        let req = parse_line(
+            r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Tone?","header":"Tone","multiSelect":true,"options":[{"label":"Calm","description":"Soft"},{"label":"Bold"}]}]},"tool_use_id":"t2"}}"#,
+        );
         let StreamEvent::PermissionRequest { request_id, tool_name, input, tool_use_id } = &req[0] else { panic!() };
-        assert_eq!((request_id.as_str(), tool_name.as_str(), tool_use_id.as_deref()), ("r1", "AskUserQuestion", Some("t2")));
+        assert_eq!(
+            (request_id.as_str(), tool_name.as_str(), tool_use_id.as_deref()),
+            ("r1", "AskUserQuestion", Some("t2"))
+        );
         let qs = questions(input);
         assert_eq!(qs.len(), 1);
-        assert!(qs[0].multi_select && qs[0].options.len() == 2 && qs[0].options[0].description.as_deref() == Some("Soft"));
+        assert!(
+            qs[0].multi_select && qs[0].options.len() == 2 && qs[0].options[0].description.as_deref() == Some("Soft")
+        );
         let mut answers = std::collections::BTreeMap::new();
         answers.insert("Tone?".to_string(), "Calm, Bold".to_string());
         let line = allow("r1", &answered_input(input, &answers));
@@ -255,7 +354,13 @@ mod tests {
         assert_eq!(v["response"]["response"]["behavior"], "allow");
         assert_eq!(v["response"]["response"]["updatedInput"]["answers"]["Tone?"], "Calm, Bold");
         let d: Value = serde_json::from_str(&deny("r1", "no")).unwrap();
-        assert_eq!((d["response"]["request_id"].as_str(), d["response"]["response"]["message"].as_str()), (Some("r1"), Some("no")));
-        assert_eq!(parse_line(r#"{"type":"control_response","response":{"request_id":"app-1","subtype":"success"}}"#), vec![StreamEvent::ControlResponse { request_id: "app-1".into() }]);
+        assert_eq!(
+            (d["response"]["request_id"].as_str(), d["response"]["response"]["message"].as_str()),
+            (Some("r1"), Some("no"))
+        );
+        assert_eq!(
+            parse_line(r#"{"type":"control_response","response":{"request_id":"app-1","subtype":"success"}}"#),
+            vec![StreamEvent::ControlResponse { request_id: "app-1".into() }]
+        );
     }
 }

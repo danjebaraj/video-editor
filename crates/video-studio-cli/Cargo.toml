@@ -24,3 +24,15 @@ tempfile = "3.27.0"
 
 [lints]
 workspace = true
+
+# Test doubles (spec §20): a Claude Code CLI that replays a script, and a cutline that writes
+# placeholder outputs. Used by this crate's end-to-end tests and the macOS app's self test.
+[[bin]]
+name = "vs-fake-claude"
+path = "src/bin/fake_claude.rs"
+test = false
+
+[[bin]]
+name = "vs-fake-cutline"
+path = "src/bin/fake_cutline.rs"
+test = false

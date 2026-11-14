@@ -41,11 +41,24 @@ pub struct ReadinessReport {
 fn findings_from(v: &Value) -> Vec<Finding> {
     let one = |x: &Value| -> Option<Finding> {
         match x {
-            Value::String(s) if !s.trim().is_empty() => Some(Finding { text: s.trim().to_string(), spec_line: None, detail: None }),
+            Value::String(s) if !s.trim().is_empty() => {
+                Some(Finding { text: s.trim().to_string(), spec_line: None, detail: None })
+            }
             Value::Object(o) => {
-                let text = ["text", "message", "title", "summary", "question", "description"].iter().find_map(|k| o.get(*k).and_then(Value::as_str))?.trim().to_string();
-                let line = ["spec_line", "line"].iter().find_map(|k| o.get(*k).and_then(Value::as_u64)).map(|n| n as usize).filter(|n| *n > 0);
-                let detail = ["detail", "details", "suggestion", "assumption"].iter().find_map(|k| o.get(*k).and_then(Value::as_str)).map(str::to_string);
+                let text = ["text", "message", "title", "summary", "question", "description"]
+                    .iter()
+                    .find_map(|k| o.get(*k).and_then(Value::as_str))?
+                    .trim()
+                    .to_string();
+                let line = ["spec_line", "line"]
+                    .iter()
+                    .find_map(|k| o.get(*k).and_then(Value::as_u64))
+                    .map(|n| n as usize)
+                    .filter(|n| *n > 0);
+                let detail = ["detail", "details", "suggestion", "assumption"]
+                    .iter()
+                    .find_map(|k| o.get(*k).and_then(Value::as_str))
+                    .map(str::to_string);
                 (!text.is_empty()).then_some(Finding { text, spec_line: line, detail })
             }
             _ => None,
@@ -87,7 +100,12 @@ impl ReadinessReport {
     /// Every finding as `(kind, title, detail, spec line)` for the validation report.
     pub fn findings(&self) -> Vec<(&'static str, String, Option<String>, Option<usize>)> {
         let mut out = Vec::new();
-        for (kind, label, list) in [("ambiguity", "Unclear in the spec", &self.ambiguities), ("missing_media", "Missing media", &self.missing_media), ("risk", "Risk", &self.risks), ("assumption", "Assumed", &self.assumptions)] {
+        for (kind, label, list) in [
+            ("ambiguity", "Unclear in the spec", &self.ambiguities),
+            ("missing_media", "Missing media", &self.missing_media),
+            ("risk", "Risk", &self.risks),
+            ("assumption", "Assumed", &self.assumptions),
+        ] {
             for f in list {
                 out.push((kind, format!("{label}: {}", f.text), f.detail.clone(), f.spec_line));
             }
@@ -102,7 +120,12 @@ impl ReadinessReport {
     /// The findings as a prompt for "Ask Claude to fix the spec" (spec §11.2).
     pub fn fix_prompt(&self) -> String {
         let mut s = String::from("A dry run of this spec found the points below. Update spec.md so a production run has what it needs. Ask me about anything only I can decide.\n");
-        for (title, list) in [("Unclear", &self.ambiguities), ("Missing media", &self.missing_media), ("Risks", &self.risks), ("Assumptions the dry run made (confirm or correct them in the spec)", &self.assumptions)] {
+        for (title, list) in [
+            ("Unclear", &self.ambiguities),
+            ("Missing media", &self.missing_media),
+            ("Risks", &self.risks),
+            ("Assumptions the dry run made (confirm or correct them in the spec)", &self.assumptions),
+        ] {
             if list.is_empty() {
                 continue;
             }
@@ -131,7 +154,14 @@ mod tests {
             "estimated_durations": {"youtube-1080p": 46.5, "bad": "x"}, "extra": true}"#)
         .unwrap();
         assert!(!r.ready && !r.is_clean());
-        assert_eq!(r.ambiguities[0], Finding { text: "Which logo opens the video?".into(), spec_line: Some(12), detail: Some("Two logos are attached".into()) });
+        assert_eq!(
+            r.ambiguities[0],
+            Finding {
+                text: "Which logo opens the video?".into(),
+                spec_line: Some(12),
+                detail: Some("Two logos are attached".into())
+            }
+        );
         assert_eq!(r.assumptions[0].text, "Used the horizontal logo");
         assert_eq!(r.missing_media[0].spec_line, Some(30));
         assert_eq!(r.risks.len(), 1);

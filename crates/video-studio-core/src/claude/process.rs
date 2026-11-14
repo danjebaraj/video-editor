@@ -38,10 +38,22 @@ pub struct ClaudeOptions {
 impl ClaudeOptions {
     /// The CLI arguments. Verified against Claude Code 2.1.311 (docs/decisions.md).
     pub fn arguments(&self) -> Vec<String> {
-        let mut a: Vec<String> = ["-p", "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let mut a: Vec<String> = [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--permission-prompt-tool",
+            "stdio",
+            "--permission-mode",
+            "default",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         // Only the app's tools: no MCP servers and no slash commands or skills from the user's setup.
         a.extend(["--strict-mcp-config".to_string(), "--disable-slash-commands".to_string()]);
         a.extend(["--tools".to_string(), self.tools.join(",")]);
@@ -78,7 +90,10 @@ impl ClaudeOptions {
 pub enum Incoming {
     Event(StreamEvent),
     /// The process ended: exit code (−1 when killed by a signal) and what it wrote to stderr.
-    Exit { code: i32, stderr: String },
+    Exit {
+        code: i32,
+        stderr: String,
+    },
 }
 
 struct Shared {
@@ -114,7 +129,9 @@ impl ClaudeProcess {
         cmd.env("PWD", options.working_dir.as_str()).env_remove("OLDPWD");
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         ProcessGroup::configure(&mut cmd);
-        let mut child = cmd.spawn().map_err(|e| Error::Environment(format!("couldn't start Claude Code ({}): {e}", options.executable)))?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| Error::Environment(format!("couldn't start Claude Code ({}): {e}", options.executable)))?;
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
@@ -127,7 +144,13 @@ impl ClaudeProcess {
             }
             None => None,
         };
-        let shared = Arc::new(Shared { stdin: Mutex::new(stdin), log: Mutex::new(log), child: Mutex::new(child), exited: AtomicBool::new(false), counter: AtomicU64::new(0) });
+        let shared = Arc::new(Shared {
+            stdin: Mutex::new(stdin),
+            log: Mutex::new(log),
+            child: Mutex::new(child),
+            exited: AtomicBool::new(false),
+            counter: AtomicU64::new(0),
+        });
         shared.log_line(&json!({"type": "host_start", "ts": crate::timeutil::now_rfc3339(), "argv": args, "cwd": options.working_dir}).to_string());
         let (tx, rx): (Sender<Incoming>, Receiver<Incoming>) = channel();
 
@@ -183,7 +206,9 @@ impl ClaudeProcess {
             };
             out_shared.exited.store(true, Ordering::SeqCst);
             let stderr = err_text.lock().unwrap().clone();
-            out_shared.log_line(&json!({"type": "host_exit", "ts": crate::timeutil::now_rfc3339(), "code": code}).to_string());
+            out_shared.log_line(
+                &json!({"type": "host_exit", "ts": crate::timeutil::now_rfc3339(), "code": code}).to_string(),
+            );
             let _ = tx.send(Incoming::Exit { code, stderr });
         });
 
@@ -202,7 +227,12 @@ impl ClaudeProcess {
         let mut guard = self.shared.stdin.lock().unwrap();
         if let Some(stdin) = guard.as_mut() {
             self.shared.log_line(line);
-            if stdin.write_all(line.as_bytes()).and_then(|_| stdin.write_all(b"\n")).and_then(|_| stdin.flush()).is_err() {
+            if stdin
+                .write_all(line.as_bytes())
+                .and_then(|_| stdin.write_all(b"\n"))
+                .and_then(|_| stdin.flush())
+                .is_err()
+            {
                 *guard = None;
             }
         }
@@ -255,7 +285,9 @@ impl ClaudeProcess {
     /// Graceful stop (spec §12.4): interrupt, close input, wait up to `grace`, then kill the tree.
     /// Returns true when the process had to be killed.
     pub fn stop(&self, grace: Duration) -> bool {
-        self.log_note(json!({"type": "host_stop", "ts": crate::timeutil::now_rfc3339(), "grace_ms": grace.as_millis() as u64}));
+        self.log_note(
+            json!({"type": "host_stop", "ts": crate::timeutil::now_rfc3339(), "grace_ms": grace.as_millis() as u64}),
+        );
         self.interrupt();
         self.finish_input();
         let deadline = std::time::Instant::now() + grace;
@@ -276,8 +308,16 @@ impl ClaudeProcess {
 /// Turns a CLI failure into something the user can act on.
 pub fn friendly_error(text: &str) -> String {
     let lower = text.to_lowercase();
-    if lower.contains("not logged in") || lower.contains("/login") || lower.contains("invalid api key") || lower.contains("authentication") || lower.contains("please run `claude`") {
-        return format!("Claude isn't signed in. Open Terminal, run `claude` and sign in, then try again.\n\n{}", text.trim());
+    if lower.contains("not logged in")
+        || lower.contains("/login")
+        || lower.contains("invalid api key")
+        || lower.contains("authentication")
+        || lower.contains("please run `claude`")
+    {
+        return format!(
+            "Claude isn't signed in. Open Terminal, run `claude` and sign in, then try again.\n\n{}",
+            text.trim()
+        );
     }
     text.trim().to_string()
 }
@@ -297,7 +337,12 @@ mod tests {
 
     #[test]
     fn builds_arguments() {
-        let mut o = ClaudeOptions { model: "claude-opus-5-5".into(), tools: vec!["Read".into(), "Edit".into(), "AskUserQuestion".into()], system_prompt_append: "ctx".into(), ..Default::default() };
+        let mut o = ClaudeOptions {
+            model: "claude-opus-5-5".into(),
+            tools: vec!["Read".into(), "Edit".into(), "AskUserQuestion".into()],
+            system_prompt_append: "ctx".into(),
+            ..Default::default()
+        };
         o.effort = Some("high".into());
         o.resume_session = Some("sess-1".into());
         o.max_budget_usd = Some(12.5);
@@ -317,7 +362,11 @@ mod tests {
         p.model = "default".into();
         p.effort = Some(" ".into());
         let a = p.arguments();
-        assert!(!a.contains(&"--disallowed-tools".to_string()) && !a.contains(&"--model".to_string()) && !a.contains(&"--effort".to_string()));
+        assert!(
+            !a.contains(&"--disallowed-tools".to_string())
+                && !a.contains(&"--model".to_string())
+                && !a.contains(&"--effort".to_string())
+        );
     }
 
     #[test]

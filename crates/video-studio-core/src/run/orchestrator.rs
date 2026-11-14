@@ -105,7 +105,13 @@ impl RunHandle {
 /// launched (bad run config, unwritable output folder, …).
 pub fn start_run(request: &RunRequest, env: &RunEnv, sink: Arc<dyn EventSink>) -> Result<RunHandle> {
     let prepared = prepare(request, env)?;
-    let shared = Arc::new(Shared { cancel: AtomicBool::new(false), kill: AtomicBool::new(false), finished: AtomicBool::new(false), process: Mutex::new(None), answers: Mutex::new(HashMap::new()) });
+    let shared = Arc::new(Shared {
+        cancel: AtomicBool::new(false),
+        kill: AtomicBool::new(false),
+        finished: AtomicBool::new(false),
+        process: Mutex::new(None),
+        answers: Mutex::new(HashMap::new()),
+    });
     let run_id = prepared.run_id.clone();
     let folder = prepared.folder.clone();
     let sink: Arc<dyn EventSink> = Arc::new(LoggingSink::new(&prepared.logs.join("events.ndjson"), sink));
@@ -215,7 +221,13 @@ pub fn tool_summary(name: &str, input: &Value, root: &Utf8Path) -> String {
 }
 
 impl Driver {
-    fn new(p: Prepared, sink: Arc<dyn EventSink>, shared: Arc<Shared>, price: Option<crate::models::Price>, project_path: Utf8PathBuf) -> Self {
+    fn new(
+        p: Prepared,
+        sink: Arc<dyn EventSink>,
+        shared: Arc<Shared>,
+        price: Option<crate::models::Price>,
+        project_path: Utf8PathBuf,
+    ) -> Self {
         Driver {
             p,
             sink,
@@ -277,7 +289,11 @@ impl Driver {
             input += u.total_input();
             output += u.output_tokens;
             if let Some(p) = &self.price {
-                cost += (u.input_tokens as f64 + u.cache_creation_tokens as f64 * 1.25 + u.cache_read_tokens as f64 * 0.1) * p.input / 1e6 + u.output_tokens as f64 * p.output / 1e6;
+                cost +=
+                    (u.input_tokens as f64 + u.cache_creation_tokens as f64 * 1.25 + u.cache_read_tokens as f64 * 0.1)
+                        * p.input
+                        / 1e6
+                        + u.output_tokens as f64 * p.output / 1e6;
             }
         }
         (self.price.as_ref().map(|_| cost), input, output)
@@ -290,12 +306,21 @@ impl Driver {
         self.last_cost_emit = Instant::now();
         let (est, input, output) = self.estimated_cost();
         let reported = self.final_usage.as_ref().and_then(|u| u.cost_usd);
-        self.emit(EventKind::Cost { claude_usd: reported.or(est), claude_estimated: reported.is_none(), input_tokens: input, output_tokens: output, eleven_credits: self.eleven_credits, eleven_cap: self.p.run_config.eleven_credit_cap });
+        self.emit(EventKind::Cost {
+            claude_usd: reported.or(est),
+            claude_estimated: reported.is_none(),
+            input_tokens: input,
+            output_tokens: output,
+            eleven_credits: self.eleven_credits,
+            eleven_cap: self.p.run_config.eleven_credit_cap,
+        });
     }
 
     fn save_record(&self, record: &RunRecord) {
         if let Err(e) = record_run(&self.project_path, record) {
-            self.emit(EventKind::Warning { message: format!("Couldn't update the run history in {}: {e}", self.project_path) });
+            self.emit(EventKind::Warning {
+                message: format!("Couldn't update the run history in {}: {e}", self.project_path),
+            });
         }
     }
 
@@ -402,7 +427,12 @@ impl Driver {
                 self.tools.insert(id, (name.clone(), stage.map(|s| s.0)));
                 if name != "AskUserQuestion" {
                     let detail = serde_json::to_string_pretty(&input).ok().map(|d| truncate(&d, 4000));
-                    self.emit(EventKind::Message { role: "tool".into(), text: tool_summary(&name, &input, &self.p.folder), tool: Some(name), detail });
+                    self.emit(EventKind::Message {
+                        role: "tool".into(),
+                        text: tool_summary(&name, &input, &self.p.folder),
+                        tool: Some(name),
+                        detail,
+                    });
                 }
             }
             StreamEvent::ToolResult { tool_use_id, content, is_error } => {
@@ -413,7 +443,12 @@ impl Driver {
                             cur.3 = false;
                         }
                     }
-                    self.emit(EventKind::Message { role: "tool".into(), text: format!("{name} failed"), tool: Some(name), detail: Some(truncate(&content, 4000)) });
+                    self.emit(EventKind::Message {
+                        role: "tool".into(),
+                        text: format!("{name} failed"),
+                        tool: Some(name),
+                        detail: Some(truncate(&content, 4000)),
+                    });
                 } else if let (Some(s), Some(cur)) = (&stage, self.stage.as_mut()) {
                     // a later success in the same stage clears an earlier failure (fix and retry)
                     if &cur.0 == s {
@@ -421,7 +456,9 @@ impl Driver {
                     }
                 }
             }
-            StreamEvent::PermissionRequest { request_id, tool_name, input, .. } => self.decide(process, request_id, tool_name, input),
+            StreamEvent::PermissionRequest { request_id, tool_name, input, .. } => {
+                self.decide(process, request_id, tool_name, input)
+            }
             StreamEvent::Result { is_error, text, session_id, subtype, usage } => {
                 self.saw_result = true;
                 if session_id.is_some() {
@@ -468,15 +505,30 @@ impl Driver {
                     process.allow(&request_id, &input);
                     return;
                 }
-                let timeout = self.p.request.question_timeout_s.or(self.p.run_config.question_timeout_s).filter(|t| *t > 0);
-                self.emit(EventKind::Question { id: request_id.clone(), questions: questions.clone(), timeout_s: timeout });
+                let timeout =
+                    self.p.request.question_timeout_s.or(self.p.run_config.question_timeout_s).filter(|t| *t > 0);
+                self.emit(EventKind::Question {
+                    id: request_id.clone(),
+                    questions: questions.clone(),
+                    timeout_s: timeout,
+                });
                 if self.p.request.assume_answers {
                     process.deny(&request_id, ASSUME_MESSAGE);
-                    self.emit(EventKind::QuestionAnswered { id: request_id, by: "assumed".into(), answers: BTreeMap::new() });
+                    self.emit(EventKind::QuestionAnswered {
+                        id: request_id,
+                        by: "assumed".into(),
+                        answers: BTreeMap::new(),
+                    });
                     let q = questions.iter().map(|q| q.question.as_str()).collect::<Vec<_>>().join(" / ");
                     self.warn(format!("Claude asked \"{q}\" and proceeded on its own assumption (no one was asked)."));
                 } else {
-                    self.pending.insert(request_id, PendingQuestion { input, deadline: timeout.map(|t| Instant::now() + Duration::from_secs(t as u64)) });
+                    self.pending.insert(
+                        request_id,
+                        PendingQuestion {
+                            input,
+                            deadline: timeout.map(|t| Instant::now() + Duration::from_secs(t as u64)),
+                        },
+                    );
                 }
             }
         }
@@ -496,7 +548,8 @@ impl Driver {
                 let q = self.pending.remove(&id).unwrap();
                 process.deny(&id, ASSUME_MESSAGE);
                 self.emit(EventKind::QuestionAnswered { id, by: "timeout".into(), answers: BTreeMap::new() });
-                let text = stream::questions(&q.input).iter().map(|q| q.question.clone()).collect::<Vec<_>>().join(" / ");
+                let text =
+                    stream::questions(&q.input).iter().map(|q| q.question.clone()).collect::<Vec<_>>().join(" / ");
                 self.warn(format!("Claude asked \"{text}\" and proceeded on its own assumption (no answer in time)."));
             }
         }
@@ -510,7 +563,11 @@ impl Driver {
             match v["type"].as_str() {
                 Some("line") => {
                     let text = v["text"].as_str().unwrap_or("");
-                    self.emit(EventKind::Progress { stage, fraction: progress_fraction(text), detail: Some(truncate(text, 200)) });
+                    self.emit(EventKind::Progress {
+                        stage,
+                        fraction: progress_fraction(text),
+                        detail: Some(truncate(text, 200)),
+                    });
                 }
                 Some("exit") => {
                     let code = v["code"].as_i64().unwrap_or(-1);
@@ -520,9 +577,21 @@ impl Driver {
                     let n = v["n"].as_u64().unwrap_or(0);
                     let command = v["command"].as_str().unwrap_or("");
                     let log = self.p.logs.join(format!("cutline/{n:03}-{command}.log"));
-                    self.emit(EventKind::Progress { stage, fraction: (code == 0).then_some(1.0), detail: Some(format!("cutline {command} finished (exit {code}, {:.1} s)", v["seconds"].as_f64().unwrap_or(0.0))) });
+                    self.emit(EventKind::Progress {
+                        stage,
+                        fraction: (code == 0).then_some(1.0),
+                        detail: Some(format!(
+                            "cutline {command} finished (exit {code}, {:.1} s)",
+                            v["seconds"].as_f64().unwrap_or(0.0)
+                        )),
+                    });
                     if log.is_file() {
-                        self.emit(EventKind::Artifact { kind: "log".into(), path: log.to_string(), output: None, bytes: None });
+                        self.emit(EventKind::Artifact {
+                            kind: "log".into(),
+                            path: log.to_string(),
+                            output: None,
+                            bytes: None,
+                        });
                     }
                 }
                 _ => {}
@@ -535,7 +604,12 @@ impl Driver {
             if v["ok"].as_bool() == Some(true) {
                 self.eleven_credits += v["credits"].as_u64().unwrap_or(0);
                 if let Some(out) = v["out"].as_str() {
-                    self.emit(EventKind::Artifact { kind: "audio".into(), path: out.to_string(), output: None, bytes: v["bytes"].as_u64() });
+                    self.emit(EventKind::Artifact {
+                        kind: "audio".into(),
+                        path: out.to_string(),
+                        output: None,
+                        bytes: v["bytes"].as_u64(),
+                    });
                 }
             }
         }
@@ -549,6 +623,10 @@ impl Driver {
         let kind = self.p.request.kind;
         let folder = self.p.folder.clone();
         self.eleven_credits = eleven::spent(&self.p.helper_context.log_path());
+        // Calls the hook refused never reach the host, so count them from its log.
+        self.denials += std::fs::read_to_string(self.p.logs.join("permissions.ndjson"))
+            .map(|t| t.lines().filter(|l| l.contains("\"decision\":\"deny\"")).count() as u32)
+            .unwrap_or(0);
 
         // What went wrong, if anything.
         let mut message: Option<String> = None;
@@ -565,7 +643,11 @@ impl Driver {
             failed = true;
             let (code, stderr) = exit.clone().unwrap_or((-1, String::new()));
             let err = stderr.trim();
-            message = Some(friendly_error(&if err.is_empty() { format!("Claude Code exited unexpectedly (status {code}) before finishing.") } else { err.to_string() }));
+            message = Some(friendly_error(&if err.is_empty() {
+                format!("Claude Code exited unexpectedly (status {code}) before finishing.")
+            } else {
+                err.to_string()
+            }));
         }
 
         let readiness = if kind == RunKind::DryRun { ReadinessReport::load(&folder) } else { None };
@@ -577,15 +659,24 @@ impl Driver {
         if ok_so_far {
             match kind {
                 RunKind::Production => {
-                    let missing: Vec<&str> = outputs.iter().filter(|o| !o.exists || o.bytes == 0).map(|o| o.export.as_str()).collect();
+                    let missing: Vec<&str> =
+                        outputs.iter().filter(|o| !o.exists || o.bytes == 0).map(|o| o.export.as_str()).collect();
                     if !missing.is_empty() {
                         failed = true;
-                        message = Some(format!("Claude finished without producing {}: {}. See summary.md and the cutline logs for why.", if missing.len() == 1 { "this output" } else { "these outputs" }, missing.join(", ")));
+                        message = Some(format!(
+                            "Claude finished without producing {}: {}. See summary.md and the cutline logs for why.",
+                            if missing.len() == 1 { "this output" } else { "these outputs" },
+                            missing.join(", ")
+                        ));
                     }
                     for o in outputs.iter().filter(|o| o.exists) {
                         match o.qa_verdict.as_str() {
-                            "fail" => self.warnings.push(format!("{}: QA failed with {} error(s).", o.output_name, o.qa_errors)),
-                            "warnings" => self.warnings.push(format!("{}: QA passed with {} warning(s).", o.output_name, o.qa_warnings)),
+                            "fail" => self
+                                .warnings
+                                .push(format!("{}: QA failed with {} error(s).", o.output_name, o.qa_errors)),
+                            "warnings" => self
+                                .warnings
+                                .push(format!("{}: QA passed with {} warning(s).", o.output_name, o.qa_warnings)),
                             "none" => self.warnings.push(format!("{}: there is no QA report.", o.output_name)),
                             _ => {}
                         }
@@ -603,11 +694,16 @@ impl Driver {
                         message = Some("The dry run didn't write a readiness report (readiness.json).".into());
                     } else {
                         if let Some(code) = self.last_validate_code.filter(|c| *c != 0) {
-                            self.warnings.push(format!("`cutline validate` was still failing at the end of the dry run (exit {code})."));
+                            self.warnings.push(format!(
+                                "`cutline validate` was still failing at the end of the dry run (exit {code})."
+                            ));
                         }
                         if let Some(r) = &readiness {
                             if !r.is_clean() || !r.ready {
-                                self.warnings.push(format!("The dry run found {} point(s) to look at before a production run.", r.ambiguities.len() + r.missing_media.len() + r.risks.len()));
+                                self.warnings.push(format!(
+                                    "The dry run found {} point(s) to look at before a production run.",
+                                    r.ambiguities.len() + r.missing_media.len() + r.risks.len()
+                                ));
                             }
                         }
                     }
@@ -626,23 +722,44 @@ impl Driver {
 
         // Artifacts
         for o in outputs.iter().filter(|o| o.exists) {
-            self.emit(EventKind::Artifact { kind: "output".into(), path: o.path.clone(), output: Some(o.output_name.clone()), bytes: Some(o.bytes) });
+            self.emit(EventKind::Artifact {
+                kind: "output".into(),
+                path: o.path.clone(),
+                output: Some(o.output_name.clone()),
+                bytes: Some(o.bytes),
+            });
             for (k, p) in [("qa", &o.qa_report), ("captions", &o.captions_srt)] {
                 if let Some(p) = p {
-                    self.emit(EventKind::Artifact { kind: k.into(), path: p.clone(), output: Some(o.output_name.clone()), bytes: None });
+                    self.emit(EventKind::Artifact {
+                        kind: k.into(),
+                        path: p.clone(),
+                        output: Some(o.output_name.clone()),
+                        bytes: None,
+                    });
                 }
             }
         }
-        for (name, kind_name) in [("project.json5", "project"), ("summary.md", "summary"), ("readiness.json", "summary")] {
+        for (name, kind_name) in
+            [("project.json5", "project"), ("summary.md", "summary"), ("readiness.json", "summary")]
+        {
             let p = folder.join(name);
             if p.is_file() {
-                self.emit(EventKind::Artifact { kind: kind_name.into(), path: p.to_string(), output: None, bytes: None });
+                self.emit(EventKind::Artifact {
+                    kind: kind_name.into(),
+                    path: p.to_string(),
+                    output: None,
+                    bytes: None,
+                });
             }
         }
         if !self.warnings.is_empty() && status == RunStatus::SucceededWithWarnings {
             for w in self.warnings.clone() {
                 // warnings raised during the run were already emitted
-                if w.contains("QA") || w.contains("summary.md") || w.contains("dry run") || w.contains("cutline validate") {
+                if w.contains("QA")
+                    || w.contains("summary.md")
+                    || w.contains("dry run")
+                    || w.contains("cutline validate")
+                {
                     self.emit(EventKind::Warning { message: w });
                 }
             }
@@ -659,22 +776,51 @@ impl Driver {
             summary.push_str("\n\n---\n\n");
         }
         summary.push_str(&format!("## Run status (written by {})\n\n", crate::APP_NAME));
-        summary.push_str(&format!("- Status: **{}**\n- Kind: {}\n- Run config: {}\n- Model: {}\n- Duration: {}\n", status.label(), if kind == RunKind::DryRun { "dry run" } else { "production" }, self.p.run_config.name, self.model_used.clone().or(self.p.record.model.clone()).unwrap_or_default(), crate::media::format_duration(seconds)));
+        summary.push_str(&format!(
+            "- Status: **{}**\n- Kind: {}\n- Run config: {}\n- Model: {}\n- Duration: {}\n",
+            status.label(),
+            if kind == RunKind::DryRun { "dry run" } else { "production" },
+            self.p.run_config.name,
+            self.model_used.clone().or(self.p.record.model.clone()).unwrap_or_default(),
+            crate::media::format_duration(seconds)
+        ));
         if let Some(c) = cost {
-            summary.push_str(&format!("- Claude cost: ${c:.2}{}\n", if self.final_usage.as_ref().and_then(|u| u.cost_usd).is_some() { "" } else { " (estimated from token counts)" }));
+            summary.push_str(&format!(
+                "- Claude cost: ${c:.2}{}\n",
+                if self.final_usage.as_ref().and_then(|u| u.cost_usd).is_some() {
+                    ""
+                } else {
+                    " (estimated from token counts)"
+                }
+            ));
         }
-        summary.push_str(&format!("- ElevenLabs credits: {} of {}\n", self.eleven_credits, self.p.run_config.eleven_credit_cap));
+        summary.push_str(&format!(
+            "- ElevenLabs credits: {} of {}\n",
+            self.eleven_credits, self.p.run_config.eleven_credit_cap
+        ));
         if let Some(m) = &message {
             summary.push_str(&format!("- Note: {m}\n"));
         }
         if self.denials > 0 {
-            summary.push_str(&format!("- Blocked tool calls: {} (see logs/permissions.ndjson and logs/claude.jsonl)\n", self.denials));
+            summary.push_str(&format!(
+                "- Blocked tool calls: {} (see logs/permissions.ndjson and logs/claude.jsonl)\n",
+                self.denials
+            ));
         }
         if !outputs.is_empty() {
             summary.push_str("\n| Output | File | Size | QA |\n|---|---|---|---|\n");
             for o in &outputs {
-                let file = Utf8Path::new(&o.path).strip_prefix(&folder).map(|p| p.to_string()).unwrap_or_else(|_| o.path.clone());
-                let state = if !o.exists { "missing".to_string() } else if o.incomplete { "incomplete".to_string() } else { paths::format_bytes(o.bytes) };
+                let file = Utf8Path::new(&o.path)
+                    .strip_prefix(&folder)
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|_| o.path.clone());
+                let state = if !o.exists {
+                    "missing".to_string()
+                } else if o.incomplete {
+                    "incomplete".to_string()
+                } else {
+                    paths::format_bytes(o.bytes)
+                };
                 summary.push_str(&format!("| {} | {file} | {state} | {} |\n", o.output_name, o.qa_verdict));
             }
         }
@@ -720,8 +866,25 @@ impl Driver {
 
         let code = exit_code::for_status(status);
         self.emit(EventKind::StageStarted { stage: "done".into(), label: "Done".into() });
-        self.emit(EventKind::RunFinished { status, exit_code: code, cost_usd: cost, eleven_credits: self.eleven_credits, seconds, message: message.clone() });
-        RunOutcome { run_id: self.p.run_id.clone(), folder: folder.to_string(), status, exit_code: code, record, outputs, readiness, warnings: self.warnings.clone(), message }
+        self.emit(EventKind::RunFinished {
+            status,
+            exit_code: code,
+            cost_usd: cost,
+            eleven_credits: self.eleven_credits,
+            seconds,
+            message: message.clone(),
+        });
+        RunOutcome {
+            run_id: self.p.run_id.clone(),
+            folder: folder.to_string(),
+            status,
+            exit_code: code,
+            record,
+            outputs,
+            readiness,
+            warnings: self.warnings.clone(),
+            message,
+        }
     }
 }
 
@@ -732,9 +895,15 @@ mod tests {
     #[test]
     fn tool_summaries() {
         let root = Utf8Path::new("/runs/r1");
-        assert_eq!(tool_summary("Write", &json!({"file_path": "/runs/r1/project.json5"}), root), "Wrote `project.json5`");
+        assert_eq!(
+            tool_summary("Write", &json!({"file_path": "/runs/r1/project.json5"}), root),
+            "Wrote `project.json5`"
+        );
         assert_eq!(tool_summary("Read", &json!({"file_path": "/footage/hero.mov"}), root), "Read `/footage/hero.mov`");
-        assert_eq!(tool_summary("Bash", &json!({"command": "cutline validate project.json5"}), root), "Ran `cutline validate project.json5`");
+        assert_eq!(
+            tool_summary("Bash", &json!({"command": "cutline validate project.json5"}), root),
+            "Ran `cutline validate project.json5`"
+        );
         assert_eq!(tool_summary("Grep", &json!({"pattern": "cue:"}), root), "Searched for `cue:`");
         assert_eq!(truncate("abcdef", 3), "abc…");
     }

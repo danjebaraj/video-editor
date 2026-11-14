@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::readiness::ReadinessReport;
-use crate::presets::ResolvedOutput;
 use crate::paths;
+use crate::presets::ResolvedOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QaFinding {
@@ -76,7 +76,11 @@ pub fn read_qa(path: &Utf8Path) -> Option<(String, u64, u64, Vec<QaFinding>)> {
         .map(|a| {
             a.iter()
                 .filter(|f| f["ok"].as_bool() == Some(false))
-                .map(|f| QaFinding { check: f["check"].as_str().unwrap_or("").to_string(), severity: f["severity"].as_str().unwrap_or("").to_lowercase(), message: f["message"].as_str().unwrap_or("").to_string() })
+                .map(|f| QaFinding {
+                    check: f["check"].as_str().unwrap_or("").to_string(),
+                    severity: f["severity"].as_str().unwrap_or("").to_lowercase(),
+                    message: f["message"].as_str().unwrap_or("").to_string(),
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -102,7 +106,11 @@ pub fn collect_outputs(folder: &Utf8Path, outputs: &[ResolvedOutput], finished_o
             let qa_path = sibling(&path, ".qa.json");
             let qa = qa_path.as_deref().and_then(|p| read_qa(Utf8Path::new(p)));
             let render_report = sibling(&path, ".render_report.json");
-            let duration = render_report.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| find_duration(&v));
+            let duration = render_report
+                .as_deref()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .and_then(|v| find_duration(&v));
             let (verdict, qa_errors, qa_warnings, findings) = qa.unwrap_or(("none".into(), 0, 0, Vec::new()));
             files.push(OutputFile {
                 output_id: o.id.clone(),
@@ -212,11 +220,29 @@ pub fn list_logs(folder: &Utf8Path) -> Vec<LogFile> {
         .filter_map(|e| {
             let p = paths::utf8(e.path().to_path_buf()).ok()?;
             let name = p.strip_prefix(&logs).ok()?.as_str().replace('\\', "/");
-            Some(LogFile { source: log_source(&name).to_string(), bytes: e.metadata().map(|m| m.len()).unwrap_or(0), path: p.to_string(), name })
+            Some(LogFile {
+                source: log_source(&name).to_string(),
+                bytes: e.metadata().map(|m| m.len()).unwrap_or(0),
+                path: p.to_string(),
+                name,
+            })
         })
         .collect();
     // The order of the spec's table first, then the per-invocation logs.
-    let rank = |n: &str| ["run.json", "summary.md", "events.ndjson", "claude.jsonl", "eleven.ndjson", "validation.json", "permissions.ndjson"].iter().position(|x| *x == n).unwrap_or(99);
+    let rank = |n: &str| {
+        [
+            "run.json",
+            "summary.md",
+            "events.ndjson",
+            "claude.jsonl",
+            "eleven.ndjson",
+            "validation.json",
+            "permissions.ndjson",
+        ]
+        .iter()
+        .position(|x| *x == n)
+        .unwrap_or(99)
+    };
     out.sort_by(|a, b| rank(&a.name).cmp(&rank(&b.name)).then(a.name.cmp(&b.name)));
     out
 }
@@ -232,7 +258,9 @@ pub fn load_results(folder: &Utf8Path) -> RunResults {
         folder: folder.to_string(),
         exists: folder.is_dir(),
         outputs: collect_outputs(folder, &outputs, finished_ok),
-        summary: std::fs::read_to_string(folder.join("logs/summary.md")).or_else(|_| std::fs::read_to_string(folder.join("summary.md"))).ok(),
+        summary: std::fs::read_to_string(folder.join("logs/summary.md"))
+            .or_else(|_| std::fs::read_to_string(folder.join("summary.md")))
+            .ok(),
         readiness: ReadinessReport::load(folder),
         project_json5: project.is_file().then(|| project.to_string()),
         logs: list_logs(folder),
@@ -252,7 +280,9 @@ pub fn extra_artifacts(folder: &Utf8Path) -> Vec<(String, Utf8PathBuf)> {
             if let Ok(p) = paths::utf8(e.path().to_path_buf()) {
                 let keep = match kind {
                     "audio" => matches!(p.extension(), Some("mp3" | "wav" | "m4a" | "json")),
-                    _ => matches!(p.file_name(), Some(n) if n.starts_with("contact") || n.starts_with("summary") || n.ends_with("qa.json")),
+                    _ => {
+                        matches!(p.file_name(), Some(n) if n.starts_with("contact") || n.starts_with("summary") || n.ends_with("qa.json"))
+                    }
                 };
                 if keep {
                     out.push((kind.to_string(), p));
@@ -276,8 +306,28 @@ mod tests {
         let folder = Utf8Path::from_path(d.path()).unwrap();
         let p = Platforms::bundled();
         let mut taken = HashSet::new();
-        let yt = resolve_output(&OutputConfig { id: "o1".into(), preset: "youtube_1080p".into(), name: None, overrides: Default::default() }, &p, &mut taken).unwrap();
-        let lp = resolve_output(&OutputConfig { id: "o2".into(), preset: "website_hero_loop".into(), name: None, overrides: Default::default() }, &p, &mut taken).unwrap();
+        let yt = resolve_output(
+            &OutputConfig {
+                id: "o1".into(),
+                preset: "youtube_1080p".into(),
+                name: None,
+                overrides: Default::default(),
+            },
+            &p,
+            &mut taken,
+        )
+        .unwrap();
+        let lp = resolve_output(
+            &OutputConfig {
+                id: "o2".into(),
+                preset: "website_hero_loop".into(),
+                name: None,
+                overrides: Default::default(),
+            },
+            &p,
+            &mut taken,
+        )
+        .unwrap();
         let dir = folder.join("outputs/youtube-1080p");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("youtube-1080p.mp4"), b"mp4-bytes").unwrap();
@@ -290,7 +340,12 @@ mod tests {
         let a = &files[0];
         assert!(a.exists && !a.incomplete && a.bytes == 9);
         assert_eq!((a.qa_verdict.as_str(), a.qa_warnings, a.qa_findings.len()), ("warnings", 1, 1));
-        assert_eq!(a.qa_findings[0], QaFinding { check: "loudness".into(), severity: "warn".into(), message: "−17.2 LUFS, target −14".into() });
+        assert_eq!(
+            a.qa_findings[0],
+            QaFinding {
+                check: "loudness".into(), severity: "warn".into(), message: "−17.2 LUFS, target −14".into()
+            }
+        );
         assert!(a.captions_srt.is_some() && a.poster.is_some() && a.captions_vtt.is_none());
         assert_eq!(a.duration_s, Some(44.5));
         assert!(!files[1].exists && files[1].qa_verdict == "none");
@@ -299,7 +354,11 @@ mod tests {
         let cancelled = collect_outputs(folder, &[yt], false);
         assert!(cancelled[0].exists && cancelled[0].incomplete);
         // failing QA
-        std::fs::write(dir.join("youtube-1080p.qa.json"), r#"{"ok": false, "errors": 2, "warnings": 0, "findings": []}"#).unwrap();
+        std::fs::write(
+            dir.join("youtube-1080p.qa.json"),
+            r#"{"ok": false, "errors": 2, "warnings": 0, "findings": []}"#,
+        )
+        .unwrap();
         assert_eq!(collect_outputs(folder, &[lp], true)[0].qa_verdict, "none");
         assert_eq!(read_qa(&dir.join("youtube-1080p.qa.json")).unwrap().0, "fail");
         copy_qa_to_logs(folder, &files);
@@ -310,14 +369,37 @@ mod tests {
     fn lists_logs_in_a_stable_order() {
         let d = tempfile::tempdir().unwrap();
         let folder = Utf8Path::from_path(d.path()).unwrap();
-        for f in ["logs/cutline/002-render.log", "logs/cutline/001-validate.log", "logs/claude.jsonl", "logs/run.json", "logs/events.ndjson", "logs/qa/a.qa.json", "logs/.eleven.lock", "logs/eleven.ndjson"] {
+        for f in [
+            "logs/cutline/002-render.log",
+            "logs/cutline/001-validate.log",
+            "logs/claude.jsonl",
+            "logs/run.json",
+            "logs/events.ndjson",
+            "logs/qa/a.qa.json",
+            "logs/.eleven.lock",
+            "logs/eleven.ndjson",
+        ] {
             let p = folder.join(f);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, b"{}").unwrap();
         }
         let logs = list_logs(folder);
-        assert_eq!(logs.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), vec!["run.json", "events.ndjson", "claude.jsonl", "eleven.ndjson", "cutline/001-validate.log", "cutline/002-render.log", "qa/a.qa.json"]);
-        assert_eq!(logs.iter().map(|l| l.source.as_str()).collect::<Vec<_>>(), vec!["app", "app", "claude", "eleven", "cutline", "cutline", "qa"]);
+        assert_eq!(
+            logs.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(),
+            vec![
+                "run.json",
+                "events.ndjson",
+                "claude.jsonl",
+                "eleven.ndjson",
+                "cutline/001-validate.log",
+                "cutline/002-render.log",
+                "qa/a.qa.json"
+            ]
+        );
+        assert_eq!(
+            logs.iter().map(|l| l.source.as_str()).collect::<Vec<_>>(),
+            vec!["app", "app", "claude", "eleven", "cutline", "cutline", "qa"]
+        );
         let r = load_results(folder);
         assert!(r.exists && r.outputs.is_empty() && r.summary.is_none());
     }

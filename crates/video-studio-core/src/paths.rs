@@ -26,7 +26,11 @@ pub fn expand_tilde(p: &str) -> Utf8PathBuf {
 pub fn collapse_tilde(p: &Utf8Path) -> String {
     if let Some(h) = home_dir() {
         if let Ok(rest) = p.strip_prefix(&h) {
-            return if rest.as_str().is_empty() { "~".into() } else { format!("~/{}", rest.as_str().replace('\\', "/")) };
+            return if rest.as_str().is_empty() {
+                "~".into()
+            } else {
+                format!("~/{}", rest.as_str().replace('\\', "/"))
+            };
         }
     }
     p.to_string()
@@ -146,10 +150,7 @@ pub fn relative_to(target: &Utf8Path, from: &Utf8Path) -> Option<String> {
         }
     }
     let common = tc.iter().zip(fc.iter()).take_while(|(a, b)| a == b).count();
-    let mut parts: Vec<&str> = Vec::new();
-    for _ in common..fc.len() {
-        parts.push("..");
-    }
+    let mut parts: Vec<&str> = vec![".."; fc.len() - common];
     for c in &tc[common..] {
         parts.push(c.as_str());
     }
@@ -186,7 +187,8 @@ pub fn write_json_atomic<T: serde::Serialize>(path: &Utf8Path, v: &T) -> Result<
 }
 
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Utf8Path) -> Result<T> {
-    let text = std::fs::read_to_string(path).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{path}: {e}"))))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{path}: {e}"))))?;
     serde_json::from_str(&text).map_err(|e| Error::InvalidProject(format!("{path}: {e}")))
 }
 
