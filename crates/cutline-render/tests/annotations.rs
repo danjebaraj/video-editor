@@ -158,7 +158,14 @@ fn timeline(layers: &str) -> Timeline {
 
 fn draw(tl: &Timeline, fr: i64) -> Canvas {
     let font = cutline_text::FontDb::bundled().ok().and_then(|db| db.get("Inter", false).map(|f| f.font.clone()));
-    let st = Style { accent: [255, 196, 0], safe: (32.0, 18.0, 576.0, 313.0), k: 1.0, font };
+    let st = Style {
+        accent: [255, 196, 0],
+        safe: (32.0, 18.0, 576.0, 313.0),
+        k: 1.0,
+        font,
+        cards: None,
+        look_key: String::new(),
+    };
     let layers: Vec<_> = tl.layers.iter().collect();
     let mut cv = Canvas::new(640, 360);
     annot::draw_frame(&mut cv, tl, &layers, &st, fr);

@@ -18,6 +18,7 @@ cutline-reframe = { version = "0.1.0", path = "../cutline-reframe" }
 cutline-text = { version = "0.1.0", path = "../cutline-text" }
 cutline-transcribe = { version = "0.1.0", path = "../cutline-transcribe" }
 image = "0.25.6"
+qrcode = { version = "0.14.1", default-features = false }
 rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

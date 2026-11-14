@@ -34,6 +34,10 @@ pub struct Style {
     /// Pixel sizes are given for the full output; `k` scales them to the render geometry.
     pub k: f64,
     pub font: Option<FontArc>,
+    /// Fonts, colors and images for the business card templates.
+    pub cards: Option<crate::cards::CardCtx>,
+    /// Anything else that changes the pixels (brand, image fingerprints): part of the cache key.
+    pub look_key: String,
 }
 
 // ------------------------------------------------------------------ canvas
@@ -328,6 +332,7 @@ pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], st: &Style
         for p in cv.px.chunks_exact_mut(4) {
             p.copy_from_slice(&[0, 0, 0, a8]);
         }
+        // (cards are drawn after this, so a card and a spotlight can share a frame)
         let max_env = holes.iter().map(|h| h.3).fold(0.0, f64::max).max(1e-6);
         for (r, _, feather, _) in &holes {
             let (x0, y0) = ((r.0 - feather).floor().max(0.0) as i64, (r.1 - feather).floor().max(0.0) as i64);
@@ -346,6 +351,37 @@ pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], st: &Style
                     cv.px[i + 3] = (dim * (1.0 - light) * 255.0).round() as u8;
                 }
             }
+        }
+    }
+
+    // cards (text layers with their own background) go under the other annotations
+    for lay in &active {
+        if let (Layer::Text { template, text, subtitle, params, look, .. }, Some(cards)) = (&lay.layer, &st.cards) {
+            let (t, len) = times(lay);
+            let empty = serde_json::Map::new();
+            let params = params.as_ref().unwrap_or(&empty);
+            let start = tl.secs(lay.start);
+            // reveal times are written on the edit; the card wants seconds since it started
+            let reveal = params
+                .get("reveal")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_f64()).map(|x| tl.from_edit(x) - start).collect())
+                .unwrap_or_default();
+            crate::cards::draw(
+                cv,
+                cards,
+                &crate::cards::CardInput {
+                    template,
+                    text: text.as_deref(),
+                    subtitle: subtitle.as_deref(),
+                    params,
+                    position: look.position.as_ref(),
+                    t,
+                    len,
+                    reveal,
+                    safe: st.safe,
+                },
+            );
         }
     }
 
@@ -552,7 +588,7 @@ pub fn position_center(
 
 /// Runs of frames with at least one annotation on screen: `(start, end, layers)`.
 pub fn runs(tl: &Timeline) -> Vec<(i64, i64, Vec<&TLayer>)> {
-    let mut ls: Vec<&TLayer> = tl.layers.iter().filter(|l| l.layer.is_annotation()).collect();
+    let mut ls: Vec<&TLayer> = tl.layers.iter().filter(|l| l.layer.is_annotation() || l.layer.is_card()).collect();
     ls.sort_by_key(|l| (l.start, l.index));
     let mut out: Vec<(i64, i64, Vec<&TLayer>)> = vec![];
     for l in ls {
@@ -587,6 +623,7 @@ pub fn render(
             serde_json::to_string(&layers).unwrap_or_default().as_bytes(),
             serde_json::to_string(&clips).unwrap_or_default().as_bytes(),
             format!("{}x{}@{} {a}-{b} {:?} {:?} {}", g.width, g.height, g.fps, st.accent, st.safe, st.k).as_bytes(),
+            st.look_key.as_bytes(),
             cutline_core::VERSION.as_bytes(),
             b"annot-v1",
         ]);

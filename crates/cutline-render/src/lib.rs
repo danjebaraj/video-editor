@@ -5,6 +5,7 @@ pub mod assemble;
 pub mod audio_plan;
 pub mod auto;
 pub mod beatrefs;
+pub mod cards;
 pub mod cues;
 pub mod custom_transitions;
 pub mod effects;

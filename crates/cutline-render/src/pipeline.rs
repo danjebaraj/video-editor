@@ -131,6 +131,7 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
             None => {
                 let before: Vec<(String, String)> =
                     project.assets.iter().map(|(k, a)| (k.clone(), a.path.clone())).collect();
+                color_assets(&mut project, &dir).map_err(LoadError::Io)?;
                 let errs = crate::terminal::record_tapes(
                     &mut project,
                     &dir,
@@ -173,6 +174,31 @@ pub fn load(path: &Path) -> Result<Loaded, LoadError> {
         "the voice layer is anchored to a clip whose position depends on cues from this voice layer, so it never settles",
     )
     .hint("anchor the voice layer to an earlier clip (one not fitted to its cues), or give it a numeric `start`")]))
+}
+
+/// Plain-color assets: `path: "color:#101014"` or `"color:brand"` (the brand background)
+/// become a small still of that color, e.g. as the clip under a `title_card`.
+pub fn color_assets(p: &mut Project, dir: &Path) -> Result<()> {
+    let brand_spec = p.brand.clone();
+    for a in p.assets.values_mut() {
+        let Some(c) = a.path.strip_prefix("color:") else { continue };
+        let hex = if c.trim() == "brand" {
+            cutline_core::brand::Brand::load(brand_spec.as_deref(), dir, &cutline_deps::paths::assets_dir())
+                .map(|b| b.colors.background)
+                .unwrap_or_else(|_| "#101014".into())
+        } else {
+            c.trim().to_string()
+        };
+        let rgb = crate::overlay::rgb_of(&hex);
+        let out = crate::cutline_dir(dir).join("cache").join("color");
+        std::fs::create_dir_all(&out)?;
+        let file = out.join(format!("{:02x}{:02x}{:02x}.png", rgb[0], rgb[1], rgb[2]));
+        if !file.exists() {
+            image::RgbImage::from_pixel(64, 64, image::Rgb(rgb)).save(&file).context("writing color asset")?;
+        }
+        a.path = file.to_string_lossy().to_string();
+    }
+    Ok(())
 }
 
 /// Add the brand's `intro` and `outro` around `main` as explicit clips (`generated_by:

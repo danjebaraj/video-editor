@@ -62,7 +62,7 @@ Errors: `E_BEAT_REF`.
 
 | Field | Default | Notes |
 |---|---|---|
-| `path` | required | image sequences use a printf pattern: `frames/%05d.png`. A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video. Editing the tape re-records it; `cutline record project.json5 [--asset id]` records again on demand (fresh clocks, process lists) |
+| `path` | required | `"color:#RRGGBB"` or `"color:brand"`: a plain still of that color. Image sequences use a printf pattern: `frames/%05d.png`. A VHS `.tape` script is recorded with `vhs` when the project loads (cached by the tape's content; `Output` lines are replaced; relative paths in the tape resolve next to it) and used as a video. Editing the tape re-records it; `cutline record project.json5 [--asset id]` records again on demand (fresh clocks, process lists) |
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |
@@ -226,10 +226,44 @@ picture zooms. With `anchor` the clip is the anchor clip; otherwise the clip on 
 `E_RECT_OUT_OF_FRAME`. `cutline review` writes `annotations/*.jpg`, a frame of each.
 
 Text templates: `hook_title`, `lower_third`, `callout`, `step_counter`, `big_number`, `quote`,
-`cta_subscribe`, `end_card`, `emoji_pop`, and HTML variants `hook_title_html`,
+`cta_subscribe`, `end_card`, `emoji_pop`, the [business cards](#business-cards) below, and HTML variants `hook_title_html`,
 `lower_third_html`, `end_card_html`. Common params: `color`, `accent`, `font`, `size`,
 `emphasis` [words], `uppercase`; plus `step`/`total`, `number`/`prefix`/`suffix`/`decimals`,
 `arrow`, `emoji`, `placeholders`.
+
+### Business cards
+
+Text templates with their own background, images and motion, for company videos and demos.
+They are drawn above other layers and annotations, under captions. Put a plain clip under a
+full-frame card: an asset with `path: "color:brand"` (the brand background) or
+`"color:#101014"` is a still of that color.
+
+```json5
+assets: {plain: {path: "color:brand"}, acme: {path: "logos/acme.png"}},
+main: [{id: "title", clip: "plain", duration: 3}, …],
+layers: [
+  {type: "text", template: "title_card", text: "Glance", subtitle: "Every metric on one screen", anchor: "title"},
+  {type: "text", template: "feature_list", text: "New in 4.2", start: "cue:new", end: "cue:next",
+   params: {items: ["Shared dashboards", "One-click export"], reveal: ["cue:dash", "cue:export"]}},
+]
+```
+
+| Template | `text` / `subtitle` | `params` |
+|---|---|---|
+| `title_card` | product name / one-line promise | `logo: false` hides the brand logo |
+| `section_card` | section title / detail | `number` (shown as `02`). Each section card starts a chapter in `cutline chapters` |
+| `feature_list` | heading | `items` (1–5 strings), `reveal` (one time per item: seconds on the edit or `"cue:…"`; default every 0.5 s) |
+| `stat` | — / label | `number` (counts up), `prefix`, `suffix`, `decimals`, `source` (small line); takes `position` |
+| `testimonial` | the quote | `name`, `title`, `company`, `photo` and `logo` (image asset ids; the photo is cropped to a circle) |
+| `compare` | heading | `left: {title, items}`, `right: {title, items}` (1–6 items each; the right column is highlighted, with ticks) |
+| `logo_wall` | heading | `logos` (1–12 image asset ids), `monochrome` (white silhouettes for logos with transparency) |
+| `cta_link` | headline / detail | `url` (shown in a pill), `qr: false` hides the QR code of the URL (`https://` is added when the URL has no scheme) |
+
+All take `background`: `"brand"` (default; a soft gradient of the brand background), `"scrim"`
+(dark, translucent, over footage; the default for `feature_list` and `stat`), `"none"` or a
+`"#color"`; and `color` / `accent` to override the brand text and accent colors. Titles use the
+brand `title` font (bold when the font has a weight axis, as Inter does), the rest the `body` font.
+Text is wrapped and shrunk to stay inside the safe zone on every target.
 
 ## Captions
 

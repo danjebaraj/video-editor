@@ -123,6 +123,63 @@ pub fn list() -> Vec<TemplateInfo> {
             description: "Noto emoji with a scale pop",
             params: &["text|emoji (name)", "size (fraction of width)", "position"],
         },
+        TemplateInfo {
+            name: "title_card",
+            description: "Business title: brand logo, product name, one-line promise (full-frame card)",
+            params: &["text (name)", "subtitle (promise)", "logo (false hides it)", "background", "color", "accent"],
+        },
+        TemplateInfo {
+            name: "section_card",
+            description: "Chapter divider with a number; also starts a chapter in `cutline chapters`",
+            params: &["text (title)", "subtitle", "number", "background"],
+        },
+        TemplateInfo {
+            name: "feature_list",
+            description: "Heading and up to 5 bullets that build one by one",
+            params: &["text (heading)", "items[]", "reveal[] (times or cues, one per item)", "background (scrim)"],
+        },
+        TemplateInfo {
+            name: "stat",
+            description: "Number counting up with a label and a source line",
+            params: &[
+                "number",
+                "prefix",
+                "suffix",
+                "decimals",
+                "subtitle (label)",
+                "source",
+                "position",
+                "background (scrim)",
+            ],
+        },
+        TemplateInfo {
+            name: "testimonial",
+            description: "Customer quote with name, title, company, photo and logo",
+            params: &[
+                "text (quote)",
+                "name",
+                "title",
+                "company",
+                "photo (image asset)",
+                "logo (image asset)",
+                "background",
+            ],
+        },
+        TemplateInfo {
+            name: "compare",
+            description: "Two columns: before/after or them/us (the right column is highlighted)",
+            params: &["text (heading)", "left {title, items[]}", "right {title, items[]}", "background"],
+        },
+        TemplateInfo {
+            name: "logo_wall",
+            description: "Customer logos in a grid",
+            params: &["text (heading)", "logos[] (image assets, up to 12)", "monochrome", "background"],
+        },
+        TemplateInfo {
+            name: "cta_link",
+            description: "Closing call to action: headline, URL pill and a QR code of the URL",
+            params: &["text (headline)", "subtitle", "url", "qr (false hides it)", "background"],
+        },
     ]
 }
 

@@ -71,6 +71,12 @@ Segments are cached: changing captions, text or music does not re-render clips.
   `brand_bumpers: false` or `watermark: false` opt a project out.
 - Times in the project count from the start of the edit, after the intro. Do not add the intro
   length to anything.
+- Structure with the business cards: `title_card` to open, `section_card` between parts (they
+  become the chapters), `feature_list` with `reveal` on cues while the narration lists
+  features, `stat` for one number that matters, `testimonial` / `logo_wall` for proof,
+  `compare` for before/after, and `cta_link` to close (headline, URL, QR code). Put full-frame
+  cards over a `path: "color:brand"` clip; `feature_list` and `stat` default to a scrim so
+  they can sit over the product.
 - Tone: no punch-in cadence, no emoji, no `bold_pop`. Plain cuts between screens, one fade from
   the title and into the end card. Keep captions on: most business video is watched muted.
 

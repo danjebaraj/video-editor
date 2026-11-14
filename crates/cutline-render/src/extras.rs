@@ -134,9 +134,13 @@ fn watermark(
 
 /// Rasterize annotation layers into cached alpha videos.
 fn annotations(l: &Loaded, tl: &Timeline, g: &crate::Geometry, brand: &Brand, extras: &mut PlanExtras) -> Result<()> {
-    if !tl.layers.iter().any(|x| x.layer.is_annotation()) {
+    if !tl.layers.iter().any(|x| x.layer.is_annotation() || x.layer.is_card()) {
         return Ok(());
     }
+    let cards = tl.layers.iter().any(|x| x.layer.is_card()).then(|| {
+        let assets = l.media.assets.iter().map(|(id, m)| (id.clone(), m.path.clone())).collect();
+        crate::cards::CardCtx::new(brand, assets)
+    });
     let k = g.scale_to(tl.target.width);
     let (sx, sy, sw, sh) = tl.target.safe_rect();
     let font = cutline_text::FontDb::bundled().ok().and_then(|db| db.get("Inter", false).map(|f| f.font.clone()));
@@ -145,7 +149,35 @@ fn annotations(l: &Loaded, tl: &Timeline, g: &crate::Geometry, brand: &Brand, ex
         safe: (sx * k, sy * k, sw * k, sh * k),
         k,
         font,
+        cards: cards.flatten(),
+        // cards draw brand fonts, colors, the logo and image assets
+        look_key: format!(
+            "{} {} {:?}",
+            serde_json::to_string(brand).unwrap_or_default(),
+            brand.file(&brand.logo).and_then(|p| cutline_media::fingerprint(&p).ok()).unwrap_or_default(),
+            l.media
+                .assets
+                .values()
+                .filter(|m| m.facts.kind == cutline_core::model::AssetKind::Image)
+                .map(|m| m.fingerprint.as_str())
+                .collect::<Vec<_>>()
+        ),
     };
+    // QA: cards count as on-screen text from their start (hook check); the box is the safe zone
+    for x in tl.layers.iter().filter(|x| x.layer.is_card()) {
+        if let cutline_core::model::Layer::Text { text, .. } = &x.layer {
+            extras.text_boxes.push(crate::TextBox {
+                start: tl.secs(x.start),
+                end: tl.secs(x.end),
+                x: sx,
+                y: sy,
+                w: sw,
+                h: sh,
+                text: text.clone().unwrap_or_default(),
+                kind: "card".into(),
+            });
+        }
+    }
     let cache = crate::cutline_dir(&l.dir).join("cache").join("annot");
     extras.annot = crate::annot::render(cutline_deps::toolchain()?, tl, g, &st, &cache)?;
     Ok(())
@@ -163,6 +195,7 @@ pub fn text_layers(_p: &Project, tl: &Timeline, brand: &Brand, extras: &mut Plan
         .layers
         .iter()
         .filter(|l| matches!(&l.layer, Layer::Text { template, .. } if !template.ends_with("_html")))
+        .filter(|l| !l.layer.is_card())
         .collect();
     if texts.is_empty() {
         return Ok(());

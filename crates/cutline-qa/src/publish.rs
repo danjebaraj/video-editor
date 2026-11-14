@@ -31,7 +31,12 @@ fn prettify(id: &str) -> String {
     }
 }
 
-/// Chapters from markers, else clips with `chapter`, else every clip (merged to ≥ 10 s).
+fn is_section(l: &cutline_core::model::Layer) -> bool {
+    matches!(l, cutline_core::model::Layer::Text { template, .. } if template == "section_card")
+}
+
+/// Chapters from markers, else `section_card` layers, else clips with `chapter`, else every
+/// clip (merged to ≥ 10 s).
 pub fn chapters(pr: &Prepared) -> (Vec<Chapter>, Vec<Diagnostic>) {
     let tl = &pr.timeline;
     let fps: Fps = tl.fps;
@@ -45,6 +50,23 @@ pub fn chapters(pr: &Prepared) -> (Vec<Chapter>, Vec<Diagnostic>) {
                 Chapter { at: if t <= 0.0 { 0.0 } else { tl.from_edit(t) }, title: m.title.clone() }
             })
             .collect()
+    } else if tl.layers.iter().any(|l| is_section(&l.layer)) {
+        // section cards divide the video: each starts a chapter
+        let mut v: Vec<Chapter> = tl
+            .layers
+            .iter()
+            .filter_map(|l| match &l.layer {
+                cutline_core::model::Layer::Text { text, .. } if is_section(&l.layer) => {
+                    Some(Chapter { at: tl.secs(l.start), title: text.clone().unwrap_or_default() })
+                }
+                _ => None,
+            })
+            .collect();
+        v.sort_by(|a, b| a.at.partial_cmp(&b.at).unwrap());
+        if v.first().is_some_and(|c| c.at > 0.0) {
+            v.insert(0, Chapter { at: 0.0, title: "Intro".into() });
+        }
+        v
     } else if tl.clips.iter().any(|c| c.clip.chapter.is_some()) {
         tl.clips
             .iter()

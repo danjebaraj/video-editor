@@ -1122,6 +1122,10 @@ impl Layer {
             _ => None,
         }
     }
+    /// A text layer using a business card template (`title_card`, `feature_list`, …).
+    pub fn is_card(&self) -> bool {
+        matches!(self, Layer::Text { template, .. } if crate::catalog::CARD_TEMPLATES.contains(&template.as_str()))
+    }
     /// highlight / spotlight / arrow / keys / cursor: drawn together in the annotation pass.
     pub fn is_annotation(&self) -> bool {
         matches!(

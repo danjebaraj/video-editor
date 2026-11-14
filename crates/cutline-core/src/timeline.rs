@@ -755,6 +755,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             }
         }
         check_annotation(l, &base, &mut d);
+        check_card(l, p, &base, &mut d);
         if let Some(v) = l.visual() {
             if let Some(o) = v.opacity {
                 if !(0.0..=1.0).contains(&o) {
@@ -1049,6 +1050,109 @@ fn check_frame(
 pub fn rect_in_frame(r: &Rect) -> bool {
     let inside = |v: f64| (0.0..=1.0).contains(&v);
     inside(r.x) && inside(r.y) && r.w > 0.0 && r.h > 0.0 && r.x + r.w <= 1.0 + 1e-9 && r.y + r.h <= 1.0 + 1e-9
+}
+
+/// Parameters of the business card templates.
+fn check_card(l: &Layer, p: &Project, base: &str, d: &mut Vec<Diagnostic>) {
+    let Layer::Text { template, text, params, .. } = l else { return };
+    if !catalog::CARD_TEMPLATES.contains(&template.as_str()) {
+        return;
+    }
+    let empty = serde_json::Map::new();
+    let pm = params.as_ref().unwrap_or(&empty);
+    let list = |k: &str| -> Vec<&str> {
+        pm.get(k).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default()
+    };
+    let asset = |id: &str, field: String, d: &mut Vec<Diagnostic>| {
+        if !p.assets.contains_key(id) {
+            d.push(
+                Diagnostic::error("E_UNKNOWN_ASSET", format!("{base}/params/{field}"), format!("unknown asset `{id}`"))
+                    .hint("image params take the id of an image asset"),
+            );
+        }
+    };
+    let need_text = |d: &mut Vec<Diagnostic>| {
+        if text.as_deref().is_none_or(|t| t.trim().is_empty()) {
+            d.push(Diagnostic::error("E_MISSING_FIELD", format!("{base}/text"), format!("`{template}` needs `text`")));
+        }
+    };
+    match template.as_str() {
+        "title_card" | "section_card" | "testimonial" => need_text(d),
+        "feature_list" => {
+            let n = list("items").len();
+            if n == 0 || n > 5 {
+                d.push(
+                    Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/params/items"),
+                        "feature_list needs 1–5 `items` (strings)",
+                    )
+                    .hint("params: {items: [\"Shared dashboards\", \"One-click export\"]}"),
+                );
+            }
+            if let Some(r) = pm.get("reveal") {
+                let ok = r.as_array().is_some_and(|a| a.len() == n && a.iter().all(|x| x.is_number()));
+                if !ok {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/params/reveal"),
+                        "reveal needs one time per item (seconds or \"cue:name\")",
+                    ));
+                }
+            }
+        }
+        "stat" => {
+            if !pm.get("number").is_some_and(|v| v.is_number()) {
+                d.push(Diagnostic::error(
+                    "E_MISSING_FIELD",
+                    format!("{base}/params/number"),
+                    "stat needs a numeric `number`",
+                ));
+            }
+        }
+        "compare" => {
+            for side in ["left", "right"] {
+                let ok = pm.get(side).and_then(|v| v.as_object()).is_some_and(|o| {
+                    o.get("title").is_some_and(|t| t.is_string())
+                        && o.get("items").and_then(|i| i.as_array()).is_some_and(|a| !a.is_empty() && a.len() <= 6)
+                });
+                if !ok {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{base}/params/{side}"),
+                        format!("compare needs `{side}: {{title, items: [1–6 strings]}}`"),
+                    ));
+                }
+            }
+        }
+        "logo_wall" => {
+            let logos = list("logos");
+            if logos.is_empty() || logos.len() > 12 {
+                d.push(Diagnostic::error(
+                    "E_BAD_VALUE",
+                    format!("{base}/params/logos"),
+                    "logo_wall needs 1–12 `logos` (image asset ids)",
+                ));
+            }
+            for (i, id) in logos.iter().enumerate() {
+                asset(id, format!("logos/{i}"), d);
+            }
+        }
+        "cta_link" => {
+            need_text(d);
+            if pm.get("url").and_then(|v| v.as_str()).is_none_or(|u| u.trim().is_empty()) {
+                d.push(Diagnostic::error("E_MISSING_FIELD", format!("{base}/params/url"), "cta_link needs `url`"));
+            }
+        }
+        _ => {}
+    }
+    for k in ["photo", "logo"] {
+        if template == "testimonial" {
+            if let Some(id) = pm.get(k).and_then(|v| v.as_str()) {
+                asset(id, k.to_string(), d);
+            }
+        }
+    }
 }
 
 fn check_annotation(l: &Layer, base: &str, d: &mut Vec<Diagnostic>) {
