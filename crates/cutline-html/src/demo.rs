@@ -392,6 +392,12 @@ struct Recorder {
     pos: (f64, f64),
     ev: DemoEvents,
     settle: f64,
+    /// Factor from CSS px to the coordinates Chrome's input takes (see `calibrate`).
+    input_scale: f64,
+    /// Held while a screenshot is taken. With an emulated device pixel ratio, input sent
+    /// while Chrome is capturing lands at coordinates divided by the ratio; taking turns
+    /// with the capture avoids that.
+    gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Recorder {
@@ -416,11 +422,45 @@ impl Recorder {
     }
 
     async fn mouse(&self, kind: DispatchMouseEventType, pressed: bool) -> Result<()> {
-        let mut b = DispatchMouseEventParams::builder().r#type(kind.clone()).x(self.pos.0).y(self.pos.1);
+        let mut b = DispatchMouseEventParams::builder()
+            .r#type(kind.clone())
+            .x(self.pos.0 * self.input_scale)
+            .y(self.pos.1 * self.input_scale);
         if pressed {
             b = b.button(MouseButton::Left).buttons(1).click_count(1);
         }
+        let _turn = self.gate.lock().await;
         self.page.execute(b.build().map_err(|e| anyhow!(e))?).await?;
+        Ok(())
+    }
+
+    /// Find how Chrome maps dispatched mouse coordinates to the page. With an emulated device
+    /// pixel ratio some builds deliver them divided by it, so a click meant for (200, 110)
+    /// lands at (100, 55). One probe move tells; every later event is scaled to match.
+    async fn calibrate(&mut self) -> Result<()> {
+        self.page
+            .evaluate(
+                "window.__cutline_probe = null; addEventListener('mousemove', e => { window.__cutline_probe = e.clientX; }, {once: true, capture: true}); true",
+            )
+            .await?;
+        let probe = 120.0_f64.min(self.size.0 / 2.0);
+        let b = DispatchMouseEventParams::builder().r#type(DispatchMouseEventType::MouseMoved).x(probe).y(probe);
+        {
+            let _turn = self.gate.lock().await;
+            self.page.execute(b.build().map_err(|e| anyhow!(e))?).await?;
+        }
+        for _ in 0..20 {
+            let seen: Option<f64> = self.page.evaluate("window.__cutline_probe").await?.into_value().unwrap_or(None);
+            if let Some(x) = seen.filter(|x| *x > 0.5) {
+                let k = probe / x;
+                // only the known cases: exact, or off by the device pixel ratio
+                self.input_scale = if (k - 1.0).abs() < 0.05 { 1.0 } else { k.clamp(0.25, 4.0) };
+                tracing::debug!(probe, seen = x, scale = self.input_scale, "mouse input calibrated");
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        tracing::debug!("mouse input calibration saw no move; assuming CSS pixels");
         Ok(())
     }
 
@@ -726,6 +766,8 @@ async fn drive(browser: &Browser, script: &DemoScript, script_dir: &Path, work: 
         pos: (w as f64 / 2.0, h as f64 / 2.0),
         ev: DemoEvents { width: w, height: h, scale: script.viewport.scale, ..Default::default() },
         settle: script.settle.unwrap_or(0.6),
+        input_scale: 1.0,
+        gate: Arc::new(tokio::sync::Mutex::new(())),
     };
     // open the page before the recording starts: no blank frames at the head
     if let Some(u) = script.url.as_ref().filter(|_| !matches!(steps.peek(), Some((_, s)) if s.goto.is_some())) {
@@ -755,6 +797,7 @@ async fn drive(browser: &Browser, script: &DemoScript, script_dir: &Path, work: 
     rec.start = Instant::now();
     rec.key(0.0, false);
     let cap = {
+        let gate = rec.gate.clone();
         let (page, stop, frames, start, work) =
             (page.clone(), stop.clone(), frames.clone(), rec.start, work.to_path_buf());
         tokio::spawn(async move {
@@ -770,8 +813,11 @@ async fn drive(browser: &Browser, script: &DemoScript, script_dir: &Path, work: 
                     optimize_for_speed: Some(true),
                     ..Default::default()
                 };
+                let turn = gate.lock().await;
                 let asked = start.elapsed().as_secs_f64();
-                match tokio::time::timeout(Duration::from_secs(20), page.screenshot(shot)).await {
+                let got = tokio::time::timeout(Duration::from_secs(20), page.screenshot(shot)).await;
+                drop(turn);
+                match got {
                     Ok(Ok(bytes)) => {
                         // the picture shows the page somewhere between asking and getting it
                         let t = (asked + start.elapsed().as_secs_f64()) / 2.0;
@@ -800,8 +846,9 @@ async fn drive(browser: &Browser, script: &DemoScript, script_dir: &Path, work: 
             err
         })
     };
-    // a first frame before anything moves
+    // a first frame before anything moves; then see how input maps once capture is running
     tokio::time::sleep(Duration::from_millis(250)).await;
+    rec.calibrate().await?;
     let mut failure = None;
     for (i, st) in steps {
         if let Err(e) = rec.run_step(i, st, &base).await {
@@ -924,7 +971,7 @@ fn cache_key(script_path: &Path, text: &str, script: &DemoScript) -> String {
         }
     }
     parts.push(crate::chrome().map(|p| p.to_string_lossy().to_string()).unwrap_or_default().into_bytes());
-    parts.push(b"demo-v1".to_vec());
+    parts.push(b"demo-v5".to_vec());
     let refs: Vec<&[u8]> = parts.iter().map(|v| v.as_slice()).collect();
     cutline_media::hash_key(&refs)
 }

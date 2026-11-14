@@ -112,6 +112,31 @@ fn records_a_session_with_steps_cursor_and_rects() {
 }
 
 #[test]
+fn clicks_and_typing_land_at_device_scale_2() {
+    if !chrome_ok() {
+        return;
+    }
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let script = setup(
+        d.path(),
+        "{click: '#go', name: 'go'}, {type: {into: '#email', text: 'hi@x.io', delay: 20}}, {wait: 'text=hi@x.io', timeout: 2}",
+    );
+    let text = std::fs::read_to_string(&script).unwrap().replace("scale: 1", "scale: 2");
+    std::fs::write(&script, text).unwrap();
+    let rec = record_cached(tc, &script, &d.path().join("cache"), false, None).unwrap();
+    assert_eq!(dims(tc, &rec.video).unwrap(), (1600, 1000));
+    // the click reached the button: the panel (at twice the pixels) is green afterwards
+    let st = rec.events.step("go").unwrap();
+    let f = read_frames(tc, &rec.video, &[((st.t + 0.35) * 30.0).round() as u64]).unwrap();
+    let after = mean_rgb(&f[0], 900, 240, 400, 240);
+    assert!(after[1] > 150.0 && after[0] < 60.0, "green after the click at scale 2: {after:?}");
+    // rects stay in fractions of the CSS viewport
+    let r = st.rect.unwrap();
+    assert!((r[0] * 800.0 - 100.0).abs() <= 2.0 && (r[2] * 800.0 - 200.0).abs() <= 2.0, "{r:?}");
+}
+
+#[test]
 fn a_failing_step_names_itself() {
     if !chrome_ok() {
         return;
