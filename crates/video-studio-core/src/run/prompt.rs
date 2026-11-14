@@ -198,11 +198,11 @@ pub fn system_prompt(input: &PromptInput) -> String {
         "You are producing a video for Syncfusion Video Studio with cutline, a declarative command-line video editor. You work alone inside one run folder and the user is not watching: the app shows them your progress, your questions and the results.\n\n\
          Run folder (your working directory): {}\n\
          - spec.md — the video spec the user wrote. It is the source of truth for content.\n\
-         - media-manifest.json — every media file: ID, absolute path, kind, role, probe data, notes. In spec.md, `media:<id>` refers to these IDs.\n\
-         - brand.json — the brand preset (when one is selected).\n\
-         - outputs.json — the deliverables for this run and the matching cutline `target` and `exports`.\n\
+         - media-manifest.json — every media file: ID, absolute path, kind, role, probe data, notes. In spec.md, `media:<id>` refers to these IDs. `kind` and `role` there are the user's hints about each file, not cutline asset roles.\n\
+{}         - outputs.json — the deliverables for this run and the matching cutline `target` and `exports`.\n\
          - run.json — the resolved run settings.\n\n",
-        input.folder
+        input.folder,
+        if p.brand.is_some() { "         - brand.json — the brand preset.\n".trim_start() } else { "" }
     ));
     s.push_str("## What you must do\n");
     if dry {

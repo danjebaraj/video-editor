@@ -154,10 +154,13 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     let spec_path = spec_file(&dir);
     paths::write_atomic(&spec_path, request.spec.as_bytes())?;
     let read_paths: Vec<Utf8PathBuf> = request.read_paths.iter().filter(|p| p.exists()).cloned().collect();
+    // Claude Code keeps large tool results in its own folder for this working directory.
+    let mut policy_reads = read_paths.clone();
+    policy_reads.extend(crate::claude::locate::claude_project_dir(&dir));
     let policy = Policy {
         mode: Mode::Assistant,
         work_dir: dir.clone(),
-        read_paths: read_paths.clone(),
+        read_paths: policy_reads,
         write_files: Some(vec![spec_path.clone()]),
         cutline: None,
         helper: None,

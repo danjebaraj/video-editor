@@ -336,6 +336,11 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     if let Some(h) = &env.cutline_home {
         add_read(h.clone());
     }
+    // Claude Code saves large tool results (the cutline schema, long logs) in its own folder
+    // for this working directory and reads them back with the file tools.
+    if let Some(d) = locate::claude_project_dir(&folder) {
+        add_read(d);
+    }
 
     // The helper's context and the hook's policy live outside anything Claude can read.
     let context_dir = env.library.join("run-contexts").join(&run_id);

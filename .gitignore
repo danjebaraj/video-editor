@@ -7,3 +7,7 @@
 .DS_Store
 /bin/
 /bin.new/
+# Syncfusion Video Studio (macOS app): generated bindings, Xcode project and build output
+/apps/macos/Generated/
+/apps/macos/build/
+/apps/macos/VideoStudio.xcodeproj/

@@ -1,0 +1,113 @@
+html, body { margin: 0; padding: 0; }
+body { background: var(--bgColor-default, #fff); }
+.markdown-body {
+  box-sizing: border-box;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px 40px 80px;
+  font-size: 15px;
+}
+/* In the app the preview uses the whole width, with the same margins on both sides (exported HTML keeps 900px). */
+.app-preview .markdown-body { max-width: none; margin: 0; }
+.markdown-body pre.mermaid { background: transparent; text-align: center; }
+.markdown-body pre.mermaid svg { max-width: 100%; height: auto; }
+.markdown-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
+.markdown-body .math-error { color: #cf222e; font-family: var(--fontStack-monospace); }
+.markdown-body a.wikilink { text-decoration: none; border-bottom: 1px dashed currentColor; }
+.markdown-body a.wikilink.unresolved { color: #cf222e; border-bottom-style: dotted; opacity: 0.85; }
+/* Large screenshots shrink to fit without distortion; the translucent border keeps white-on-white images visible. */
+.markdown-body img { cursor: zoom-in; max-width: 100%; max-height: 420px; object-fit: contain; display: block; margin: 8px 0; border: 1px solid #8886; }
+.markdown-body .image-frame { position: relative; display: block; width: fit-content; max-width: 100%; }
+/* top: the image's 8px margin plus a 6px inset, so the button sits inside the picture's corner. */
+.markdown-body .copy-image {
+  position: absolute; top: 14px; right: 6px; display: inline-flex; padding: 4px; border-radius: 4px;
+  background: #000b; color: #fff; opacity: .6; text-decoration: none; cursor: default;
+}
+.markdown-body .image-frame:hover .copy-image, .markdown-body .copy-image:focus-visible { opacity: 1; outline: 1px solid #fff; }
+.markdown-body .island-outline {
+  position: relative; border: 1px dashed color-mix(in srgb, currentColor 35%, transparent); border-radius: 6px;
+  padding: 18px 12px 2px; margin: 12px 0;
+}
+.markdown-body .island-outline::before {
+  content: attr(data-island); position: absolute; top: 2px; left: 8px;
+  font: 600 10px/1.4 var(--fontStack-monospace, ui-monospace, monospace); color: var(--fgColor-muted, #59636e);
+}
+.markdown-body .image-unavailable { color: var(--fgColor-muted, #59636e); font-style: italic; }
+.markdown-body .broken-image {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border: 1px dashed #cf222e; border-radius: 6px;
+  color: #cf222e; font-size: 13px; font-family: var(--fontStack-monospace);
+}
+.markdown-body details.frontmatter {
+  font-size: 12px; border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px; padding: 6px 10px; margin-bottom: 16px; color: var(--fgColor-muted, #59636e);
+}
+.markdown-body details.frontmatter summary { cursor: pointer; font-weight: 600; }
+.markdown-body details.frontmatter pre { margin: 8px 0 0; background: transparent; padding: 0; }
+.markdown-body .task-list-item input { cursor: pointer; }
+.markdown-body .todo-important { display: inline-block; min-width: 1.1em; padding: 0 0.3em; margin-right: 0.25em; border-radius: 0.6em;
+  background: #d1242f; color: #fff; font-size: 0.75em; font-weight: 700; text-align: center; line-height: 1.5; vertical-align: 0.1em; }
+.markdown-body p.auto-tagged { color: #6e7781; font-size: 0.9em; }
+.markdown-body .auto-tag { display: inline-block; padding: 0 0.45em; border-radius: 1em; font-size: 0.9em;
+  background: rgba(88, 86, 214, 0.14); color: #5856d6; }
+@media (prefers-color-scheme: dark) { .markdown-body .auto-tag { background: rgba(94, 92, 230, 0.25); color: #a5a3ff; } }
+.markdown-body .todo-due { display: inline-block; padding: 0 0.5em; border-radius: 1em; font-size: 0.75em; line-height: 1.6;
+  background: rgba(110, 119, 129, 0.15); color: #57606a; vertical-align: 0.1em; white-space: nowrap; }
+@media (prefers-color-scheme: dark) { .markdown-body .todo-due { color: #9198a1; } }
+.markdown-body .todo-category { display: inline-block; padding: 0 0.5em; border-radius: 1em; font-size: 0.8em; line-height: 1.5;
+  background: rgba(130, 80, 223, 0.15); color: #8250df; vertical-align: 0.05em; }
+.markdown-body table { border-collapse: collapse; }
+/* A translucent neutral border reads well on both the light and dark themes. */
+.markdown-body table th, .markdown-body table td { padding: 6px 10px; border: 1px solid rgba(128, 128, 128, 0.35); }
+/* <mark>: a highlighter pen stroke, the same yellow in light and dark, kept when printing or exporting to PDF. */
+.markdown-body mark {
+  background: linear-gradient(104deg, rgba(255, 230, 0, 0.1) 0.9%, rgba(255, 230, 0, 0.85) 2.4%, rgba(255, 224, 0, 0.7) 5.8%, rgba(255, 224, 0, 0.75) 93%, rgba(255, 230, 0, 0.1) 96%);
+  background-color: transparent;
+  color: #1f2328;
+  padding: 0.05em 0.2em;
+  margin: 0 -0.05em;
+  border-radius: 0.35em 0.15em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.markdown-body mark a, .markdown-body mark code { color: inherit; }
+.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { from { background: rgba(255, 213, 0, 0.35); } to { background: transparent; } }
+
+@media print {
+  .markdown-body { max-width: none; padding: 0; }
+  pre, img, svg, table, .katex-display, .markdown-alert, pre.mermaid { break-inside: avoid; page-break-inside: avoid; }
+  h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
+  .markdown-body .copy-image { display: none; }
+  body { background: #fff; }
+}
+
+/* ---------- Media cards: ![label](media:<id>) ---------- */
+.media-card { display: inline-flex; flex-direction: column; width: 260px; max-width: 100%; margin: 6px 10px 6px 0; vertical-align: top; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 8px; overflow: hidden; background: var(--bgColor-muted, #f6f8fa); cursor: pointer; text-align: left; }
+.media-card:focus-visible { outline: 2px solid #2f81f7; outline-offset: 1px; }
+.media-thumb { position: relative; display: block; aspect-ratio: 16 / 9; background: #1b1f24; overflow: hidden; }
+.media-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; background: #1b1f24; border-radius: 0; }
+.media-thumb.no-picture { background: repeating-linear-gradient(135deg, #2a2f36, #2a2f36 10px, #262a31 10px, #262a31 20px); }
+.media-icon { position: absolute; left: 8px; bottom: 6px; color: #fff; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,.7); pointer-events: none; }
+.media-thumb.no-picture .media-icon { left: 0; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 30px; opacity: .8; }
+.media-time { position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,.65); color: #fff; font: 11px -apple-system, sans-serif; font-variant-numeric: tabular-nums; pointer-events: none; }
+.media-scrub { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: #f26b21; pointer-events: none; }
+.media-caption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 7px 10px 8px; }
+.media-label { flex: 1 1 100%; font-weight: 600; font-size: 13px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-meta { font-size: 11px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.media-badge { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 9px; color: #fff; background: #cf222e; line-height: 17px; }
+.media-card.status-changed .media-badge { background: #9a6700; }
+.media-card.status-missing, .media-card.status-unknown { border-color: #cf222e; }
+.media-card.status-missing .media-thumb, .media-card.status-unknown .media-thumb { opacity: .55; }
+
+/* ---------- Structured spec blocks ---------- */
+.spec-block { margin: 0 0 16px; padding: 10px 14px 12px; border-left: 3px solid #2f81f7; border-radius: 0 6px 6px 0; background: var(--bgColor-muted, #f6f8fa); }
+.spec-block-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; opacity: .65; margin-bottom: 4px; }
+.spec-block-body { white-space: pre-wrap; font-size: 15px; line-height: 1.5; }
+.spec-vo .spec-block-body { font-style: italic; }
+.spec-music { border-left-color: #8250df; }
+.spec-music .spec-block-body, .spec-shot .spec-block-body { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.spec-cta { border-left-color: #f26b21; }
+.image-unavailable, .broken-image { font-size: 12px; opacity: .7; }

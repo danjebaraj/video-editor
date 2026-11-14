@@ -212,6 +212,18 @@ pub fn claude_signed_in(info: &ClaudeInfo) -> Option<bool> {
     v["loggedIn"].as_bool()
 }
 
+/// The folder where Claude Code keeps a session's files for a working directory
+/// (`~/.claude/projects/<slug>`). Large tool results are saved there and read back with the
+/// file tools, so a run's policy has to allow reading it.
+pub fn claude_project_dir(cwd: &Utf8Path) -> Option<Utf8PathBuf> {
+    let base = match std::env::var("CLAUDE_CONFIG_DIR").ok().filter(|s| !s.is_empty()) {
+        Some(d) => Utf8PathBuf::from(d),
+        None => paths::home_dir()?.join(".claude"),
+    };
+    let slug: String = cwd.as_str().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    Some(base.join("projects").join(slug))
+}
+
 pub fn min_version_text() -> String {
     format!("{}.{}.{}", MIN_CLAUDE_VERSION.0, MIN_CLAUDE_VERSION.1, MIN_CLAUDE_VERSION.2)
 }
@@ -331,6 +343,8 @@ mod tests {
         assert_eq!(parse_version("cutline 0.1.0"), Some((0, 1, 0)));
         assert_eq!(parse_version("no digits"), None);
         assert!((2, 1, 311) >= MIN_CLAUDE_VERSION && (1, 9, 0) < MIN_CLAUDE_VERSION);
+        let dir = claude_project_dir("/private/tmp/My Runs/2026-11-14-1753-shorts".into()).unwrap();
+        assert!(dir.as_str().ends_with("projects/-private-tmp-My-Runs-2026-11-14-1753-shorts"), "{dir}");
     }
 
     #[test]
