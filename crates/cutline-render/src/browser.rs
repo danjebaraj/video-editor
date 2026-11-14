@@ -217,7 +217,7 @@ pub fn resolve_steps(v: &mut Value, demos: &Demos) -> Vec<Diagnostic> {
             let anchor = l.get("anchor").and_then(|a| a.as_str()).map(str::to_string);
             let cands: Vec<&RecClip> = clips
                 .iter()
-                .filter(|c| anchor.as_ref().is_none_or(|a| &c.id == a))
+                .filter(|c| anchor.as_ref().map_or(true, |a| &c.id == a))
                 .filter(|c| demos.get(&c.asset).is_some_and(|ev| ev.step(&name).is_some()))
                 .collect();
             let Some(c) = (cands.len() == 1 || (anchor.is_some() && !cands.is_empty())).then(|| cands[0]) else {

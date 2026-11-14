@@ -1074,7 +1074,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
             );
         }
         if let Some(m) = &e.max_bytes {
-            if m.bytes().is_none_or(|b| b < 10_000) {
+            if m.bytes().map_or(true, |b| b < 10_000) {
                 d.push(
                     Diagnostic::error(
                         "E_BAD_VALUE",
@@ -1202,7 +1202,7 @@ fn check_card(l: &Layer, p: &Project, base: &str, d: &mut Vec<Diagnostic>) {
         }
     };
     let need_text = |d: &mut Vec<Diagnostic>| {
-        if text.as_deref().is_none_or(|t| t.trim().is_empty()) {
+        if text.as_deref().map_or(true, |t| t.trim().is_empty()) {
             d.push(Diagnostic::error("E_MISSING_FIELD", format!("{base}/text"), format!("`{template}` needs `text`")));
         }
     };
@@ -1270,7 +1270,7 @@ fn check_card(l: &Layer, p: &Project, base: &str, d: &mut Vec<Diagnostic>) {
         }
         "cta_link" => {
             need_text(d);
-            if pm.get("url").and_then(|v| v.as_str()).is_none_or(|u| u.trim().is_empty()) {
+            if pm.get("url").and_then(|v| v.as_str()).map_or(true, |u| u.trim().is_empty()) {
                 d.push(Diagnostic::error("E_MISSING_FIELD", format!("{base}/params/url"), "cta_link needs `url`"));
             }
         }

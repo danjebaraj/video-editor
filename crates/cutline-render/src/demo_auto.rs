@@ -178,7 +178,7 @@ pub fn fast_forward_idle(
             if *sp > 1.0 {
                 nc.speed = Some(*sp);
                 // sped-up interface sounds are noise
-                if nc.audio.as_deref().is_none_or(|x| x == "keep" || x == "duck") {
+                if nc.audio.as_deref().map_or(true, |x| x == "keep" || x == "duck") {
                     nc.audio = Some("mute".into());
                 }
                 if ff.badge {

@@ -67,7 +67,7 @@ impl CardCtx {
         if let Some(i) = self.images.borrow().get(&key) {
             return i.clone();
         }
-        let out = image::open(path).ok().map(|i| i.to_rgba8()).and_then(|img| {
+        let out = image::open(path).ok().map(|i| i.to_rgba8()).map(|img| {
             let s = (max_w / img.width() as f64).min(max_h / img.height() as f64);
             let (w, h) =
                 (((img.width() as f64 * s).round() as u32).max(1), ((img.height() as f64 * s).round() as u32).max(1));
@@ -83,7 +83,7 @@ impl CardCtx {
                     }
                 }
             }
-            Some(r)
+            r
         });
         self.images.borrow_mut().insert(key, out.clone());
         out
@@ -291,7 +291,7 @@ pub fn draw(cv: &mut Canvas, ctx: &CardCtx, c: &CardInput) {
             cv.shape((x - 3.2 * u, y, x - 2.4 * u, y + total * grow), accent, fade, |_, _| 1.0);
             if let Some(n) = &num {
                 let (a, dy) = appear(c.t, 0.0, 1.5 * u);
-                lines(cv, &ctx.body_bold, 3.8 * u, &[n.clone()], x, y + dy, 0.0, accent, a * fade);
+                lines(cv, &ctx.body_bold, 3.8 * u, std::slice::from_ref(n), x, y + dy, 0.0, accent, a * fade);
                 y += num_h;
             }
             let (a, dy) = appear(c.t, 0.1, 2.0 * u);

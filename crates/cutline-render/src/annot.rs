@@ -66,8 +66,8 @@ impl Canvas {
         let a = a.min(1.0);
         let da = self.px[i + 3] as f64 / 255.0;
         let oa = a + da * (1.0 - a);
-        for c in 0..3 {
-            let v = (rgb[c] as f64 * a + self.px[i + c] as f64 * da * (1.0 - a)) / oa;
+        for (c, src) in rgb.iter().enumerate() {
+            let v = (*src as f64 * a + self.px[i + c] as f64 * da * (1.0 - a)) / oa;
             self.px[i + c] = v.round() as u8;
         }
         self.px[i + 3] = (oa * 255.0).round() as u8;

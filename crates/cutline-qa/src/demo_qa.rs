@@ -245,7 +245,7 @@ pub fn run(l: &Loaded, pr: &Prepared, ocr_choice: Option<&str>) -> Result<DemoRe
                 px.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 let small = px.iter().filter(|v| **v < min_px).count() as f64 / px.len() as f64;
                 let med = px[px.len() / 2];
-                if worst.is_none_or(|w| small > w.0) {
+                if worst.map_or(true, |w| small > w.0) {
                     worst = Some((small, med, px.len(), fr as usize));
                 }
             }

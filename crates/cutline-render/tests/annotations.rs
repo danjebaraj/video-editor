@@ -223,7 +223,7 @@ fn cursor_arrow_and_keys_draw_where_expected() {
     let p = px(&cv, 400, 180);
     assert!(p[3] > 240 && p[0] > 230 && p[2] < 40, "shaft: {p:?}");
     let (x0, _, x1, _) = ink(&cv).unwrap();
-    assert!(x1 >= 508 && x1 <= 516, "tip at x=512: {x1}");
+    assert!((508..=516).contains(&x1), "tip at x=512: {x1}");
     assert!(x0 < 300, "label to the left of the tail: {x0}");
     let white = (170..190).any(|y| (220..320).any(|x| px(&cv, x, y)[..3].iter().all(|c| *c > 235)));
     assert!(white, "label text");
@@ -233,6 +233,6 @@ fn cursor_arrow_and_keys_draw_where_expected() {
     let cv = draw(&tl, 45);
     let (x0, y0, x1, y1) = ink(&cv).unwrap();
     assert!((((x0 + x1) / 2) as i64 - 320).abs() <= 3, "centred: {x0}..{x1}");
-    assert!(y1 <= 333 && y1 >= 326 && y1 - y0 >= 60, "on the safe zone's bottom: {y0}..{y1}");
+    assert!((326..=333).contains(&y1) && y1 - y0 >= 60, "on the safe zone's bottom: {y0}..{y1}");
     assert!(x1 - x0 > 130 && x1 - x0 < 190, "two 64 px caps and a gap: {}", x1 - x0);
 }
