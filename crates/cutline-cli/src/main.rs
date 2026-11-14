@@ -148,6 +148,10 @@ enum Cmd {
         project: PathBuf,
         #[arg(long, default_value = "review")]
         out: PathBuf,
+        /// Text recognition for the demo checks: auto, vision (macOS), tesseract or off.
+        /// Default: CUTLINE_OCR, else the project's `qa.ocr`, else auto.
+        #[arg(long)]
+        ocr: Option<String>,
     },
     /// Thumbnail (1280×720, or 1080×1920 for Shorts) with template text.
     Thumbnail {
@@ -343,7 +347,7 @@ fn dispatch(cli: Cli) -> CmdResult {
             edit::preview(&project, &at, range.as_deref(), safe_zones, out)
         }
         Cmd::Templates { cmd: TemplatesCmd::List } => templates_list(),
-        Cmd::Review { project, out } => edit::review(&project, &out),
+        Cmd::Review { project, out, ocr } => edit::review(&project, &out, ocr.as_deref()),
         Cmd::Thumbnail { project, at, text, template, out } => {
             edit::thumbnail(&project, &at, text.as_deref(), &template, out)
         }

@@ -597,6 +597,8 @@ pub fn apply(
                 ));
                 push_overlay(lines, cur, &format!("{lab}o"), &format!("-W+W*t/{}", f(total)), &y, s, e);
             }
+            // masks that follow their clip are drawn with the annotations
+            Layer::Mask { follow: Some(true), .. } => {}
             Layer::Mask { rect, mode, color, strength, text, text_color, text_size, .. } => {
                 mask_lines(
                     lines,

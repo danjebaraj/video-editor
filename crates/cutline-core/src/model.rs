@@ -79,6 +79,9 @@ pub struct Project {
     /// Strings that text can refer to as `"@key"` (the base language).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub strings: BTreeMap<String, String>,
+    /// Review settings (text recognition for the demo checks).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qa: Option<QaSettings>,
     /// Screen frame for every video clip that has no `frame` of its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_frame: Option<ScreenFrame>,
@@ -88,6 +91,34 @@ pub struct Project {
     /// `false`: do not draw the brand logo as a watermark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct QaSettings {
+    /// Text recognition engine for `cutline review`: `auto` (default: macOS Vision on macOS,
+    /// Tesseract elsewhere), `vision`, `tesseract` or `off`. The `CUTLINE_OCR` environment
+    /// variable and `review --ocr` override it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr: Option<OcrEngine>,
+    /// Smallest text height that counts as readable, in output px (default 2 % of the frame's
+    /// shorter side; 2.4 % on vertical targets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_text_px: Option<f64>,
+    /// Seconds with nothing said and nothing pointed at before review suggests tightening
+    /// (default 8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_quiet: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OcrEngine {
+    #[default]
+    Auto,
+    Vision,
+    Tesseract,
+    Off,
 }
 
 /// A cut of the edit. Clips and layers also choose their variants with `only` / `except`.
@@ -1022,6 +1053,10 @@ pub enum Layer {
         /// Text size in output px at full resolution (default 60 % of the region height).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         text_size: Option<f64>,
+        /// `true`: the rect is in fractions of the clip's picture and the mask moves with the
+        /// clip's screen frame and zoom (like an annotation). Needs `mode: "fill"`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        follow: Option<bool>,
         #[serde(flatten)]
         at: Placement,
     },
@@ -1273,11 +1308,13 @@ impl Layer {
     pub fn is_card(&self) -> bool {
         matches!(self, Layer::Text { template, .. } if crate::catalog::CARD_TEMPLATES.contains(&template.as_str()))
     }
-    /// highlight / spotlight / arrow / keys / cursor: drawn together in the annotation pass.
+    /// highlight / spotlight / arrow / keys / cursor (and masks that follow their clip): drawn
+    /// together in the annotation pass.
     pub fn is_annotation(&self) -> bool {
         matches!(
             self,
-            Layer::Highlight { .. }
+            Layer::Mask { follow: Some(true), .. }
+                | Layer::Highlight { .. }
                 | Layer::Spotlight { .. }
                 | Layer::Arrow { .. }
                 | Layer::Keys { .. }

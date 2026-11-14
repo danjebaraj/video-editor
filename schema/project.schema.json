@@ -164,6 +164,17 @@
         }
       ]
     },
+    "qa": {
+      "description": "Review settings (text recognition for the demo checks).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QaSettings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "safe_zone": {
       "description": "Override the target's safe zone.",
       "anyOf": [
@@ -3106,6 +3117,13 @@
                 "type": "string"
               }
             },
+            "follow": {
+              "description": "`true`: the rect is in fractions of the clip's picture and the mask moves with the\nclip's screen frame and zoom (like an annotation). Needs `mode: \"fill\"`.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "mode": {
               "description": "blur (default) | pixelate | fill. Use `fill` for secrets: blurred or pixelated text\ncan sometimes be recovered.",
               "anyOf": [
@@ -4209,6 +4227,15 @@
         "fill"
       ]
     },
+    "OcrEngine": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "vision",
+        "tesseract",
+        "off"
+      ]
+    },
     "Point": {
       "type": "object",
       "properties": {
@@ -4306,6 +4333,39 @@
         "skip_if_other_motion": {
           "type": "boolean",
           "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "QaSettings": {
+      "type": "object",
+      "properties": {
+        "max_quiet": {
+          "description": "Seconds with nothing said and nothing pointed at before review suggests tightening\n(default 8).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "min_text_px": {
+          "description": "Smallest text height that counts as readable, in output px (default 2 % of the frame's\nshorter side; 2.4 % on vertical targets).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "ocr": {
+          "description": "Text recognition engine for `cutline review`: `auto` (default: macOS Vision on macOS,\nTesseract elsewhere), `vision`, `tesseract` or `off`. The `CUTLINE_OCR` environment\nvariable and `review --ocr` override it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OcrEngine"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false

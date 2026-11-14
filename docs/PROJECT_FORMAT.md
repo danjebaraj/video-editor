@@ -44,6 +44,7 @@ Errors: `E_BEAT_REF`.
 | `exports` | [Export] | one export of `target` | multi-target from one edit |
 | `cues` | map name → Cue | `{}` | phrases in the voice-over; see [Cues](#cues) |
 | `variants`, `locales`, `strings` | maps | `{}` | several cuts and languages from one project; see [Variants and locales](#variants-and-locales) |
+| `qa` | QaSettings | — | review settings; see [Review checks for demos](#review-checks-for-demos-qa) |
 | `brand_bumpers` | bool | `true` | `false`: do not add the brand's `intro` / `outro` around `main` |
 | `watermark` | bool | `true` | `false`: do not draw the brand `logo` as a watermark |
 | `profile` | `standard` | `screencast`: tuned for screen/terminal recordings — x264 `-tune animation` and CRF − 2 for sharp text and UI edges; QA's freeze check passes (pauses are normal) |
@@ -272,7 +273,7 @@ others until the end. Visual layers take: `position` (preset `center`, `top`, `b
 | `audio` | `asset`, `src_in`, `gain_db`, `fade_in`, `fade_out`, `loop`, `role`, `align` (`end`: backtime so the asset's own ending lands on the layer end — default the timeline end; the head is trimmed, or a shorter asset starts later; not with `src_in`/`loop`) |
 | `sfx` | `asset` (or brand alias), `at` or `anchor`+`offset`, `gain_db`, `pick_from` |
 | `presenter` | `asset` (the camera recording), `src_in` (camera time at the layer start, to line it up with the screen), `shape` (`circle` · `rounded`), `position` (`bottom_right`), `scale` 0.18 (0.3 on vertical targets), `focus` `{x, y}` (where the face is; default: detected with the face model, else the middle of the upper half), `border` 4 px, `border_color` white, `shadow` true, `audio` (false; `true` adds the camera's sound as dialogue), `gain_db`, `layouts` `[{at, layout}]`: from each `at` (edit time or cue) the camera shows as `bubble` (default), `side_by_side` (a tall panel over the right third), `presenter_full` (fills the frame) or `screen_full` (hidden); changes dissolve in 0.2 s |
-| `mask` | `rect` `{x, y, w, h}` (fractions of the frame), `mode` (`blur` default, `pixelate`, `fill`), `color` (fill, default `#000000`), `strength` (default 1), `text` (replacement text, Inter), `text_color` (`#9AA0A6`), `text_size` (px at full size; default 60 % of the rect height). Hides part of the frame over the footage and overlays, under text and captions; until the end by default. Use `fill` for secrets: blurred or pixelated text can sometimes be recovered |
+| `mask` | `rect` `{x, y, w, h}` (fractions of the frame), `mode` (`blur` default, `pixelate`, `fill`), `color` (fill, default `#000000`), `strength` (default 1), `text` (replacement text, Inter), `text_color` (`#9AA0A6`), `text_size` (px at full size; default 60 % of the rect height). Hides part of the frame over the footage and overlays, under text and captions; until the end by default. Use `fill` for secrets: blurred or pixelated text can sometimes be recovered . With `follow: true` (needs `mode: "fill"`) the rect is in fractions of the clip's picture and the mask moves with the clip's screen frame and zoom, like an annotation; masks made from a recording `step` follow by default |
 
 ### Annotations
 
@@ -506,6 +507,31 @@ With `--locale`, browser recordings are made in that language too (the script's 
 replaced and each language is cached separately), so the interface on screen matches the
 narration. Outputs are named `<name>…-<locale>`. `W_FIT_HOLD` shows where a longer narration
 runs out of footage.
+
+## Review checks for demos (`qa`)
+
+`cutline review` adds three checks when the edit has screen recordings (`profile:
+"screencast"`, a `frame`, or a browser recording). They are listed in `summary.md` and, with
+ready-to-paste fixes, in `demo_checks.json`.
+
+| Check | What it reports |
+|---|---|
+| private details | text in the recordings that looks like an email address, a home path with a user name, an access token or key, or an IP address, and that no mask covers. The fix is a `mask` layer (`mode: "fill"`, `follow: true`) on that line |
+| legibility | clips whose interface text is too small to read in the delivered frame (over half the lines under `min_text_px`), zoom included |
+| pacing | stretches longer than `max_quiet` where nobody speaks and no text or annotation is on screen |
+
+Text is read from the source recordings at their own resolution, on this machine. `qa`:
+
+| Field | Default | Notes |
+|---|---|---|
+| `ocr` | `auto` | `auto` (macOS Vision on macOS, else Tesseract), `vision`, `tesseract`, `off`. Overridden by `CUTLINE_OCR` and by `cutline review --ocr <engine>` |
+| `min_text_px` | 2 % of the frame's shorter side (2.4 % on vertical targets) | smallest readable text height in output px |
+| `max_quiet` | 8 | seconds |
+
+Vision needs the Xcode command-line tools (a small helper is compiled once into the cutline
+home); Tesseract is the `tesseract` command (`CUTLINE_TESSERACT`, else `PATH`). `cutline doctor`
+shows which is available. Without an engine, the pacing check still runs. Recognition is a
+check, not a guarantee: still look at the contact sheet for private details.
 
 ## Brand file
 

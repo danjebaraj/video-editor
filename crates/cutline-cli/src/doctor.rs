@@ -111,6 +111,22 @@ pub fn run() -> CmdResult {
         lines.push(format!("✔ face model installed; detector: {det}"));
     }
 
+    // text recognition (optional: review's private-details and legibility checks)
+    let tess = cutline_qa::ocr::tesseract_binary();
+    let swiftc = cfg!(target_os = "macos")
+        && std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|d| d.join("swiftc").is_file());
+    match (swiftc, &tess) {
+        (true, t) => lines.push(format!(
+            "✔ text recognition: macOS Vision (default){}",
+            t.as_ref().map(|p| format!(", tesseract at {}", p.display())).unwrap_or_default()
+        )),
+        (false, Some(p)) => lines.push(format!("✔ text recognition: tesseract at {}", p.display())),
+        (false, None) => lines.push(
+            "· no text recognition (review skips private-details and legibility checks; install tesseract or, on macOS, the Xcode command-line tools)"
+                .into(),
+        ),
+    }
+
     let free = fs2::available_space(paths::data_dir().parent().unwrap_or(std::path::Path::new("."))).ok();
     if let Some(f) = free {
         let gb = f as f64 / 1e9;

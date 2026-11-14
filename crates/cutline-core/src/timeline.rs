@@ -732,6 +732,18 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 );
             }
         }
+        if let Layer::Mask { follow: Some(true), mode, .. } = l {
+            if !matches!(mode, Some(MaskMode::Fill)) {
+                d.push(
+                    Diagnostic::error(
+                        "E_FIELD_CONFLICT",
+                        format!("{base}/follow"),
+                        "a mask that follows its clip must be `mode: \"fill\"` (blur and pixelate work on a fixed region of the frame)",
+                    )
+                    .hint("add `mode: \"fill\"` with the background `color`, or remove `follow`"),
+                );
+            }
+        }
         if let Layer::Mask { rect, strength, text_size, .. } = l {
             let inside = |v: f64| (0.0..=1.0).contains(&v);
             if !(inside(rect.x) && inside(rect.y) && rect.w > 0.0 && rect.h > 0.0)

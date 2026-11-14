@@ -141,9 +141,16 @@ Segments are cached: changing captions, text or music does not re-render clips.
 
 ### Hide private details
 
+- `cutline review` reads the text in screen recordings and lists possible private details no
+  mask covers, each with a `mask` layer to paste (`demo_checks.json`). It also flags interface
+  text too small to read and long stretches where nothing is said or pointed at. Fix them all,
+  then still:
 - Look for usernames, home paths, emails, tokens and hostnames in every frame (`review`'s
   contact sheet) and cover them with `mask` layers: `{type: "mask", rect: {x, y, w, h},
   anchor: "clip", duration: 2}`; `rect` is in fractions of the frame.
+- On a framed or zooming clip use `mode: "fill", follow: true` with the rect in fractions of
+  the recording: the mask then stays on its text. With a browser recording,
+  `{type: "mask", step: "email"}` does this for the element a step touched.
 - `blur` (default) suits incidental text; use `mode: "fill"` with the background `color` for
   secrets, optionally with replacement `text` (e.g. `~/Library/…`) so the UI still reads well.
 

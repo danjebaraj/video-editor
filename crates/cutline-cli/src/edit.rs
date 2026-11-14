@@ -558,13 +558,16 @@ pub fn qa(video: &Path, target: &str, project: Option<&Path>) -> CmdResult {
     Ok(Output::ok(json!(r), cutline_qa::qa::summary(&r)).with_code(code))
 }
 
-pub fn review(path: &Path, out: &Path) -> CmdResult {
+pub fn review(path: &Path, out: &Path, ocr: Option<&str>) -> CmdResult {
+    if let Some(o) = ocr {
+        cutline_qa::ocr::setting(Some(o), None).map_err(CliError::usage)?;
+    }
     let l = load_or_return!(path);
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
     }
     let out = if out.is_absolute() { out.to_path_buf() } else { l.dir.join(out) };
-    let r = cutline_qa::review::review(&l, &out).map_err(classify)?;
+    let r = cutline_qa::review::review_with(&l, &out, ocr).map_err(classify)?;
     let mut h = format!(
         "review pack: {}\nsource: {}\nQA: {}\n",
         r.dir.display(),

@@ -236,6 +236,11 @@ pub fn static_gaps(pr: &Prepared, min: f64) -> Vec<(f64, f64)> {
 }
 
 pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
+    review_with(l, out_dir, None)
+}
+
+/// `review`, with a text recognition engine chosen on the command line (`--ocr`).
+pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<ReviewReport> {
     let tc = cutline_deps::toolchain()?;
     std::fs::create_dir_all(out_dir)?;
     for sub in ["cuts", "captions", "reframe", "annotations"] {
@@ -457,6 +462,14 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
             }
         }
     }
+    // ---- demo checks: private details, legibility, pacing
+    let demo = crate::demo_qa::run(l, &pr, ocr)?;
+    for f in &demo.findings {
+        suggestions.push(f.message.clone());
+    }
+    let dp = out_dir.join("demo_checks.json");
+    std::fs::write(&dp, serde_json::to_vec_pretty(&demo)?)?;
+    files.push(dp);
     let mut md = format!(
         "# Review: {}\n\nSource: `{}`  \nDuration: {}  \nTarget: {} ({}×{} @ {} fps)\n\n## QA: {} ({} errors, {} warnings)\n\n",
         cutline_render::output_name(&l.project, &l.path),

@@ -516,6 +516,22 @@ pub fn draw_frame(cv: &mut Canvas, tl: &Timeline, layers: &[&TLayer], st: &Style
                     x += kw + gap;
                 }
             }
+            Layer::Mask { rect, color, text, text_color, text_size, .. } => {
+                // a filled mask on the clip's own picture: it moves with the frame and the zoom
+                let (map, content) = ctx(lay, Some(true));
+                let r = px_rect(rect, &map, &content, 0.0);
+                let col = crate::overlay::rgb_of(color.as_deref().unwrap_or("#000000"));
+                cv.shape((r.0, r.1, r.0 + r.2, r.1 + r.3), col, 1.0, |x, y| {
+                    aa(sd_rrect(x, y, r.0, r.1, r.2, r.3, 0.0))
+                });
+                if let (Some(tx), Some(font)) = (text.as_deref().filter(|s| !s.is_empty()), st.font.as_ref()) {
+                    let fs = text_size.map(|v| v * k * map.s).unwrap_or(0.6 * r.3).max(4.0);
+                    let sf = font.as_scaled(PxScale::from(fs as f32));
+                    let baseline = r.1 + (r.3 + sf.ascent() as f64 + sf.descent() as f64) / 2.0;
+                    let tc = crate::overlay::rgb_of(text_color.as_deref().unwrap_or("#9AA0A6"));
+                    cv.text(font, fs, r.0 + 0.3 * fs, baseline, tx, tc, 1.0);
+                }
+            }
             Layer::Badge { text, position, size, .. } => {
                 let Some(font) = st.font.as_ref() else { continue };
                 let fs = (size.unwrap_or(30.0) * k).max(6.0);

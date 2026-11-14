@@ -16,7 +16,8 @@ cutline validate my-short/project.json5
 cutline expand   my-short/project.json5     # explicit timeline (auto jump cuts, fillers, punch-ins)
 cutline cues     my-short/project.json5     # where each voice-over cue landed
 cutline beats    my-short/project.json5     # tempo and beat times of the music
-cutline record   my-short/project.json5     # record VHS .tape assets again (fresh live data)
+cutline record   my-short/project.json5     # record .tape and .demo.json5 assets again
+cutline render   demo/project.json5 --variant teaser --locale de
 cutline review   my-short/project.json5     # review/ pack for vision
 cutline render   my-short/project.json5     # final render + QA + .srt + credits
 cutline guide                               # the workflow Claude should follow
@@ -33,6 +34,15 @@ cutline guide                               # the workflow Claude should follow
   border, shadow) with enter/exit animations; progress bar; LUTs and color presets.
 - **Screencasts:** VHS `.tape` scripts as assets (recorded and cached at load), `profile: "screencast"` (text-tuned encoding, freeze-tolerant QA), optional
   4:4:4 chroma, and `zoom_to` a rectangle of the UI.
+- **Business and product demos:** `init --style business`; brand logo watermark and
+  intro/outro bumpers; screen frames (browser, window, phone, tablet) on a background;
+  annotations (highlight, spotlight, arrow, keycaps, drawn cursor) that follow zooms; business
+  cards (title, section, feature list, stat, testimonial, compare, logo wall, link CTA with QR
+  code); browser recordings from `.demo.json5` scripts, edited by named step, with automatic
+  cursor, zoom on clicks and fast-forward of idle stretches; a presenter camera layer;
+  variants and locales from one project; exports for web and social (WebM, silent loops, size
+  caps, cut-outs, 4:5); review checks for private details (text recognition), legibility and
+  pacing.
 - **Masks:** blur, pixelate or fill a region (with optional replacement text) to hide private
   details in screen recordings.
 - **Text:** libass-rendered templates (hook title, lower third, callout, step counter, big

@@ -197,3 +197,41 @@ Observed, not changed: an SVG layer renders on a target-size canvas unless the a
 ## Known issues
 - Speed-ramp audio uses the average tempo (see decisions).
 - Transition goldens are per ffmpeg major version (xfade timing differs between 6.x and 9.x).
+
+## Business and product-demo features (2026-11-14)
+
+Spec: `docs/specs/business-demo-features.md`. Built on macOS (Apple Silicon), ffmpeg 9.0.2,
+installed Chrome headless shell, macOS Vision and Tesseract 5.5.
+
+| Feature | Status | Tests |
+|---|---|---|
+| F3 Brand kit (watermark, bumpers, `init --style business`) | ✅ | `cutline-render/tests/brand_kit.rs` |
+| F1 Annotation layers | ✅ | `cutline-render/tests/annotations.rs` |
+| F2 Screen frames and backgrounds | ✅ | `cutline-render/tests/frames.rs`, `cutline-core` frame unit tests |
+| F4 Business card templates, plain-color assets | ✅ | `cutline-render/tests/cards.rs` |
+| F5 Delivery (WebM, silent loop, size cap, range, 4:5, VTT, poster) | ✅ | `cutline-qa/tests/delivery.rs` |
+| F6 Browser recordings, editing by step | ✅ | `cutline-html/tests/demo.rs`, `cutline-render/tests/browser.rs` |
+| F7 Demo auto directives | ✅ | `cutline-render/tests/demo_auto.rs` |
+| F8 Variants, F9 Locales | ✅ | `cutline-render/tests/variants_locales.rs` |
+| F10 Presenter layer | ✅ | `cutline-render/tests/presenter.rs` |
+| F11 Demo review checks (OCR: Vision / Tesseract) | ✅ | `cutline-qa/tests/demo_qa.rs` |
+
+Deviations from the spec:
+- F4: the cards are drawn in Rust (with the annotations), not as libass templates, and have no
+  separate HTML variants; motion (fades, builds, count-up) is built in.
+- F1/F4 acceptance uses pixel and layout assertions rather than golden images.
+- F2 has no dedicated text-sharpness measurement; zooms on framed clips supersample from the
+  source as before.
+- F5: GIF and WebP were dropped by decision; loops need `audio: false`.
+- F6: capture is real-time screenshots (JPEG quality 95) resampled to CFR, typically 15–30
+  frames per second of capture depending on the page size; the pointer is always drawn by the
+  edit. Login flows work through ordinary steps with `$ENV` text; there is no dedicated login
+  step.
+- F7: `zoom_on_clicks` pans between close clicks at one scale instead of zooming per click.
+- F10: `side_by_side` lays the camera over the right third of the frame; the screen is not
+  re-laid-out beside it.
+- F11: text is read from the source recordings (full resolution) rather than the preview.
+- Brand bumpers introduced an *edit origin*: timeline times in the project count from the
+  start of the edit, after the intro.
+- An export without `target` now uses the project's target (was `shorts`); clip `speed` may go
+  up to 8 (was 4); a clip's zooms each keep their own focus (the last one used to win).

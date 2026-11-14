@@ -249,6 +249,12 @@ pub fn resolve_steps(v: &mut Value, demos: &Demos) -> Vec<Diagnostic> {
             o.remove("step");
             o.insert("rect".into(), rect);
             o.insert("anchor".into(), json!(c.id));
+            if kind == "mask" {
+                // the element's rect is in the recording's own fractions: the mask must move
+                // with the clip's frame and zoom, which a filled mask can
+                o.entry("mode").or_insert(json!("fill"));
+                o.entry("follow").or_insert(json!(true));
+            }
             let timed = ["start", "end", "offset", "duration"].iter().any(|k| o.contains_key(*k));
             if !timed && kind != "mask" {
                 // from when the pointer sets off until a second after the step is done
@@ -349,8 +355,9 @@ mod tests {
             (json!("a"), json!(1.0), json!(1.8))
         );
         assert!(h.get("step").is_none() && h["rect"]["w"] == json!(0.25));
-        // a mask keeps its own timing (the whole video unless told otherwise)
+        // a mask keeps its own timing (the whole video unless told otherwise) and follows the clip
         assert!(v["layers"][1].get("offset").is_none() && v["layers"][1]["anchor"] == json!("a"));
+        assert_eq!(v["layers"][1]["follow"], json!(true));
     }
 
     #[test]
