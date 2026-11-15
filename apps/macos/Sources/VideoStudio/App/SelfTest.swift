@@ -478,7 +478,7 @@ enum SelfTest {
         check("`ls` was denied; cutline was allowed", runTrace.contains("\"command\":\"ls -la\"") && runTrace.components(separatedBy: "\n").filter { $0.contains("\"decision\":\"deny\"") }.count == 1 && runTrace.contains("Only cutline"))
         check("the answer given in the app reached Claude", runTrace.contains("\"Keep the music under the whole clip?\":\"Yes\""))
         let folder = URL(fileURLWithPath: outcome?.folder ?? "/nonexistent")
-        for f in ["logs/run.json", "logs/events.ndjson", "logs/claude.jsonl", "logs/validation.json", "logs/summary.md", "logs/permissions.ndjson", "logs/cutline/001-validate.log", "logs/cutline/002-render.log", "media-manifest.json", "spec.md", "brand.json"] {
+        for f in ["logs/run.json", "logs/events.ndjson", "logs/claude.jsonl", "logs/validation.json", "logs/summary.md", "logs/permissions.ndjson", "logs/cutline/001-validate.log", "logs/cutline/002-render.log", "media-manifest.json", "spec.md", "brand-preset.json", "brand/default.json"] {
             check("the run folder has \(f)", fm.fileExists(atPath: folder.appendingPathComponent(f).path))
         }
         check("the run is in the project's history", doc.project.runs.last?.status == outcome?.status && doc.project.runs.last?.folder == outcome?.folder)

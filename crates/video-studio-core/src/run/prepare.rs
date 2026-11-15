@@ -280,7 +280,11 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     paths::write_atomic(&folder.join("spec.md"), project.spec.replace("\r\n", "\n").as_bytes())?;
     let brand = project.brand.as_ref().map(|b| &b.snapshot);
     if let Some(b) = brand {
-        paths::write_json_atomic(&folder.join("brand.json"), b)?;
+        // The preset as the app keeps it, for Claude to read, and the same brand in cutline's
+        // own format where cutline looks for it without being told (`brand/default.json`).
+        paths::write_json_atomic(&folder.join("brand-preset.json"), b)?;
+        std::fs::create_dir_all(folder.join("brand"))?;
+        paths::write_json_atomic(&folder.join("brand").join("default.json"), &b.for_cutline().file)?;
     }
     let exports = cutline_exports(&outputs);
     paths::write_json_atomic(&folder.join("outputs.json"), &json!({"outputs": outputs, "cutline": exports}))?;

@@ -95,6 +95,8 @@ export interface Estimates {
 export interface Finding { text: string; spec_line?: number; detail?: string }
 export interface Readiness {
   ready: boolean; ambiguities: Finding[]; assumptions: Finding[]; missing_media: Finding[]; risks: Finding[];
+  /** What the production run records or generates itself; not a problem. */
+  planned?: Finding[];
   estimated_durations: Record<string, number>; notes?: string;
 }
 export interface Report {

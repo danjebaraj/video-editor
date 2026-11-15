@@ -55,6 +55,11 @@ struct ValidationView: View {
                            action: ("Validate", { Task { await document.validate() } }))
             }
         }
+        // Back from System Settings: check again, so a permission that was just allowed clears.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard document.report?.issues.contains(where: { $0.rule == "capture_permission" }) == true, !document.runs.isRunning else { return }
+            Task { await document.validate() }
+        }
     }
 
     private func summaryChip(_ n: String, _ label: String, _ color: Color) -> some View {
@@ -118,7 +123,12 @@ struct IssueRow: View {
                 Text(issue.title).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                 if let d = issue.detail { Text(d).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
                 HStack(spacing: 8) {
-                    if issue.fix != nil {
+                    if let permission = issue.fix.flatMap({ $0.kind == "permission" ? CapturePermission(rawValue: $0.target ?? "") : nil }) {
+                        // One click: the app is added to the list and System Settings opens on it.
+                        Button("Allow \(permission.title)…") { permission.allow() }
+                            .controlSize(.small)
+                            .help("Opens System Settings with Syncfusion Video Studio in the \(permission.title) list. Turn its switch on there.")
+                    } else if issue.fix != nil {
                         Button(fixLabel + " →") { document.reveal(issue.fix) }.buttonStyle(.link).font(.caption)
                             .accessibilityLabel("Go to \(fixLabel)")
                     }
@@ -230,6 +240,7 @@ struct DryRunFindingsSheet: View {
                     section("Missing media", r?.missing_media ?? [])
                     section("Risks", r?.risks ?? [])
                     section("Assumptions the dry run made", r?.assumptions ?? [])
+                    section("Made during the production run (nothing to do)", r?.planned ?? [])
                     if let n = r?.notes, !n.isEmpty { Text(n).font(.callout).foregroundStyle(.secondary) }
                 }
             }

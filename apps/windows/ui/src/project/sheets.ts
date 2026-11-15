@@ -107,7 +107,7 @@ export function showFindings(w: ProjectWindow, r: Readiness) {
           w.jumpToLine(f.spec_line!);
         } }, `Line ${f.spec_line}`) : null))))
       : null;
-  clear(s.body, section('Unclear in the spec', r.ambiguities), section('Missing media', r.missing_media), section('Risks', r.risks), section('Assumptions', r.assumptions), r.notes ? h('p', null, r.notes) : null);
+  clear(s.body, section('Unclear in the spec', r.ambiguities), section('Missing media', r.missing_media), section('Risks', r.risks), section('Assumptions', r.assumptions), section('Made during the production run (nothing to do)', r.planned ?? []), r.notes ? h('p', null, r.notes) : null);
   s.footer.append(
     button('Ask Claude to Fix the Spec', () => {
       s.close('fix');

@@ -148,6 +148,10 @@ pub trait EnvProbe {
     fn eleven_key_present(&self) -> bool;
     /// Remaining ElevenLabs credits, when the key is present and the API answers.
     fn eleven_remaining(&self) -> Option<u64>;
+    /// Whether this computer lets the app record the screen and control other apps.
+    fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
+        None
+    }
 }
 
 /// The real machine.
@@ -184,6 +188,9 @@ impl EnvProbe for SystemEnv<'_> {
         let key = self.secrets.get(crate::platform::ELEVEN_KEY).ok().flatten()?;
         let client = crate::eleven::Client::new(&key, self.eleven_base_url.as_deref());
         client.subscription().ok().map(|s| s.remaining())
+    }
+    fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
+        Some(crate::capture::permissions(false))
     }
 }
 
@@ -584,6 +591,8 @@ fn check_spec(c: &mut Ctx, input: &ValidateInput, est: &Estimates) {
             "vo_too_long" => ("spec_vo_too_long", Severity::Warning),
             "placeholder" => ("spec_placeholder", Severity::Warning),
             "scene_empty" => ("spec_scene_empty", Severity::Warning),
+            "scene_vo_too_long" => ("spec_scene_vo_too_long", Severity::Warning),
+            "scene_vo_tight" => ("spec_scene_vo_tight", Severity::Info),
             _ => ("spec_scene_length", Severity::Info),
         };
         c.add(rule, Some(&format!("{}:{n}", i.line)), sev, "spec", i.message, None, FixLink::line(i.line));
@@ -604,6 +613,97 @@ fn check_spec(c: &mut Ctx, input: &ValidateInput, est: &Estimates) {
             Some("Without a target length, platform duration limits and voice-over length can't be checked.".into()),
             FixLink::to("project"),
         );
+    }
+}
+
+/// What a run can only find out the expensive way: no voice chosen, and app recording that the
+/// computer or the project doesn't allow.
+fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput]) {
+    let p = input.project;
+    let (needs_voice, _) = needs_generated_audio(p);
+    let brand_voice = p.brand.as_ref().map(|b| b.snapshot.voice.voice_id.trim()).unwrap_or("");
+    if needs_voice && brand_voice.is_empty() && input.settings.eleven_default_voice.trim().is_empty() {
+        c.add(
+            "voice_unset",
+            None,
+            Severity::Warning,
+            "brand",
+            "No voice is chosen for the voice-over".into(),
+            Some("Claude would have to pick one itself. Choose a voice in the brand preset, or set a default voice in Settings › ElevenLabs.".into()),
+            if p.brand.is_some() { FixLink::to("brand") } else { FixLink::target("settings", "elevenlabs") },
+        );
+    }
+
+    let recorded: Vec<spec::Scene> = spec::scenes(&p.spec).into_iter().filter(|s| s.records_app).collect();
+    if let Some(first) = recorded.first() {
+        let n = recorded.len();
+        let scenes = if n == 1 { "1 scene asks".to_string() } else { format!("{n} scenes ask") };
+        if !p.app_capture.enabled {
+            c.add(
+                "capture_off",
+                None,
+                Severity::Warning,
+                "spec",
+                "The spec asks to record an app, but App recording is off".into(),
+                Some(format!("{scenes} for a recording. Turn on App recording in the Project inspector, or attach the recordings as media.")),
+                FixLink::line(first.line),
+            );
+        } else if let Some(perm) = input.env.capture_permissions().filter(|perm| perm.supported) {
+            // One warning per permission, so each can be fixed with its own button.
+            for (ok, key, name, what) in [
+                (perm.screen_recording, "screen_recording", "Screen & System Audio Recording", "record the screen"),
+                (perm.accessibility, "accessibility", "Accessibility", "click, type and use menus in other apps"),
+            ] {
+                if ok {
+                    continue;
+                }
+                c.add(
+                    "capture_permission",
+                    Some(key),
+                    Severity::Warning,
+                    "environment",
+                    format!("{name} isn't allowed for Syncfusion Video Studio yet"),
+                    Some(format!(
+                        "{scenes} for a recording, and the run needs this to {what}. Allow opens System Settings with Syncfusion Video Studio in the list, switched off: turn its switch on. If the switch was already on, it was for an earlier build of the app, and Allow replaces it.{}",
+                        if key == "screen_recording" { " macOS then offers to quit and reopen the app." } else { "" }
+                    )),
+                    FixLink::target("permission", key),
+                );
+            }
+        }
+    }
+
+    // Burned-in captions asked for in words, on an output that delivers them another way.
+    let lower = p.spec.to_lowercase();
+    if let Some(at) =
+        ["burned-in caption", "burned in caption", "burnt-in caption", "burn in caption", "burn-in caption"]
+            .iter()
+            .find_map(|k| lower.find(k))
+    {
+        let others: Vec<String> = outputs
+            .iter()
+            .filter(|o| o.captions != "burn")
+            .map(|o| match o.captions.as_str() {
+                "sidecar" => format!("{} delivers captions as a separate file", o.name),
+                "none" => format!("{} has no captions", o.name),
+                other => format!("{} has captions set to \"{other}\"", o.name),
+            })
+            .collect();
+        if !others.is_empty() {
+            let line = p.spec[..at].matches('\n').count() + 1;
+            c.add(
+                "captions_not_burned",
+                None,
+                Severity::Info,
+                "outputs",
+                "The spec mentions burned-in captions, but not every output burns them in".into(),
+                Some(format!(
+                    "{}. Change the output's captions setting under Outputs, or say in the spec which outputs get burned-in captions.",
+                    others.join("; ")
+                )),
+                FixLink::line(line),
+            );
+        }
     }
 }
 
@@ -1000,6 +1100,7 @@ pub fn validate(input: &ValidateInput) -> Report {
     check_media(&mut c, input, &outputs);
     check_spec(&mut c, input, &est);
     check_brand(&mut c, input);
+    check_run_needs(&mut c, input, &outputs);
     check_outputs(&mut c, input, &outputs, out_root.as_ref(), &mut est);
     if input.kind == RunKind::Production {
         check_budget(&mut c, input, &est, outputs.len());
@@ -1028,6 +1129,7 @@ pub struct FakeEnv {
     pub writable: bool,
     pub eleven_key: bool,
     pub eleven_remaining: Option<u64>,
+    pub capture: Option<crate::capture::Permissions>,
 }
 
 impl Default for FakeEnv {
@@ -1049,6 +1151,7 @@ impl Default for FakeEnv {
             writable: true,
             eleven_key: true,
             eleven_remaining: Some(1_000_000),
+            capture: Some(crate::capture::Permissions { screen_recording: true, accessibility: true, supported: true }),
         }
     }
 }
@@ -1077,6 +1180,9 @@ impl EnvProbe for FakeEnv {
     }
     fn eleven_remaining(&self) -> Option<u64> {
         self.eleven_remaining
+    }
+    fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
+        self.capture
     }
 }
 
@@ -1133,7 +1239,7 @@ mod tests {
             Fx {
                 dir,
                 project,
-                settings: Settings::default(),
+                settings: Settings { eleven_default_voice: "voice_default".into(), ..Settings::default() },
                 platforms: Platforms::bundled(),
                 models: ModelList::bundled(),
                 env: FakeEnv::default(),
@@ -1172,6 +1278,53 @@ mod tests {
     }
     fn rules(r: &Report) -> Vec<String> {
         r.issues.iter().map(|i| format!("{:?}:{}", i.severity, i.rule)).collect()
+    }
+
+    #[test]
+    fn finds_what_a_run_would_only_learn_the_expensive_way() {
+        let mut f = Fx::new();
+        // no voice anywhere
+        f.settings.eleven_default_voice = String::new();
+        let r = f.run();
+        assert!(has(&r, "voice_unset", Severity::Warning), "{:?}", rules(&r));
+        f.settings.eleven_default_voice = "voice_1".into();
+        assert!(!has(&f.run(), "voice_unset", Severity::Warning));
+
+        // a recorded scene needs the computer's permissions and the project's switch
+        f.project.spec = format!("{GOOD_SPEC}\n## Scene 3: Demo\n- **Duration:** 30 s\n- **Record:** Safari, open the pricing page\n\nAll outputs get burned-in captions.\n");
+        assert!(!f.run().issues.iter().any(|i| i.rule.starts_with("capture_")));
+        f.env.capture =
+            Some(crate::capture::Permissions { screen_recording: true, accessibility: false, supported: true });
+        let r = f.run();
+        let found: Vec<&Issue> = r.issues.iter().filter(|i| i.rule == "capture_permission").collect();
+        assert_eq!(found.len(), 1, "only the missing permission is reported");
+        let i = found[0];
+        assert_eq!((i.severity, i.id.as_str()), (Severity::Warning, "capture_permission:accessibility"));
+        assert!(i.title.starts_with("Accessibility isn't allowed"));
+        assert!(i.detail.as_deref().unwrap().contains("1 scene asks"));
+        // the app turns this link into a one-click Allow button
+        assert_eq!(
+            i.fix,
+            Some(FixLink { kind: "permission".into(), target: Some("accessibility".into()), line: None })
+        );
+        f.env.capture =
+            Some(crate::capture::Permissions { screen_recording: false, accessibility: false, supported: true });
+        assert_eq!(f.run().issues.iter().filter(|i| i.rule == "capture_permission").count(), 2);
+        f.env.capture =
+            Some(crate::capture::Permissions { screen_recording: false, accessibility: false, supported: false });
+        assert!(
+            !f.run().issues.iter().any(|i| i.rule == "capture_permission"),
+            "not on platforms without app recording"
+        );
+        f.project.app_capture.enabled = false;
+        assert!(has(&f.run(), "capture_off", Severity::Warning));
+
+        // burned-in captions in words against an output that delivers a sidecar
+        let r = f.run();
+        let i = r.issues.iter().find(|i| i.rule == "captions_not_burned").expect("caption note");
+        assert_eq!(i.severity, Severity::Info);
+        assert!(i.detail.as_deref().unwrap().contains("delivers captions as a separate file"), "{:?}", i.detail);
+        assert_eq!(i.fix.as_ref().and_then(|f| f.line), Some(22));
     }
 
     #[test]

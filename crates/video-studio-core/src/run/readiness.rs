@@ -31,6 +31,10 @@ pub struct ReadinessReport {
     pub missing_media: Vec<Finding>,
     #[serde(default)]
     pub risks: Vec<Finding>,
+    /// What the production run will record or generate itself. Not a problem, so it never
+    /// counts against the report.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub planned: Vec<Finding>,
     /// Output slug → estimated duration in seconds.
     #[serde(default)]
     pub estimated_durations: BTreeMap<String, f64>,
@@ -88,6 +92,7 @@ impl ReadinessReport {
             assumptions: o.get("assumptions").map(findings_from).unwrap_or_default(),
             missing_media: o.get("missing_media").map(findings_from).unwrap_or_default(),
             risks: o.get("risks").or_else(|| o.get("risky_choices")).map(findings_from).unwrap_or_default(),
+            planned: o.get("planned").or_else(|| o.get("made_by_the_run")).map(findings_from).unwrap_or_default(),
             estimated_durations: durations,
             notes: o.get("notes").and_then(Value::as_str).map(str::to_string),
         })
@@ -119,7 +124,7 @@ impl ReadinessReport {
 
     /// The findings as a prompt for "Ask Claude to fix the spec" (spec §11.2).
     pub fn fix_prompt(&self) -> String {
-        let mut s = String::from("A dry run of this spec found the points below. Update spec.md so a production run has what it needs. Ask me about anything only I can decide.\n");
+        let mut s = String::from("A dry run of this spec found the points below. Update spec.md so a production run has what it needs. Ask me about anything only I can decide.\n\nThe spec describes the video, not this computer or the project's settings. Some points can't be fixed in spec.md: a missing permission, a voice that isn't chosen, an output that isn't added to the run, an API key. Don't write those into the spec as notes or status; tell me in your reply what I need to change and where. If the spec already carries such notes from an earlier dry run, remove them.\n");
         for (title, list) in [
             ("Unclear", &self.ambiguities),
             ("Missing media", &self.missing_media),
@@ -173,8 +178,14 @@ mod tests {
         let prompt = r.fix_prompt();
         assert!(prompt.contains("- Which logo opens the video? (spec.md line 12) — Two logos are attached"));
         assert!(prompt.contains("Missing media:") && prompt.contains("Assumptions"));
+        assert!(prompt.contains("not this computer or the project's settings"));
         assert!(ReadinessReport::parse("not json").is_none());
         assert!(ReadinessReport::parse("[]").is_none());
         assert!(ReadinessReport::parse(r#"{"ready": true}"#).unwrap().is_clean());
+        // What the run makes itself is listed but is not a finding.
+        let p =
+            ReadinessReport::parse(r#"{"ready": true, "planned": ["Recording captures/scene-2.mov, 22 s"]}"#).unwrap();
+        assert!(p.is_clean() && p.findings().is_empty() && p.planned.len() == 1);
+        assert!(!p.fix_prompt().contains("scene-2"));
     }
 }

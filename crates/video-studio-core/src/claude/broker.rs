@@ -331,8 +331,20 @@ impl Policy {
         if args.first().map(String::as_str) == Some("capture") {
             return self.check_capture(&args[1..]);
         }
+        if args.first().map(String::as_str) == Some("standin") {
+            let sub = args.get(1).map(String::as_str).unwrap_or("");
+            if !["video", "audio", "--help", "-h", "help"].contains(&sub) {
+                return Err(format!("`video-studio standin {sub}` isn't a command (video, audio)."));
+            }
+            if self.mode != Mode::DryRun {
+                return Err("Stand-ins are only for dry runs. In a production run, record the footage with `video-studio capture …` and generate the audio with `video-studio eleven …`.".into());
+            }
+            return Ok(());
+        }
         if args.first().map(String::as_str) != Some("eleven") {
-            return Err("Only the `eleven` and `capture` subcommands of video-studio can be run here.".into());
+            return Err(
+                "Only the `eleven`, `capture` and `standin` subcommands of video-studio can be run here.".into()
+            );
         }
         let sub = args.get(1).map(String::as_str).unwrap_or("");
         if !["tts", "music", "sfx", "scribe", "voices", "quote", "--help", "-h", "help"].contains(&sub) {
@@ -342,7 +354,7 @@ impl Policy {
         }
         if self.mode == Mode::DryRun && !["voices", "quote", "--help", "-h", "help"].contains(&sub) {
             return Err(
-                "Audio isn't generated in a dry run. Use `video-studio eleven quote …` to estimate credits instead."
+                "Audio isn't generated in a dry run. Use `video-studio eleven quote …` to estimate credits, and `video-studio standin audio --out audio/<name>.mp3 --seconds <n>` to hold the file's place in the edit."
                     .into(),
             );
         }
@@ -377,7 +389,7 @@ impl Policy {
             return Err("App recording is turned off for this project, so apps can't be driven or recorded in this run. Use only the attached media, and say in summary.md which footage is missing. The user can turn it on under Project › App recording.".into());
         }
         if self.mode == Mode::DryRun && !["check", "--help", "-h", "help"].contains(&sub) {
-            return Err("Apps aren't driven or recorded in a dry run. Plan the recordings (which app, which steps, which file under captures/) and note them in the readiness report; `video-studio capture check` shows whether recording is allowed.".into());
+            return Err("Apps aren't driven or recorded in a dry run. Plan the recordings (which app, which steps, which file under captures/), hold each one's place with `video-studio standin video --out captures/<name>.mov --seconds <n>`, and list them under `planned` in the readiness report; `video-studio capture check` shows whether recording is allowed.".into());
         }
         Ok(())
     }
@@ -846,6 +858,16 @@ mod tests {
         assert_eq!(bash(&dry.policy, "video-studio capture check"), Decision::Allow);
         assert!(denied(bash(&dry.policy, "video-studio capture record start --out a.mov")).contains("dry run"));
         assert!(denied(bash(&dry.policy, "video-studio capture click 1 2")).contains("dry run"));
+        // stand-ins hold the place of run-made files, in dry runs only
+        for ok in [
+            "video-studio standin video --out captures/scene-2.mov --seconds 22 --size 1280x800",
+            "video-studio standin audio --out audio/vo-1.mp3 --seconds 9.5",
+        ] {
+            assert_eq!(bash(&dry.policy, ok), Decision::Allow, "{ok}");
+            assert!(denied(bash(&f.policy, ok)).contains("only for dry runs"), "{ok}");
+        }
+        assert!(denied(bash(&dry.policy, "video-studio standin image --out a.png")).contains("isn't a command"));
+        assert!(denied(bash(&dry.policy, "video-studio eleven tts --text hi --out a.mp3")).contains("standin audio"));
     }
 
     #[test]

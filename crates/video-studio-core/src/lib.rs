@@ -24,6 +24,7 @@ pub mod project;
 pub mod run;
 pub mod settings;
 pub mod spec;
+pub mod standin;
 pub mod timeutil;
 pub mod validation;
 

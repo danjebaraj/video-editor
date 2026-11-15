@@ -105,6 +105,43 @@ struct InspectorSection<Content: View>: View {
 
 /// Project › App recording: whether production runs may drive and record apps, which apps, and
 /// whether macOS allows it.
+/// The two macOS permissions a run needs to drive and record apps.
+enum CapturePermission: String {
+    case screenRecording = "screen_recording"
+    case accessibility
+
+    var title: String { self == .screenRecording ? "Screen Recording" : "Accessibility" }
+    private var pane: String { self == .screenRecording ? "Privacy_ScreenCapture" : "Privacy_Accessibility" }
+
+    private var service: String { self == .screenRecording ? "ScreenCapture" : "Accessibility" }
+
+    /// Registers the app with macOS for this permission, so it is already in the list, then
+    /// opens that list in System Settings. All that is left for the user is the switch.
+    ///
+    /// This is only offered while macOS says the permission is missing. If the list already
+    /// shows the app switched on, that entry belongs to another build: macOS ties a grant to
+    /// the app's code signature, and an ad-hoc signed build gets a new one every time it is
+    /// built. Such an entry can't be reused, so it is cleared first and this build is added.
+    func allow() {
+        if let id = Bundle.main.bundleIdentifier {
+            let reset = Process()
+            reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            reset.arguments = ["reset", service, id]
+            reset.standardOutput = FileHandle.nullDevice
+            reset.standardError = FileHandle.nullDevice
+            if (try? reset.run()) != nil { reset.waitUntilExit() }
+        }
+        switch self {
+        case .screenRecording:
+            CGRequestScreenCaptureAccess()
+        case .accessibility:
+            let prompt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            _ = AXIsProcessTrustedWithOptions([prompt: true] as CFDictionary)
+        }
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { NSWorkspace.shared.open(url) }
+    }
+}
+
 struct AppRecordingSection: View {
     @ObservedObject var document: ProjectDocument
     @State private var permissions: CapturePermissions?
@@ -112,8 +149,8 @@ struct AppRecordingSection: View {
 
     private var capture: AppCapture { document.project.app_capture }
 
-    private func refresh(request: Bool = false) {
-        permissions = try? Core.run("capture.permissions", ["request": request])
+    private func refresh() {
+        permissions = try? Core.run("capture.permissions", ["request": false])
     }
 
     var body: some View {
@@ -132,16 +169,11 @@ struct AppRecordingSection: View {
                 }
                 .onChange(of: appsDraft) { commitApps() }
                 if let p = permissions, p.supported {
-                    permissionRow("Screen recording", ok: p.screen_recording, pane: "Privacy_ScreenCapture")
-                    permissionRow("Accessibility (click and type)", ok: p.accessibility, pane: "Privacy_Accessibility")
+                    permissionRow("Screen recording", ok: p.screen_recording, permission: .screenRecording)
+                    permissionRow("Accessibility (click and type)", ok: p.accessibility, permission: .accessibility)
                     if !p.screen_recording || !p.accessibility {
-                        HStack {
-                            Button("Ask macOS…") { refresh(request: true) }
-                                .help("Shows the macOS permission prompts for Syncfusion Video Studio")
-                            Button("Re-check") { refresh() }
-                        }
-                        .controlSize(.small)
-                        Text("macOS asks once per app. After turning a permission on in System Settings, quit and reopen Syncfusion Video Studio.")
+                        Button("Re-check") { refresh() }.controlSize(.small)
+                        Text("Allow opens System Settings with Syncfusion Video Studio in the list, switched off: turn its switch on. If it was already on, that was for an earlier build of the app, and Allow replaces it. For screen recording, macOS then offers to quit and reopen the app.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 } else if permissions != nil {
@@ -161,16 +193,15 @@ struct AppRecordingSection: View {
         if apps != capture.apps { document.update { $0.app_capture.apps = apps } }
     }
 
-    private func permissionRow(_ title: String, ok: Bool, pane: String) -> some View {
+    private func permissionRow(_ title: String, ok: Bool, permission: CapturePermission) -> some View {
         HStack(spacing: 6) {
             Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill").foregroundStyle(ok ? Color.green : Color.orange)
             Text(title).font(.callout)
             Spacer(minLength: 0)
             if !ok {
-                Button("Open Settings…") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { NSWorkspace.shared.open(url) }
-                }
-                .buttonStyle(.link).controlSize(.small)
+                Button("Allow…") { permission.allow() }
+                    .buttonStyle(.link).controlSize(.small)
+                    .help("Opens System Settings with Syncfusion Video Studio in the \(permission.title) list")
             }
         }
         .accessibilityElement(children: .combine)
