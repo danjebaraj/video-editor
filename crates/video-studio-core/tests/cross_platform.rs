@@ -67,39 +67,46 @@ fn a_crlf_scribe_transcript_and_brand_file_parse() {
 }
 
 #[test]
-fn a_project_made_on_macos_keeps_its_bookmark_when_saved_elsewhere() {
+fn a_move_replaces_this_platforms_file_reference_and_keeps_the_other_platforms() {
     let (_d, root) = tmp();
     std::fs::create_dir_all(root.join("footage")).unwrap();
     std::fs::write(root.join("footage/hero.mov"), b"hero").unwrap();
-    // what the Mac app writes: a bookmark, a POSIX absolute path that doesn't exist here, and a
-    // relative path that does
-    let mac = json!({
+    // a project that has been on both platforms: a Mac bookmark, a Windows file ID, an absolute
+    // path that doesn't exist here, and a relative path that does
+    const BOOKMARK: &str = "Ym9va21hcmstZGF0YQ==";
+    const FILE_ID: &str = "000000001234abcd:deadbeef000102030405060708090aff";
+    let both = json!({
         "format": "video-studio-project", "version": 1, "id": "prj_mac", "name": "From the Mac",
         "created": "2026-11-14T10:00:00Z", "modified": "2026-11-14T10:00:00Z",
         "intent": {"kind": "marketing"}, "spec": "# From the Mac\n",
         "media": [{"id": "m-hero", "kind": "video",
                    "paths": {"absolute": "/Users/ana/Footage/hero.mov", "relative": "footage/hero.mov",
-                             "bookmark_macos": "Ym9va21hcmstZGF0YQ=="}}]
+                             "bookmark_macos": BOOKMARK, "file_id_windows": FILE_ID}}]
     });
     let path = root.join("from-mac.cutproj");
-    std::fs::write(&path, serde_json::to_string_pretty(&mac).unwrap()).unwrap();
+    std::fs::write(&path, serde_json::to_string_pretty(&both).unwrap()).unwrap();
     let mut p = Project::load(&path).unwrap();
+    // a plain save keeps both
+    p.save(&path).unwrap();
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["media"][0]["paths"]["bookmark_macos"], BOOKMARK);
+    assert_eq!(saved["media"][0]["paths"]["file_id_windows"], FILE_ID);
+    // the file is found somewhere else: this platform's reference pointed at the old place, so it
+    // is replaced (dropped here, where nothing can make a bookmark); the other platform's is kept
     let refs = video_studio_core::platform::system_file_refs();
     let res = media::resolve_all(&p, Some(&path), &[], refs.as_ref());
     assert_eq!(res[0].status, MediaStatus::Moved, "found by its relative path: {res:?}");
     media::apply_resolutions(&mut p, Some(&path), &res, refs.as_ref());
     p.save(&path).unwrap();
-    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(saved["media"][0]["paths"]["bookmark_macos"], "Ym9va21hcmstZGF0YQ==", "the Mac's bookmark is kept");
-    // and the other way round: a Windows file ID survives a save on any platform
-    p.media[0].paths.file_id_windows = Some("000000001234abcd:deadbeef000102030405060708090aff".into());
-    p.save(&path).unwrap();
     let again = Project::load(&path).unwrap();
-    assert_eq!(
-        again.media[0].paths.file_id_windows.as_deref(),
-        Some("000000001234abcd:deadbeef000102030405060708090aff")
-    );
-    assert_eq!(again.media[0].paths.bookmark_macos.as_deref(), Some("Ym9va21hcmstZGF0YQ=="));
+    let paths = &again.media[0].paths;
+    if cfg!(windows) {
+        assert_eq!(paths.bookmark_macos.as_deref(), Some(BOOKMARK), "the Mac's bookmark is kept");
+        assert_ne!(paths.file_id_windows.as_deref(), Some(FILE_ID), "the file ID is this file's now");
+    } else {
+        assert_eq!(paths.file_id_windows.as_deref(), Some(FILE_ID), "the Windows file ID is kept");
+        assert_eq!(paths.bookmark_macos, None, "the stale bookmark is dropped");
+    }
 }
 
 #[cfg(windows)]

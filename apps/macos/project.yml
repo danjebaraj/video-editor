@@ -5,13 +5,14 @@ options:
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
+# Code signing lives in Signing.xcconfig, which a machine overrides in Signing.local.xcconfig.
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    DEVELOPMENT_TEAM: ""
-    CODE_SIGN_IDENTITY: "-"
-    CODE_SIGN_STYLE: Manual
     ENABLE_HARDENED_RUNTIME: NO
     SWIFT_STRICT_CONCURRENCY: minimal
     # The Rust core is built for this Mac's architecture only, so the app is too (Release would
@@ -67,7 +68,8 @@ targets:
             # Test doubles for the in-app self test.
             cp "$SRCROOT/build/core/vs-fake-claude" "$SRCROOT/build/core/vs-fake-cutline" "$DEST/"
           fi
-          codesign --force --sign - "$DEST"/* 2>/dev/null || true
+          # Same signature as the app, so a signed app's helpers are signed with its certificate.
+          codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" "$DEST"/*
         basedOnDependencyAnalysis: false
         showEnvVars: false
     settings:

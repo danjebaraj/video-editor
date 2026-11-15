@@ -33,6 +33,12 @@ apps/macos/build.sh install                   # Release, copied to /Applications
 
 `build.sh` builds the core, generates the Swift bindings into `apps/macos/Generated/`, generates the Xcode project and builds the app. The bundle carries the `video-studio` helper in `Contents/Helpers/`.
 
+### Signing (macOS)
+
+By default the app is signed ad hoc, which needs no certificate. macOS ties the recording permissions to the signature, and an ad-hoc signature changes with every build, so the permissions must be allowed again after each one.
+
+To keep them across builds, sign with a certificate on the Mac: copy `apps/macos/Signing.local.xcconfig.example` to `apps/macos/Signing.local.xcconfig` and set `CODE_SIGN_IDENTITY` and `DEVELOPMENT_TEAM` (`security find-identity -v -p codesigning` lists the certificates). The file is not in source control, so each machine uses its own. The app and its helpers are signed with it in every `build.sh` mode and when building from Xcode.
+
 ## The app
 
 One window per project: a sidebar (Outline, Media, Runs), the spec in the middle (source or preview, ⌘/), and an inspector (Claude, Project, Outputs, Validation, Run). The toolbar has the brand preset, the run config, Validate (⌘B), Run (⌘R) and Stop (⌘.). The App Library (⇧⌘B) holds brand presets and output presets.
@@ -98,7 +104,7 @@ When a spec asks for footage of an app that isn't attached (a `- **Record:**` li
 - Project › App recording turns this on or off (on by default) and can limit it to named apps. With no list, any app can be driven except terminals, System Settings, password managers and Finder.
 - Every action is checked by the helper: it acts only on the app it was pointed at, opens only app names and http(s) addresses, and writes only under `captures/`. `osascript`, `screencapture` and `open` themselves stay blocked.
 - Recordings have a fixed length (`record start --seconds <n>`, then `record wait`), because the system recorder can't be stopped early without losing the file. The edit trims them.
-- macOS must allow **Screen & System Audio Recording** and **Accessibility** for Syncfusion Video Studio (or for the terminal, when using the CLI). The Project inspector shows both and links to the settings. The app is signed ad hoc, so a rebuilt app may need the permissions granted again.
+- macOS must allow **Screen & System Audio Recording** and **Accessibility** for Syncfusion Video Studio (or for the terminal, when using the CLI). The Project inspector shows both and links to the settings. Unless the app is signed with a certificate (see [Signing](#signing-macos)), a rebuilt app needs the permissions allowed again.
 - The pointer and keyboard are shared with whoever is at the Mac while a run drives an app.
 - The platform part is one trait (`capture::Backend`), with a fake for tests (`VIDEO_STUDIO_CAPTURE_FAKE`). Windows has its own backend: see [Recording apps on Windows](#recording-apps-on-windows).
 

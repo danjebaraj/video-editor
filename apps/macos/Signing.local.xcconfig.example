@@ -1,0 +1,10 @@
+// Copy to Signing.local.xcconfig (not in source control) and fill in.
+//
+// List this Mac's certificates with:
+//   security find-identity -v -p codesigning
+//
+// CODE_SIGN_IDENTITY takes the certificate's name ("Developer ID Application: Your Name (TEAMID)")
+// or the 40-character hash printed before it. DEVELOPMENT_TEAM is the ID in the parentheses of a
+// Developer ID certificate.
+CODE_SIGN_IDENTITY = Developer ID Application: Your Name (TEAMID)
+DEVELOPMENT_TEAM = TEAMID
