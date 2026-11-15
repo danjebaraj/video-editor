@@ -315,7 +315,8 @@ pub fn request_allowed(url: &str, origins: &[String], dirs: &[PathBuf]) -> bool 
     if url.starts_with("file://") {
         return crate::url_to_path(url)
             .and_then(|p| p.canonicalize().ok())
-            .is_some_and(|p| dirs.iter().any(|d| p.starts_with(d)));
+            .map(|p| crate::plain_path(&p))
+            .is_some_and(|p| dirs.iter().any(|d| p.starts_with(crate::plain_path(d))));
     }
     let Some(o) = origin(url) else { return false };
     let host = o.split_once("://").map(|x| x.1).unwrap_or("");
@@ -914,7 +915,9 @@ fn encode(tc: &cutline_deps::Toolchain, cap: &Captured, fps: f64, work: &Path, o
     if let Some((p, _)) = cap.frames.last() {
         list.push_str(&format!("file '{}'\n", p.file_name().and_then(|n| n.to_str()).unwrap_or_default()));
     }
-    let lp = work.join("frames.ffconcat");
+    // ffmpeg resolves the entries against the list's folder and can't do that through a
+    // Windows verbatim (`\\?\`) path, so give it the plain form.
+    let lp = crate::plain_path(&work.join("frames.ffconcat"));
     std::fs::write(&lp, list)?;
     let frames = (cap.events.duration * fps).round().max(1.0) as i64;
     let o = tc

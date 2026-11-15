@@ -1,0 +1,32 @@
+{
+  "name": "video-studio-win-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Syncfusion Video Studio for Windows: the window content (ui/spec.md §23.3)",
+  "type": "module",
+  "scripts": {
+    "gen": "node scripts/gen-types.mjs",
+    "build": "npm run gen && tsc --noEmit && vite build",
+    "dev": "vite",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.18.0",
+    "@codemirror/commands": "^6.8.0",
+    "@codemirror/lang-markdown": "^6.3.0",
+    "@codemirror/language": "^6.11.0",
+    "@codemirror/language-data": "^6.5.0",
+    "@codemirror/lint": "^6.8.0",
+    "@codemirror/merge": "^6.10.0",
+    "@codemirror/search": "^6.5.0",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.0",
+    "@fluentui/tokens": "^1.0.0-alpha.0",
+    "@fluentui/web-components": "^3.0.0"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  }
+}

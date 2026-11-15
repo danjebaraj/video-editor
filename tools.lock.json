@@ -2,6 +2,16 @@
   "version": 1,
   "tools": [
     {
+      "name": "chrome-headless-shell",
+      "version": "157.0.8103.78",
+      "platform": "windows-x86_64",
+      "url": "https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.78/win64/chrome-headless-shell-win64.zip",
+      "sha256": "2138c1583d25d6f3abec5269943b2f430207d87a539895aa9e90cc4697ec0e1f",
+      "installed_at": null,
+      "selftest": null,
+      "license": "BSD-3-Clause and others (Chromium)"
+    },
+    {
       "name": "ffmpeg",
       "version": "9.0.2",
       "platform": "linux-arm64",
@@ -38,6 +48,16 @@
       "url": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1789931006_9.0.2/ffmpeg.zip",
       "sha256": "7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4",
       "installed_at": null,
+      "selftest": null,
+      "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "ffmpeg+ffprobe",
+      "version": "9.0",
+      "platform": "windows-x86_64",
+      "url": "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-win64-gpl-9.0.zip",
+      "sha256": "7c82cc4d0539cb8cdaa2946fa1b00109180da36641129a42bfa6d3301daad522",
+      "installed_at": "unix:1794709691",
       "selftest": null,
       "license": "GPL-2.0-or-later (static build)"
     },
@@ -80,6 +100,26 @@
       "installed_at": null,
       "selftest": null,
       "license": "GPL-2.0-or-later (static build)"
+    },
+    {
+      "name": "whisper-base.en",
+      "version": "ggml-base.en.bin",
+      "platform": "any",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+      "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+      "installed_at": null,
+      "selftest": null,
+      "license": "MIT"
+    },
+    {
+      "name": "yunet",
+      "version": "face_detection_yunet_2023mar.onnx",
+      "platform": "any",
+      "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+      "installed_at": null,
+      "selftest": null,
+      "license": "MIT (OpenCV Zoo)"
     }
   ]
 }

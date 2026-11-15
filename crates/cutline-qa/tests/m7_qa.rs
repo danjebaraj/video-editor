@@ -161,8 +161,9 @@ fn review_pack_respects_limits() {
     assert!(r.images.len() <= cutline_qa::review::MAX_IMAGES);
     assert!(r.images.iter().any(|p| p.ends_with("contact_sheet.jpg")));
     assert!(r.images.iter().any(|p| p.ends_with("audio.png")));
-    assert!(r.images.iter().any(|p| p.to_string_lossy().contains("/cuts/")));
-    assert!(r.images.iter().any(|p| p.to_string_lossy().contains("/captions/")));
+    let in_dir = |p: &std::path::PathBuf, dir: &str| p.parent().and_then(|d| d.file_name()) == Some(dir.as_ref());
+    assert!(r.images.iter().any(|p| in_dir(p, "cuts")));
+    assert!(r.images.iter().any(|p| in_dir(p, "captions")));
     for p in &r.images {
         let (w, h) = image::image_dimensions(p).unwrap();
         assert!(w.max(h) <= cutline_qa::review::MAX_SIDE, "{} is {w}x{h}", p.display());

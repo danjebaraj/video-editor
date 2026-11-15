@@ -1,0 +1,5 @@
+// Icon and manifest for every binary of the Windows shell.
+#include <winuser.h>
+
+1 ICON "app.ico"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"

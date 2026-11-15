@@ -369,9 +369,22 @@ pub fn safe_file_name(name: &str) -> String {
     let cleaned = cleaned.trim_matches(|c| c == '.' || c == ' ').to_string();
     if cleaned.is_empty() {
         "Untitled".into()
+    } else if is_reserved_windows_name(&cleaned) {
+        // Windows can't create `CON`, `NUL.mp4`, `COM1`… on any platform's behalf: a project
+        // made on a Mac must still render on Windows (ui/spec.md §23.5).
+        format!("{cleaned}-")
     } else {
         cleaned
     }
+}
+
+/// `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, with or without an extension.
+pub fn is_reserved_windows_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
 impl Project {
@@ -688,6 +701,7 @@ fn rebase_media(project: &mut Project, old_path: Option<&Utf8Path>, new_path: &U
             if let Ok(rest) = Utf8Path::new(a).strip_prefix(os) {
                 abs = Some(new_sidecar.join(rest).to_string());
                 m.paths.bookmark_macos = None;
+                m.paths.file_id_windows = None;
             }
         }
         if let Some(a) = &abs {

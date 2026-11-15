@@ -1,0 +1,1033 @@
+{
+  "$defs": {
+    "AllowMediaArgs": {
+      "properties": {
+        "add": {
+          "default": false,
+          "description": "Add to what is allowed (run outputs, logs) instead of replacing the project's list.",
+          "type": "boolean"
+        },
+        "files": {
+          "description": "Absolute paths of the project's resolved media files.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sidecar": {
+          "default": null,
+          "description": "The project's `.assets` sidecar folder, whose images are allowed too.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "type": "object"
+    },
+    "AnswerArgs": {
+      "properties": {
+        "answers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "question_id": {
+          "type": "string"
+        },
+        "token": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token",
+        "question_id"
+      ],
+      "type": "object"
+    },
+    "AssistantStartArgs": {
+      "properties": {
+        "request": {
+          "description": "A core `AssistantRequest`."
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
+    "ConfirmArgs": {
+      "properties": {
+        "buttons": {
+          "description": "Button labels, the default first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "message": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "warning": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "message",
+        "buttons"
+      ],
+      "type": "object"
+    },
+    "CoreArgs": {
+      "properties": {
+        "args": {
+          "default": null
+        },
+        "method": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "type": "object"
+    },
+    "CutlineAction": {
+      "enum": [
+        "doctor",
+        "install_deps"
+      ],
+      "type": "string"
+    },
+    "CutlineArgs": {
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/CutlineAction"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "DirtyArgs": {
+      "properties": {
+        "dirty": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "dirty"
+      ],
+      "type": "object"
+    },
+    "FileFilter": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "spec": {
+          "description": "`*.cutproj;*.json`",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "spec"
+      ],
+      "type": "object"
+    },
+    "HostError": {
+      "properties": {
+        "code": {
+          "description": "The core's stable error codes (`not_found`, `environment`, `bad_request`, …) or `shell`.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "HostMessage": {
+      "description": "Shell → UI.",
+      "oneOf": [
+        {
+          "properties": {
+            "error": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/HostError"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "id": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "response",
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "result": true
+          },
+          "required": [
+            "kind",
+            "id",
+            "ok"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": true,
+            "kind": {
+              "const": "event",
+              "type": "string"
+            },
+            "topic": {
+              "$ref": "#/$defs/Topic"
+            }
+          },
+          "required": [
+            "kind",
+            "topic",
+            "data"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Method": {
+      "description": "Everything the UI can ask of the shell.",
+      "oneOf": [
+        {
+          "enum": [
+            "run.cancel",
+            "run.kill",
+            "run.answer",
+            "assistant.stop",
+            "assistant.answer",
+            "assistant.dismiss",
+            "shell.info",
+            "shell.reveal",
+            "shell.open",
+            "shell.open_url",
+            "shell.notify",
+            "shell.set_title",
+            "shell.set_dirty",
+            "shell.quit",
+            "shell.recent",
+            "shell.add_recent",
+            "secret.set",
+            "secret.test",
+            "secret.delete"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "core",
+          "description": "One core operation, exactly as the macOS shell calls it: [`CoreArgs`].",
+          "type": "string"
+        },
+        {
+          "const": "project.store_pasted_image",
+          "description": "Stores a pasted image in the project's `.assets` sidecar: [`PastedImageArgs`] → path.",
+          "type": "string"
+        },
+        {
+          "const": "run.start",
+          "description": "[`RunStartArgs`] → [`RunStarted`]. Events arrive on the `run` topic.",
+          "type": "string"
+        },
+        {
+          "const": "assistant.start",
+          "description": "[`AssistantStartArgs`] → `{token}`. Events arrive on the `assistant` topic.",
+          "type": "string"
+        },
+        {
+          "const": "dialog.open",
+          "description": "[`OpenDialogArgs`] → `string[]` (empty when cancelled).",
+          "type": "string"
+        },
+        {
+          "const": "dialog.save",
+          "description": "[`SaveDialogArgs`] → `string | null`.",
+          "type": "string"
+        },
+        {
+          "const": "dialog.confirm",
+          "description": "[`ConfirmArgs`] → index of the button chosen.",
+          "type": "string"
+        },
+        {
+          "const": "shell.progress",
+          "description": "[`ProgressArgs`]: taskbar progress for this window.",
+          "type": "string"
+        },
+        {
+          "const": "shell.open_window",
+          "description": "[`OpenWindowArgs`]: a project, the App Library, Settings or the start window.",
+          "type": "string"
+        },
+        {
+          "const": "shell.close_window",
+          "description": "Closes this window (the UI has saved first).",
+          "type": "string"
+        },
+        {
+          "const": "shell.watch",
+          "description": "[`PathArgs`]: report changes to this file on the `file_changed` topic.",
+          "type": "string"
+        },
+        {
+          "const": "shell.allow_media",
+          "description": "[`AllowMediaArgs`]: the files this window may load through the media host.",
+          "type": "string"
+        },
+        {
+          "const": "shell.media_url",
+          "description": "[`PathArgs`] → URL of an allowed media file on the media host.",
+          "type": "string"
+        },
+        {
+          "const": "secret.status",
+          "description": "[`SecretArgs`]: the ElevenLabs key, through the bundled helper (never read by the app).",
+          "type": "string"
+        },
+        {
+          "const": "shell.write_text",
+          "description": "[`WriteTextArgs`]: writes a text file the user just chose in a Save dialog (Export Spec).",
+          "type": "string"
+        },
+        {
+          "const": "shell.recycle",
+          "description": "[`RecycleArgs`] → `{moved}`: moves pasted images from a `.cutproj.assets` sidecar to the\nRecycle Bin (Clean Up Pasted Images). Nothing else can be deleted this way.",
+          "type": "string"
+        },
+        {
+          "const": "assistant.load_sessions",
+          "description": "[`SessionsArgs`] → the project's saved assistant transcripts (`[]` when none).",
+          "type": "string"
+        },
+        {
+          "const": "assistant.save_sessions",
+          "description": "[`SessionsArgs`] with `sessions`: writes them.",
+          "type": "string"
+        },
+        {
+          "const": "assistant.delete_session",
+          "description": "[`SessionsArgs`] with `session_id`: removes that session's scratch folder.",
+          "type": "string"
+        },
+        {
+          "const": "shell.cutline",
+          "description": "[`CutlineArgs`] → `{code, output}`: `cutline doctor` or `cutline deps install --all`.",
+          "type": "string"
+        },
+        {
+          "const": "shell.snapshot",
+          "description": "[`PathArgs`]: saves a PNG of this window's content (self test, UI tests).",
+          "type": "string"
+        },
+        {
+          "const": "selftest.report",
+          "description": "[`SelfTestReport`]: a self-test step finished (self test only).",
+          "type": "string"
+        },
+        {
+          "const": "selftest.fs",
+          "description": "[`SelfTestFsArgs`]: renames, copies or removes a folder inside the self test's scratch\nfolder (the relink step). Refused outside the self test.",
+          "type": "string"
+        }
+      ]
+    },
+    "NotifyArgs": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body"
+      ],
+      "type": "object"
+    },
+    "OpenArgs": {
+      "properties": {
+        "application": {
+          "default": null,
+          "description": "`None`: the default app. `\"\"`: the Open With dialog. Otherwise a program to open it with.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "OpenDialogArgs": {
+      "properties": {
+        "default_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FileFilter"
+          },
+          "type": "array"
+        },
+        "folders": {
+          "default": false,
+          "type": "boolean"
+        },
+        "multiple": {
+          "default": false,
+          "type": "boolean"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OpenWindowArgs": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/WindowKind"
+        },
+        "options": {
+          "default": null,
+          "description": "For an untitled project: what to make (`{name, intent, template}`)."
+        },
+        "path": {
+          "default": null,
+          "description": "The project file, for a project window. Omitted: an untitled project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PastedImageArgs": {
+      "properties": {
+        "image_base64": {
+          "description": "The image bytes (PNG, JPEG, …), base64.",
+          "type": "string"
+        },
+        "project_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_path",
+        "image_base64"
+      ],
+      "type": "object"
+    },
+    "PathArgs": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ProgressArgs": {
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/ProgressState"
+        },
+        "value": {
+          "default": null,
+          "description": "0…1",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "ProgressState": {
+      "enum": [
+        "none",
+        "normal",
+        "indeterminate",
+        "error",
+        "paused"
+      ],
+      "type": "string"
+    },
+    "RecycleArgs": {
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "Request": {
+      "description": "UI → shell.",
+      "properties": {
+        "args": {
+          "default": null
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "$ref": "#/$defs/Method"
+        }
+      },
+      "required": [
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "RunEvent": {
+      "description": "Payload of a `run` event: one core event, or the run's end with its outcome.",
+      "properties": {
+        "event": true,
+        "finished": true,
+        "token": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "type": "object"
+    },
+    "RunStartArgs": {
+      "properties": {
+        "options": {
+          "default": null,
+          "description": "Options only the shell knows are filled in by it (`helper`, `eleven_key_present`)."
+        },
+        "request": {
+          "description": "A core `RunRequest`."
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
+    "RunStarted": {
+      "properties": {
+        "folder": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "token": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token",
+        "run_id",
+        "folder"
+      ],
+      "type": "object"
+    },
+    "SaveDialogArgs": {
+      "properties": {
+        "default_name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FileFilter"
+          },
+          "type": "array"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SecretArgs": {
+      "properties": {
+        "value": {
+          "default": null,
+          "description": "For `secret.set`: the key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SelfTestFsArgs": {
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "op": {
+          "description": "`rename`, `copy` or `remove`.",
+          "type": "string"
+        },
+        "to": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "op",
+        "from"
+      ],
+      "type": "object"
+    },
+    "SelfTestReport": {
+      "properties": {
+        "detail": {
+          "default": "",
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "step": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "SessionsArgs": {
+      "properties": {
+        "project_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessions": {
+          "default": null
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "ShellInfo": {
+      "description": "`shell.info`: what the UI needs to know about the machine and the shell.",
+      "properties": {
+        "app_version": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "core_version": {
+          "type": "string"
+        },
+        "debug": {
+          "type": "boolean"
+        },
+        "helper": {
+          "type": "string"
+        },
+        "options": {
+          "default": null
+        },
+        "path": {
+          "default": null,
+          "description": "Files passed on the command line for this window.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": "string"
+        },
+        "selftest": {
+          "type": "boolean"
+        },
+        "theme": {
+          "$ref": "#/$defs/ThemeInfo"
+        },
+        "webview_version": {
+          "type": "string"
+        },
+        "window_id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_kind": {
+          "$ref": "#/$defs/WindowKind"
+        }
+      },
+      "required": [
+        "app_version",
+        "core_version",
+        "platform",
+        "arch",
+        "window_kind",
+        "window_id",
+        "helper",
+        "webview_version",
+        "debug",
+        "selftest",
+        "theme"
+      ],
+      "type": "object"
+    },
+    "ThemeInfo": {
+      "properties": {
+        "accent": {
+          "description": "`#rrggbb`",
+          "type": "string"
+        },
+        "dark": {
+          "type": "boolean"
+        },
+        "high_contrast": {
+          "type": "boolean"
+        },
+        "mica": {
+          "default": false,
+          "description": "The Mica backdrop shows through the page. False when transparency effects are off, in\nhigh contrast, and for snapshots: the page then paints a solid background.",
+          "type": "boolean"
+        },
+        "scale": {
+          "description": "Scale factor of the window's monitor (1.0 = 96 DPI).",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "dark",
+        "high_contrast",
+        "accent",
+        "scale"
+      ],
+      "type": "object"
+    },
+    "TitleArgs": {
+      "properties": {
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "type": "object"
+    },
+    "TokenArgs": {
+      "properties": {
+        "token": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "type": "object"
+    },
+    "Topic": {
+      "oneOf": [
+        {
+          "const": "run",
+          "description": "A run event (`events.ndjson` schema), with the run's `token`: [`RunEvent`].",
+          "type": "string"
+        },
+        {
+          "const": "assistant",
+          "description": "An assistant event, with the turn's `token`.",
+          "type": "string"
+        },
+        {
+          "const": "menu",
+          "description": "A menu command or accelerator: `{command}`.",
+          "type": "string"
+        },
+        {
+          "const": "theme",
+          "description": "The system theme, contrast, accent or DPI changed: [`ThemeInfo`].",
+          "type": "string"
+        },
+        {
+          "const": "file_changed",
+          "description": "A watched file changed on disk: `{path}`.",
+          "type": "string"
+        },
+        {
+          "const": "open_files",
+          "description": "Files to open (double-click, jump list, a second instance): `{paths}`.",
+          "type": "string"
+        },
+        {
+          "const": "close_requested",
+          "description": "The user asked to close the window: save, then `shell.close_window`.",
+          "type": "string"
+        },
+        {
+          "const": "self_test",
+          "description": "The self test asks the UI to perform a step: `{step, args}`.",
+          "type": "string"
+        }
+      ]
+    },
+    "UrlArgs": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "WindowKind": {
+      "enum": [
+        "start",
+        "project",
+        "library",
+        "settings"
+      ],
+      "type": "string"
+    },
+    "WriteTextArgs": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "allow_media_args": {
+      "$ref": "#/$defs/AllowMediaArgs"
+    },
+    "answer_args": {
+      "$ref": "#/$defs/AnswerArgs"
+    },
+    "assistant_start_args": {
+      "$ref": "#/$defs/AssistantStartArgs"
+    },
+    "confirm_args": {
+      "$ref": "#/$defs/ConfirmArgs"
+    },
+    "core_args": {
+      "$ref": "#/$defs/CoreArgs"
+    },
+    "cutline_args": {
+      "$ref": "#/$defs/CutlineArgs"
+    },
+    "dirty_args": {
+      "$ref": "#/$defs/DirtyArgs"
+    },
+    "host_message": {
+      "$ref": "#/$defs/HostMessage"
+    },
+    "notify_args": {
+      "$ref": "#/$defs/NotifyArgs"
+    },
+    "open_args": {
+      "$ref": "#/$defs/OpenArgs"
+    },
+    "open_dialog_args": {
+      "$ref": "#/$defs/OpenDialogArgs"
+    },
+    "open_window_args": {
+      "$ref": "#/$defs/OpenWindowArgs"
+    },
+    "pasted_image_args": {
+      "$ref": "#/$defs/PastedImageArgs"
+    },
+    "path_args": {
+      "$ref": "#/$defs/PathArgs"
+    },
+    "progress_args": {
+      "$ref": "#/$defs/ProgressArgs"
+    },
+    "recycle_args": {
+      "$ref": "#/$defs/RecycleArgs"
+    },
+    "request": {
+      "$ref": "#/$defs/Request"
+    },
+    "run_event": {
+      "$ref": "#/$defs/RunEvent"
+    },
+    "run_start_args": {
+      "$ref": "#/$defs/RunStartArgs"
+    },
+    "run_started": {
+      "$ref": "#/$defs/RunStarted"
+    },
+    "save_dialog_args": {
+      "$ref": "#/$defs/SaveDialogArgs"
+    },
+    "secret_args": {
+      "$ref": "#/$defs/SecretArgs"
+    },
+    "self_test_fs_args": {
+      "$ref": "#/$defs/SelfTestFsArgs"
+    },
+    "self_test_report": {
+      "$ref": "#/$defs/SelfTestReport"
+    },
+    "sessions_args": {
+      "$ref": "#/$defs/SessionsArgs"
+    },
+    "shell_info": {
+      "$ref": "#/$defs/ShellInfo"
+    },
+    "title_args": {
+      "$ref": "#/$defs/TitleArgs"
+    },
+    "token_args": {
+      "$ref": "#/$defs/TokenArgs"
+    },
+    "url_args": {
+      "$ref": "#/$defs/UrlArgs"
+    },
+    "write_text_args": {
+      "$ref": "#/$defs/WriteTextArgs"
+    }
+  },
+  "required": [
+    "request",
+    "host_message",
+    "core_args",
+    "pasted_image_args",
+    "run_start_args",
+    "run_started",
+    "run_event",
+    "token_args",
+    "answer_args",
+    "assistant_start_args",
+    "open_dialog_args",
+    "save_dialog_args",
+    "confirm_args",
+    "path_args",
+    "open_args",
+    "url_args",
+    "notify_args",
+    "progress_args",
+    "title_args",
+    "dirty_args",
+    "open_window_args",
+    "allow_media_args",
+    "secret_args",
+    "cutline_args",
+    "sessions_args",
+    "write_text_args",
+    "self_test_fs_args",
+    "recycle_args",
+    "self_test_report",
+    "shell_info"
+  ],
+  "title": "Bridge",
+  "type": "object"
+}

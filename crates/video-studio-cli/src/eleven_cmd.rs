@@ -128,7 +128,13 @@ fn check_length(length: f64, max: f64, what: &str) -> Result<(), Error> {
 
 fn generate(ctx: &HelperContext, req: Request, out: &str, secrets: &dyn Secrets) -> Result<(), Error> {
     let r = eleven::execute(ctx, &req, out, secrets)?;
-    let shown = r.out.strip_prefix(&ctx.run_folder).map(|p| p.to_string()).unwrap_or_else(|_| r.out.to_string());
+    // Relative to the run folder, with forward slashes, as Claude writes paths in its commands.
+    let shown = video_studio_core::paths::strip_path_prefix(
+        &video_studio_core::paths::normalize(&r.out),
+        &video_studio_core::paths::normalize(&ctx.run_folder),
+    )
+    .map(|p| p.as_str().replace('\\', "/"))
+    .unwrap_or_else(|| r.out.to_string());
     if r.cached {
         println!("{shown} (from cache, 0 credits; {} of {} used in this run)", r.spent, r.cap);
     } else {

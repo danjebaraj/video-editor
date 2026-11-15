@@ -198,15 +198,24 @@ mod tests {
         assert_eq!(subcommand(&a("--version")), None);
     }
 
-    #[cfg(unix)]
     #[test]
     fn logs_each_invocation_and_blocks_render_in_dry_runs() {
-        use std::os::unix::fs::PermissionsExt;
         let d = tempfile::tempdir().unwrap();
         let dir = camino::Utf8Path::from_path(d.path()).unwrap();
-        let fake = dir.join("real-cutline");
-        std::fs::write(&fake, "#!/bin/sh\necho \"out $*\"\necho \"segment 1/2\" >&2\nexit 3\n").unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        let fake = {
+            use std::os::unix::fs::PermissionsExt;
+            let fake = dir.join("real-cutline");
+            std::fs::write(&fake, "#!/bin/sh\necho \"out $*\"\necho \"segment 1/2\" >&2\nexit 3\n").unwrap();
+            std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+            fake
+        };
+        #[cfg(windows)]
+        let fake = {
+            let fake = dir.join("real-cutline.cmd");
+            std::fs::write(&fake, "@echo out %*\r\n@echo segment 1/2 1>&2\r\n@exit /b 3\r\n").unwrap();
+            fake
+        };
         let run = dir.join("run");
         std::fs::create_dir_all(run.join("logs")).unwrap();
         let mut ctx = HelperContext {

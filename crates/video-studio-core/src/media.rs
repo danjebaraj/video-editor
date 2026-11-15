@@ -80,6 +80,29 @@ pub struct MediaPaths {
     /// Security-scoped bookmark (base64), when the macOS shell could make one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bookmark_macos: Option<String>,
+    /// `<volume serial>:<128-bit file ID>` (hex), when made on Windows. Each platform uses its own
+    /// entry, ignores the other's and keeps it when saving (ui/spec.md §6.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id_windows: Option<String>,
+}
+
+impl MediaPaths {
+    /// This platform's durable reference: the file ID on Windows, the bookmark elsewhere.
+    pub fn platform_ref(&self) -> Option<&String> {
+        if cfg!(windows) {
+            self.file_id_windows.as_ref()
+        } else {
+            self.bookmark_macos.as_ref()
+        }
+    }
+
+    pub fn set_platform_ref(&mut self, r: Option<String>) {
+        if cfg!(windows) {
+            self.file_id_windows = r;
+        } else {
+            self.bookmark_macos = r;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -149,7 +172,7 @@ impl MediaItem {
             id: id.to_string(),
             kind,
             role: None,
-            paths: MediaPaths { absolute: Some(absolute.to_string()), relative: None, bookmark_macos: None },
+            paths: MediaPaths { absolute: Some(absolute.to_string()), ..Default::default() },
             fingerprint: None,
             probe: None,
             notes: None,
@@ -274,7 +297,7 @@ fn project_dir(project_path: Option<&Utf8Path>) -> Utf8PathBuf {
 fn set_location(item: &mut MediaItem, file: &Utf8Path, project_path: Option<&Utf8Path>, refs: &dyn FileRefs) {
     let abs = paths::normalize(file);
     item.paths.relative = project_path.and_then(|_| paths::relative_to(&abs, &project_dir(project_path)));
-    item.paths.bookmark_macos = refs.create(&abs).or(None);
+    item.paths.set_platform_ref(refs.create(&abs));
     item.paths.absolute = Some(abs.to_string());
 }
 
@@ -495,7 +518,7 @@ pub fn resolve_item(
     let stored = item.paths.absolute.clone().or_else(|| item.paths.relative.clone());
     let stored_abs = item.paths.absolute.as_ref().map(|a| paths::normalize(Utf8Path::new(a)));
     let mut found: Option<(Utf8PathBuf, FoundBy)> = None;
-    if let Some(b) = &item.paths.bookmark_macos {
+    if let Some(b) = item.paths.platform_ref() {
         if let Some(p) = refs.resolve(b).filter(|p| p.is_file()) {
             found = Some((p, FoundBy::Bookmark));
         }
@@ -666,15 +689,23 @@ pub fn suggest_prefix_fix(old_abs: &str, new_abs: &str) -> Option<PrefixFix> {
 
 /// Applies a prefix rewrite to a stored path, if it starts with the old prefix.
 pub fn rewrite_prefix(stored: &str, fix: &PrefixFix) -> Option<String> {
-    let rest = stored.strip_prefix(&fix.old_prefix)?;
+    // A Windows prefix (`D:\Footage`, `\\server\share`) matches regardless of case and separator:
+    // `d:/footage/x.mov` was stored by the same drive.
+    let windows_like = |p: &str| p.as_bytes().get(1) == Some(&b':') || p.starts_with("\\\\") || p.starts_with("//");
+    let rest = if windows_like(&fix.old_prefix) {
+        let fold = |s: &str| s.replace('\\', "/").to_lowercase();
+        let n = fix.old_prefix.len();
+        (stored.len() >= n && stored.is_char_boundary(n) && fold(&stored[..n]) == fold(&fix.old_prefix))
+            .then(|| &stored[n..])?
+    } else {
+        stored.strip_prefix(&fix.old_prefix)?
+    };
     if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
         return None;
     }
-    let rest = if fix.new_prefix.contains('/') || !fix.new_prefix.contains('\\') {
-        rest.replace('\\', "/")
-    } else {
-        rest.to_string()
-    };
+    // The new prefix decides the separator: `D:` and `\\nas\share` take backslashes.
+    let backslashes = !fix.new_prefix.contains('/') && (fix.new_prefix.contains('\\') || windows_like(&fix.new_prefix));
+    let rest = if backslashes { rest.replace('/', "\\") } else { rest.replace('\\', "/") };
     Some(format!("{}{}", fix.new_prefix, rest))
 }
 
@@ -978,7 +1009,7 @@ mod tests {
                 .unwrap()
                 .expect("a prefix fix is offered");
         assert_eq!(fix.old_prefix, root.to_string());
-        assert_eq!(fix.new_prefix, root.join("Volumes/Work").to_string());
+        assert_eq!(fix.new_prefix, crate::paths::normalize(&root.join("Volumes/Work")).to_string());
         let would = prefix_fix_candidates(&p, Some(&path), &fix, &NoFileRefs);
         assert_eq!(would.len(), 2);
         let done = apply_prefix_fix(&mut p, Some(&path), &fix, &NoFileRefs);
@@ -1017,6 +1048,18 @@ mod tests {
         let w = suggest_prefix_fix("D:\\Footage\\day1\\x.mov", "/Volumes/Work/Footage/day1/x.mov").unwrap();
         assert_eq!(w.old_prefix, "D:");
         assert_eq!(rewrite_prefix("D:\\Footage\\music\\t.wav", &w).unwrap(), "/Volumes/Work/Footage/music/t.wav");
+        // and back: a Mac project opened on Windows (ui/spec.md §23.5)
+        let m = suggest_prefix_fix("/Volumes/Footage/day1/x.mov", "D:\\Footage\\day1\\x.mov").unwrap();
+        assert_eq!((m.old_prefix.as_str(), m.new_prefix.as_str()), ("/Volumes", "D:"));
+        assert_eq!(rewrite_prefix("/Volumes/Footage/music/t.wav", &m).unwrap(), "D:\\Footage\\music\\t.wav");
+        // UNC shares and mapped drives, matched regardless of case and separator
+        let u = suggest_prefix_fix("\\\\nas\\media\\Footage\\x.mov", "Z:\\Footage\\x.mov").unwrap();
+        assert_eq!((u.old_prefix.as_str(), u.new_prefix.as_str()), ("\\\\nas\\media", "Z:"));
+        assert_eq!(rewrite_prefix("\\\\NAS\\Media\\Footage\\y.mov", &u).unwrap(), "Z:\\Footage\\y.mov");
+        assert_eq!(rewrite_prefix("//nas/media/Footage/y.mov", &u).unwrap(), "Z:\\Footage\\y.mov");
+        let d = suggest_prefix_fix("C:\\Users\\a\\Footage\\x.mov", "E:\\Archive\\Footage\\x.mov").unwrap();
+        assert_eq!(rewrite_prefix("c:\\users\\A\\Footage\\b.mov", &d).unwrap(), "E:\\Archive\\Footage\\b.mov");
+        assert_eq!(rewrite_prefix("C:\\Users\\ab\\Footage\\b.mov", &d), None, "prefix ends at a separator");
     }
 
     #[test]
@@ -1033,7 +1076,7 @@ mod tests {
         let (_d, root, path, mut p) = fixture();
         let moved = root.join("renamed-on-same-volume.mov");
         std::fs::rename(root.join("footage/day1/hero.mov"), &moved).unwrap();
-        p.media.iter_mut().find(|m| m.id == "m-hero").unwrap().paths.bookmark_macos = Some("Ym9va21hcms=".into());
+        p.media.iter_mut().find(|m| m.id == "m-hero").unwrap().paths.set_platform_ref(Some("Ym9va21hcms=".into()));
         let refs = Refs(moved.clone());
         let r = resolve_item(p.media_by_id("m-hero").unwrap(), Some(&path), None, &refs);
         assert_eq!((r.status, r.found_by), (MediaStatus::Moved, Some(FoundBy::Bookmark)));

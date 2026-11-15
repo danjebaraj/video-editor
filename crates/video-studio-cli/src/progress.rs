@@ -31,6 +31,8 @@ pub struct PendingQuestion {
 }
 
 struct State {
+    /// The tenth of progress last printed as a plain line (consoles without VT sequences).
+    last_step: i32,
     bar_shown: bool,
     stage: String,
     stage_started: Instant,
@@ -38,10 +40,38 @@ struct State {
     credits: u64,
 }
 
+/// Whether stderr understands VT escape sequences (the `\r\x1b[2K` that redraws the progress bar).
+/// Unix terminals do; on Windows the console is asked to turn them on, and an old console that
+/// can't gets plain progress lines instead (ui/spec.md §23.5).
+pub fn vt_supported() -> bool {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Console::{
+            GetConsoleMode, GetStdHandle, SetConsoleMode, CONSOLE_MODE, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+            STD_ERROR_HANDLE,
+        };
+        unsafe {
+            let Ok(h) = GetStdHandle(STD_ERROR_HANDLE) else { return false };
+            let mut mode = CONSOLE_MODE::default();
+            if GetConsoleMode(h, &mut mode).is_err() {
+                return false;
+            }
+            mode.0 & ENABLE_VIRTUAL_TERMINAL_PROCESSING.0 != 0
+                || SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING).is_ok()
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
 pub struct TerminalSink {
     debug: bool,
     quiet_header: bool,
     tty: bool,
+    /// The terminal redraws lines (VT sequences); without it progress is printed as plain lines.
+    vt: bool,
     questions: Option<Mutex<Sender<PendingQuestion>>>,
     state: Mutex<State>,
 }
@@ -52,8 +82,10 @@ impl TerminalSink {
             debug,
             quiet_header,
             tty: std::io::stderr().is_terminal(),
+            vt: std::io::stderr().is_terminal() && vt_supported(),
             questions: questions.map(Mutex::new),
             state: Mutex::new(State {
+                last_step: -1,
                 bar_shown: false,
                 stage: String::new(),
                 stage_started: Instant::now(),
@@ -64,7 +96,7 @@ impl TerminalSink {
     }
 
     fn clear_bar(&self, st: &mut State) {
-        if st.bar_shown {
+        if st.bar_shown && self.vt {
             eprint!("\r\x1b[2K");
             st.bar_shown = false;
         }
@@ -117,6 +149,16 @@ impl EventSink for TerminalSink {
                     );
                 } else {
                     self.clear_bar(&mut st);
+                }
+            }
+            EventKind::Progress { fraction, detail, .. } if self.tty && !self.vt => {
+                // No line redrawing: a plain line at every tenth of the way.
+                if let Some(f) = fraction {
+                    let step = (f.clamp(0.0, 1.0) * 10.0).floor() as i32;
+                    if step != st.last_step {
+                        st.last_step = step;
+                        eprintln!("  {} {}", bar(*f), clip(detail.as_deref().unwrap_or(""), 60));
+                    }
                 }
             }
             EventKind::Progress { fraction, detail, .. } => {

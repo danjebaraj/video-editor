@@ -12,6 +12,7 @@ The specification is `ui/spec.md`. Decisions made while building it are in `docs
 | `crates/video-studio-cli` | The `video-studio` binary: the headless CLI, the helper Claude uses during runs, the pre-tool hook and the cutline logging proxy |
 | `crates/video-studio-ffi` | UniFFI bindings for the shells |
 | `apps/macos` | The macOS app (Swift, AppKit and SwiftUI, built with XcodeGen) |
+| `apps/windows` | The Windows app (Rust on `windows-rs`, UI in WebView2), its MSIX packaging and UI Automation tests; see [Windows](#windows) |
 | `schema/cutproj.schema.json` | JSON Schema of the project file (`video-studio schema`) |
 
 ## Requirements
@@ -19,7 +20,7 @@ The specification is `ui/spec.md`. Decisions made while building it are in `docs
 - Claude Code 2.1.0 or later, signed in (`claude` in Terminal). The app never asks for Anthropic credentials.
 - cutline, with its dependencies installed (`cutline deps install --all`).
 - An ElevenLabs API key, only if a spec needs generated voice-over or music.
-- To build the app: Xcode with the macOS 26 SDK, XcodeGen (`brew install xcodegen`), and a Rust toolchain.
+- To build the app: Xcode with the macOS 26 SDK, XcodeGen (`brew install xcodegen`), and a Rust toolchain. For Windows, see [Requirements (Windows)](#requirements-windows).
 
 ## Building
 
@@ -98,7 +99,7 @@ When a spec asks for footage of an app that isn't attached (a `- **Record:**` li
 - Recordings have a fixed length (`record start --seconds <n>`, then `record wait`), because the system recorder can't be stopped early without losing the file. The edit trims them.
 - macOS must allow **Screen & System Audio Recording** and **Accessibility** for Syncfusion Video Studio (or for the terminal, when using the CLI). The Project inspector shows both and links to the settings. The app is signed ad hoc, so a rebuilt app may need the permissions granted again.
 - The pointer and keyboard are shared with whoever is at the Mac while a run drives an app.
-- macOS only for now. The platform part is one trait (`capture::Backend`), with a fake for tests (`VIDEO_STUDIO_CAPTURE_FAKE`).
+- The platform part is one trait (`capture::Backend`), with a fake for tests (`VIDEO_STUDIO_CAPTURE_FAKE`). Windows has its own backend: see [Recording apps on Windows](#recording-apps-on-windows).
 
 ## Tests
 
@@ -112,6 +113,79 @@ The Rust end-to-end tests use `vs-fake-claude`, which speaks the stream-json pro
 
 Environment variables for tests and unusual setups: `VIDEO_STUDIO_HOME` (library folder), `VIDEO_STUDIO_CLAUDE` and `VIDEO_STUDIO_CUTLINE` (binary paths), `VIDEO_STUDIO_NO_CLAUDE` (pretend the CLI is missing), `VIDEO_STUDIO_ELEVEN_BASE_URL`.
 
-## Porting to Windows
+## Windows
 
-Everything outside `apps/macos` is platform-neutral: paths are `camino` UTF-8 paths, files are written with LF, and OS-specific code sits behind the traits in `platform.rs` (`Secrets`, `FileRefs`, `ProcessGroup`, `Notifications`, `RevealInFileManager`, `OpenWith`). A Windows shell built on `windows-rs` links `video-studio-ffi` (or the core directly), supplies `FileRefs`, and replaces the `taskkill` fallback in `ProcessGroup` with a Job Object.
+The Windows app (`apps/windows`, ui/spec.md §23) is a Rust shell on `windows-rs` with its UI in WebView2: TypeScript, CodeMirror 6 and Fluent UI web components, with the Mac app's preview scripts reused as they are. It links the core directly, so projects, brand presets, run folders and the CLI are the same on both platforms; a project saved on one opens on the other.
+
+### Requirements (Windows)
+
+- Windows 11 22H2 or later, x64 or ARM64. The WebView2 Runtime (part of Windows 11; the app says so if it is missing).
+- Claude Code 2.1.0 or later, signed in (`claude` in a terminal). Verified with 2.1.319.
+- **Git for Windows.** Claude Code runs its Bash tool and hooks through Git Bash. The app finds `bash.exe` (Git's install folder, or `CLAUDE_CODE_GIT_BASH_PATH`) and passes it on; validation reports a blocker when it is missing.
+- cutline with its dependencies (`cutline deps install --all`), and an ElevenLabs key only when a spec needs generated audio.
+- To build: a Rust toolchain (with the `aarch64-pc-windows-msvc` target for ARM64), Node.js 20 or later, and Visual Studio Build Tools with the Windows 11 SDK (`makeappx`, `signtool`). ARM64 builds also need clang (LLVM, or the "C++ Clang tools for Windows" component), which the TLS crates use for their ARM64 code.
+
+### Building (Windows)
+
+```powershell
+apps\windows\build.ps1             # Web UI + debug build, laid out in target\debug\app\
+apps\windows\build.ps1 release     # release builds for x64 and ARM64 (-Arch x64 for one)
+apps\windows\build.ps1 package     # MSIX per architecture, the .msixbundle, portable CLI zips
+apps\windows\build.ps1 selftest    # debug build, then the in-app self test
+apps\windows\build.ps1 uitest      # debug build, then the UI Automation tests
+apps\windows\build.ps1 test        # fmt, clippy -D warnings, cargo test for the workspace
+```
+
+The bridge between the shell and the UI is typed from one source: `apps/windows/src/protocol.rs`. Its JSON Schema (`ui/src/generated/bridge.schema.json`, refreshed with `VIDEO_STUDIO_BLESS=1 cargo test -p video-studio-win`) generates the TypeScript types on every UI build, as does `schema/cutproj.schema.json` for the project model.
+
+`package` signs with `VIDEO_STUDIO_SIGN_PFX` / `VIDEO_STUDIO_SIGN_PASSWORD` when set. Otherwise it makes a self-signed test certificate once (in `CurrentUser\My`, exported to `target\package\test-signing.cer`) and prints the two commands that trust it and install the bundle. The package installs the `video-studio` execution alias, the `.cutproj` and `.cutbrand` file associations, and the toast activator. The portable zip holds `video-studio.exe` and the CLI section of this README.
+
+### Locations (Windows)
+
+| What | Where |
+|---|---|
+| Library (settings, brand and output presets, assistant sessions) | `%APPDATA%\Syncfusion Video Studio\` (`VIDEO_STUDIO_HOME` overrides) |
+| Caches (thumbnails, ElevenLabs cache) | `%LOCALAPPDATA%\Syncfusion Video Studio\Cache\` |
+| Default run folders | the Videos known folder, `Syncfusion Video Studio\` |
+| ElevenLabs key | Windows Credential Manager, "Syncfusion Video Studio" / `elevenlabs` |
+| Pasted images | `<name>.cutproj.assets\` next to the project, as on macOS |
+
+Media references keep a Windows file ID (`file_id_windows`, the NTFS file ID with its volume serial) beside the Mac bookmark, so a file renamed or moved on the same volume is still found. Paths are stored as typed; long paths work (the app is long-path aware), and file names that Windows reserves (`CON`, `NUL`, `COM1`…) are avoided when the app names files.
+
+### Shortcuts (Windows)
+
+| Action | Keys | Action | Keys |
+|---|---|---|---|
+| New Project / Open / Save | Ctrl+N / Ctrl+O / Ctrl+S | Validate | Ctrl+Shift+B |
+| Save As | Ctrl+Shift+S | Run / Stop | F5 / Shift+F5 |
+| Source / Preview | Ctrl+/ | Send to Claude | Ctrl+Enter |
+| Outline / Media / Runs | Ctrl+1 / 2 / 3 | Add Media | Ctrl+Shift+M |
+| Claude / Project / Outputs / Validation / Run tabs | Ctrl+Alt+1 … 5 | App Library | Ctrl+Shift+L |
+| Find / Replace | Ctrl+F / Ctrl+H | Settings | Ctrl+, |
+| Undo / Redo | Ctrl+Z / Ctrl+Y | Close window | Ctrl+W |
+
+The menu bar shows the same shortcuts. The app follows the system light or dark theme, accent color, high contrast and text scaling, and uses Mica where transparency effects are on.
+
+### Recording apps on Windows
+
+`video-studio capture` works as on macOS, with a Windows backend: UI Automation to find windows and menus, `SendInput` for the pointer and keys (`cmd` in a key combo means Ctrl), and Windows.Graphics.Capture for recordings, encoded by ffmpeg (H.264) with the app's own audio through WASAPI process loopback. Recordings are `.mp4`.
+
+- No permission prompts are needed. Windows draws a yellow border around a window being recorded.
+- Terminals (cmd, PowerShell, Windows Terminal), Settings and Control Panel, Registry Editor, Task Manager, MMC, password managers and File Explorer can't be driven. Neither can a window running as administrator (UI Automation and input from a normal process can't reach it); the helper refuses it and says so.
+- The pointer and keyboard are shared with whoever is at the PC while a run drives an app.
+
+### Tests (Windows)
+
+```powershell
+cargo test -p video-studio-core -p video-studio-cli -p video-studio-ffi -p video-studio-win
+apps\windows\build.ps1 selftest
+apps\windows\build.ps1 uitest
+scripts\video-studio-live-test.ps1        # optional: one real run on Haiku, costs a few cents
+```
+
+- The Rust suites run on Windows CI for x64 and ARM64, including the Windows-only tests: Job Object process trees and Ctrl-Break, Credential Manager, file IDs across a rename, Git Bash command forms in the broker, CRLF projects and reserved names. `tests/capture_windows.rs` drives `vs-capture-target.exe` (open, window, screenshot, click, type, key, menu, scroll, drag, a 5-second recording checked with ffprobe, and the terminal and elevated-window guards).
+- The in-app self test (`--selftest`) drives the app with the fake Claude and the real cutline, as on macOS, and saves WebView2 snapshots next to its log.
+- `vs-uitest` drives the app only through UI Automation and synthesized input: onboarding, opening a project by path, editing and slash commands, every Windows shortcut, the App Library, Validate, Run and Stop, log export through the Save dialog, an accessible-name audit and a keyboard-only pass. Screenshots go next to its log.
+- The live test uses the installed MSIX's `video-studio` alias when present, else the debug build.
+
+`.gitattributes` keeps the repository LF on Windows checkouts, so the schema and snapshot tests compare the same bytes on every platform.

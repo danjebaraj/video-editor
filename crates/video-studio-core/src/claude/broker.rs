@@ -107,8 +107,20 @@ impl Policy {
         }
     }
 
+    /// An absolute path for a path Claude gave: relative to the working folder, `~` expanded, and
+    /// on Windows a Git Bash form (`/c/Runs/x`) turned into its Windows form.
     fn resolve(&self, path: &str) -> Utf8PathBuf {
-        paths::absolutize(&paths::expand_tilde(path), &self.work_dir)
+        paths::absolutize(&paths::expand_tilde(&paths::from_shell_path(path)), &self.work_dir)
+    }
+
+    /// Whether a path or glob prefix points outside the working folder by itself: absolute, from
+    /// home, a drive or share on Windows, or climbing out with `..`.
+    fn escapes(&self, pat: &str) -> bool {
+        pat.starts_with('/')
+            || pat.starts_with('~')
+            || pat.contains("..")
+            || (cfg!(windows)
+                && (pat.starts_with('\\') || pat.as_bytes().get(1) == Some(&b':') || Utf8Path::new(pat).has_root()))
     }
 
     fn may_read(&self, p: &Utf8Path) -> bool {
@@ -125,7 +137,7 @@ impl Policy {
         // An absolute glob pattern searches outside the working folder: check its fixed prefix.
         if tool == "Glob" {
             if let Some(pat) = input["pattern"].as_str() {
-                if pat.starts_with('/') || pat.starts_with('~') || pat.contains("..") {
+                if self.escapes(pat) {
                     let fixed: String = pat.split(['*', '?', '[', '{']).next().unwrap_or("").to_string();
                     targets.push(self.resolve(&fixed));
                 }
@@ -151,9 +163,12 @@ impl Policy {
         if self.write_files.is_none() {
             let lexical = paths::normalize(&target);
             for work in [paths::normalize(&self.work_dir), paths::canonical_or_normal(&self.work_dir)] {
-                if let Ok(rel) = lexical.strip_prefix(&work) {
-                    let first = rel.components().next().map(|c| c.as_str()).unwrap_or("");
-                    if first == "logs" || first == ".bin" || rel == "run.json" || rel == "media-manifest.json" {
+                if let Some(rel) = paths::strip_path_prefix(&lexical, &work) {
+                    // Windows file names are case-insensitive: `LOGS\x` is `logs/x`.
+                    let fold = |s: &str| if cfg!(windows) { s.to_lowercase() } else { s.to_string() };
+                    let first = fold(rel.components().next().map(|c| c.as_str()).unwrap_or(""));
+                    let whole = fold(rel.as_str());
+                    if first == "logs" || first == ".bin" || whole == "run.json" || whole == "media-manifest.json" {
                         return Decision::Deny(format!("{rel} is written by the app and is read-only."));
                     }
                 }
@@ -201,19 +216,48 @@ impl Policy {
     }
 
     /// The real path of a command's executable: a path as given, or a bare name found on PATH.
+    /// On Windows a name or path without an extension also finds the `.exe` (as Git Bash does),
+    /// and a `.exe` is matched case-insensitively.
     fn resolve_executable(&self, arg0: &str) -> Option<Utf8PathBuf> {
+        let with_exe = |p: Utf8PathBuf| -> Option<Utf8PathBuf> {
+            if p.is_file() {
+                return Some(p);
+            }
+            if cfg!(windows) && p.extension().is_none() {
+                let e = Utf8PathBuf::from(format!("{p}.exe"));
+                return e.is_file().then_some(e);
+            }
+            None
+        };
         let candidate = if arg0.contains('/') || arg0.contains('\\') {
-            Some(self.resolve(arg0))
+            with_exe(self.resolve(arg0))
         } else {
-            self.path_dirs.iter().map(|d| d.join(arg0)).find(|c| c.exists()).or_else(|| {
-                if cfg!(windows) {
-                    self.path_dirs.iter().map(|d| d.join(format!("{arg0}.exe"))).find(|c| c.exists())
-                } else {
-                    None
-                }
-            })
+            self.path_dirs.iter().find_map(|d| with_exe(d.join(arg0)))
         }?;
-        candidate.exists().then(|| paths::canonical_or_normal(&candidate))
+        Some(paths::canonical_or_normal(&candidate))
+    }
+
+    /// Whether `exe` is the configured binary `bin`. On Unix `.bin/cutline` is a symlink and
+    /// canonicalizes to the helper; on Windows it is a hard link (or a copy), so the file's
+    /// identity decides, and a copy in the run's own `.bin` (which Claude can't write) counts.
+    fn is_binary(&self, exe: &Utf8Path, bin: &Option<Utf8PathBuf>, bin_names: &[&str]) -> bool {
+        let Some(b) = bin else { return false };
+        if paths::same_path(&paths::canonical_or_normal(b), exe) {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            if same_file::is_same_file(b, exe).unwrap_or(false) {
+                return true;
+            }
+            let in_bin = exe.parent().map(|d| paths::same_path(d, &self.work_dir.join(".bin"))).unwrap_or(false);
+            let stem = exe.file_stem().unwrap_or("").to_ascii_lowercase();
+            if in_bin && bin_names.contains(&stem.as_str()) {
+                return true;
+            }
+        }
+        let _ = bin_names;
+        false
     }
 
     fn check_command(&self, argv: &[String]) -> Result<(), String> {
@@ -222,15 +266,15 @@ impl Policy {
         let Some(exe) = self.resolve_executable(arg0) else {
             return Err(format!("`{arg0}` isn't an allowed command. {only}"));
         };
-        let is =
-            |bin: &Option<Utf8PathBuf>| bin.as_ref().map(|b| paths::canonical_or_normal(b) == exe).unwrap_or(false);
+        let is_cutline = self.is_binary(&exe, &self.cutline, &[]);
+        let is_helper = self.is_binary(&exe, &self.helper, &["cutline", "video-studio"]);
         // The helper is also installed as `.bin/cutline`, a logging proxy for the real cutline;
         // the name it is called by decides which it acts as.
         let called_as = Utf8Path::new(arg0).file_stem().unwrap_or("").to_ascii_lowercase();
-        if is(&self.cutline) || (is(&self.helper) && called_as == "cutline") {
+        if is_cutline || (is_helper && called_as == "cutline") {
             return self.check_cutline(&argv[1..]);
         }
-        if is(&self.helper) {
+        if is_helper {
             return self.check_helper(&argv[1..]);
         }
         Err(format!("`{arg0}` isn't an allowed command. {only}"))
@@ -397,9 +441,16 @@ pub fn split_commands(command: &str) -> Result<Vec<Vec<String>>, String> {
                     match chars.get(i) {
                         Some('"') => break,
                         Some('\\') => {
+                            // As in bash: inside double quotes a backslash only escapes `"`, `\`,
+                            // `$`, a backtick or a newline, and stays otherwise ("C:\Runs\x").
                             i += 1;
                             match chars.get(i) {
-                                Some(ch) => cur.push(*ch),
+                                Some(ch @ ('"' | '\\' | '$' | '`')) => cur.push(*ch),
+                                Some('\n') => {}
+                                Some(ch) => {
+                                    cur.push('\\');
+                                    cur.push(*ch);
+                                }
                                 None => return Err("The command has an unclosed quote.".into()),
                             }
                         }
@@ -497,6 +548,8 @@ pub fn shell_quote(s: &str) -> String {
 
 /// The `--settings` JSON that installs the PreToolUse hook for a run.
 pub fn hook_settings(helper: &Utf8Path, policy_file: &Utf8Path) -> Value {
+    // Plain paths: Git Bash, which runs hooks on Windows, mangles `\\?\` verbatim paths.
+    let (helper, policy_file) = (paths::plain(helper), paths::plain(policy_file));
     let command = format!("{} hook --policy {}", shell_quote(helper.as_str()), shell_quote(policy_file.as_str()));
     json!({"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": 20}]}]}})
 }
@@ -557,9 +610,10 @@ mod tests {
         for d in [&run, &media, &outside, &tools, &run.join(".bin"), &run.join("logs")] {
             std::fs::create_dir_all(d).unwrap();
         }
-        let cutline = tools.join("cutline");
-        let helper = tools.join("video-studio");
-        let rogue = tools.join("rm");
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        let cutline = tools.join(format!("cutline{exe}"));
+        let helper = tools.join(format!("video-studio{exe}"));
+        let rogue = tools.join(format!("rm{exe}"));
         for b in [&cutline, &helper, &rogue] {
             std::fs::write(b, "#!/bin/sh\n").unwrap();
         }
@@ -568,6 +622,12 @@ mod tests {
         {
             std::os::unix::fs::symlink(&helper, run.join(".bin/cutline")).unwrap();
             std::os::unix::fs::symlink(&helper, run.join(".bin/video-studio")).unwrap();
+        }
+        // Windows has no symlinks without Developer Mode: the run folder gets hard links
+        #[cfg(windows)]
+        {
+            std::fs::hard_link(&helper, run.join(".bin/cutline.exe")).unwrap();
+            std::fs::hard_link(&helper, run.join(".bin/video-studio.exe")).unwrap();
         }
         std::fs::write(media.join("hero.mov"), b"x").unwrap();
         std::fs::write(outside.join("secret.txt"), b"x").unwrap();
@@ -626,7 +686,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn production_allows_only_cutline_and_the_helper() {
         let f = fx(Mode::Production);
@@ -637,7 +696,8 @@ mod tests {
             Decision::Allow
         );
         assert_eq!(
-            bash(p, &format!("{} review project.json5 2>&1", p.cutline.as_ref().unwrap())),
+            // (forward slashes: unquoted backslashes are escapes to Git Bash, as to any shell)
+            bash(p, &format!("{} review project.json5 2>&1", p.cutline.as_ref().unwrap().as_str().replace('\\', "/"))),
             Decision::Allow,
             "the real binary by full path"
         );
@@ -673,12 +733,92 @@ mod tests {
         assert!(denied(p.decide("Bash", &json!({"command": "cutline render p.json5", "run_in_background": true})))
             .contains("Background"));
         // a look-alike binary elsewhere isn't cutline
-        let fake = f.outside.join("cutline");
+        let fake = f.outside.join(if cfg!(windows) { "cutline.exe" } else { "cutline" });
         std::fs::write(&fake, "#!/bin/sh\n").unwrap();
-        assert!(denied(bash(p, &format!("{fake} render p.json5"))).contains("isn't an allowed command"));
+        let fake_cmd = fake.as_str().replace('\\', "/");
+        assert!(denied(bash(p, &format!("{fake_cmd} render p.json5"))).contains("isn't an allowed command"));
     }
 
-    #[cfg(unix)]
+    /// Claude Code runs Bash through Git Bash on Windows (docs/decisions.md, Windows port): the
+    /// same command can name the binaries in POSIX, mixed or Windows form, with or without
+    /// `.exe`, and `cmd`, PowerShell and `start` stay closed like any other program.
+    #[cfg(windows)]
+    #[test]
+    fn git_bash_command_forms_on_windows() {
+        let f = fx(Mode::Production);
+        let p = &f.policy;
+        let posix = |path: &Utf8Path| {
+            let s = path.as_str().replace('\\', "/");
+            format!("/{}{}", s[..1].to_ascii_lowercase(), &s[2..])
+        };
+        let real = p.cutline.clone().unwrap();
+        let helper = p.helper.clone().unwrap();
+        let mixed = real.as_str().replace('\\', "/");
+        for ok in [
+            "cutline validate project.json5".to_string(),
+            "cutline.exe validate project.json5".to_string(),
+            "CUTLINE.EXE validate project.json5".to_string(),
+            "video-studio.exe eleven voices".to_string(),
+            format!("{} validate project.json5", posix(&real)),
+            format!("{} validate project.json5", posix(&real).trim_end_matches(".exe")),
+            format!("{mixed} validate project.json5"),
+            format!("\"{}\" validate project.json5", real),
+            format!("'{}' eleven voices", helper),
+            format!("{} validate p.json5", posix(&f.run.join(".bin/cutline.exe"))),
+            "./.bin/cutline validate p.json5".to_string(),
+            format!("cutline render p.json5 --out {}/outputs/x.mp4", posix(&f.run)),
+            format!("cutline render p.json5 --out \"{}\"", f.run.join("outputs").join("y.mp4")),
+            "cutline validate --json project.json5 2>&1".to_string(),
+        ] {
+            assert_eq!(bash(p, &ok), Decision::Allow, "{ok}");
+        }
+        for cmd in [
+            "cmd /c dir",
+            "cmd.exe /C cutline render p.json5",
+            "powershell -Command Get-ChildItem",
+            "pwsh -c ls",
+            "start notepad",
+            "explorer .",
+            "rm.exe -rf outputs",
+            "where cutline",
+        ] {
+            let why = denied(bash(p, cmd));
+            assert!(why.contains("isn't an allowed command"), "{cmd}: {why}");
+        }
+        // an output path outside the run folder, in either form, is refused
+        assert!(denied(bash(p, &format!("cutline render p.json5 --out {}/x.mp4", posix(&f.outside))))
+            .contains("inside the run folder"));
+        assert!(denied(bash(p, &format!("cutline render p.json5 --out \"{}\"", f.outside.join("x.mp4"))))
+            .contains("inside the run folder"));
+        assert!(denied(bash(p, "cutline render p.json5 -o C:/Windows/x.mp4")).contains("inside the run folder"));
+        // a copy of the helper that isn't the run's own .bin is not the helper
+        let copy = f.outside.join("video-studio.exe");
+        std::fs::copy(&helper, &copy).unwrap();
+        assert!(denied(bash(p, &format!("{} eleven voices", posix(&copy)))).contains("isn't an allowed command"));
+    }
+
+    /// Scope checks compare Windows paths case-insensitively and with either separator.
+    #[cfg(windows)]
+    #[test]
+    fn windows_scope_is_case_insensitive() {
+        let f = fx(Mode::Production);
+        let p = &f.policy;
+        let upper = f.media.join("HERO.MOV").as_str().to_uppercase();
+        assert_eq!(p.decide("Read", &json!({"file_path": upper})), Decision::Allow);
+        let fwd = f.run.join("work").join("notes.md").as_str().replace('\\', "/").to_lowercase();
+        assert_eq!(p.decide("Write", &json!({"file_path": fwd})), Decision::Allow);
+        let s = f.media.join("hero.mov").as_str().replace('\\', "/");
+        let git_bash = format!("/{}{}", s[..1].to_ascii_lowercase(), &s[2..]);
+        assert_eq!(p.decide("Read", &json!({"file_path": git_bash})), Decision::Allow);
+        let secret = f.outside.join("secret.txt").as_str().to_lowercase().replace('\\', "/");
+        assert!(denied(p.decide("Read", &json!({"file_path": secret}))).contains("outside"));
+        assert!(denied(p.decide("Write", &json!({"file_path": r".BIN\cutline.exe"}))).contains("read-only"));
+        assert!(denied(p.decide("Write", &json!({"file_path": "LOGS/events.ndjson"}))).contains("read-only"));
+        assert!(matches!(p.decide("Glob", &json!({"pattern": "C:/Windows/**/*"})), Decision::Deny(_)));
+        assert!(matches!(p.decide("Glob", &json!({"pattern": "/c/Windows/**"})), Decision::Deny(_)));
+        assert!(matches!(p.decide("Grep", &json!({"pattern": "x", "path": r"\\server\share"})), Decision::Deny(_)));
+    }
+
     #[test]
     fn capture_commands_follow_the_project_switch_and_the_mode() {
         let mut f = fx(Mode::Production);
@@ -793,7 +933,6 @@ mod tests {
         ));
     }
 
-    #[cfg(unix)]
     #[test]
     fn hook_answers_and_logs() {
         let mut f = fx(Mode::Production);

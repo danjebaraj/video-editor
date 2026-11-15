@@ -50,7 +50,33 @@ fn snapshot_for(project: &str, m: &ProjectMedia, draft: bool) -> String {
     let tc = tc();
     let plan = build_plan(&tc, &p, Path::new("/proj/p.json5"), m, &tl, &opts, None, &extras).unwrap();
     let txt = dry_run_text(&tc, &plan);
-    txt.replace(&plan.work_dir.to_string_lossy().to_string(), "<work>")
+    portable(&txt.replace(&plan.work_dir.to_string_lossy().to_string(), "<work>"))
+}
+
+/// The goldens are written with `/`. On Windows the plan joins paths with `\`, and the shell
+/// quoting then wraps those words in quotes: undo both so one golden serves every platform.
+fn portable(s: &str) -> String {
+    if !cfg!(windows) {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('\'') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('\'') {
+            Some(end) if after[..end].contains('\\') && !after[..end].contains(char::is_whitespace) => {
+                out.push_str(&after[..end].replace('\\', "/"));
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push('\'');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out.replace('\\', "/")
 }
 
 #[test]

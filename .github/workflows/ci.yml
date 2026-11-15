@@ -73,6 +73,91 @@ jobs:
       - name: Build the core, the bindings and the app
         run: apps/macos/build.sh debug
 
+  # Syncfusion Video Studio for Windows (ui/spec.md §23.9): the Rust suites on both
+  # architectures, the in-app self test, the UI Automation tests and the MSIX artifact.
+  video-studio-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: windows-latest
+            triple: x86_64-pc-windows-msvc
+          - arch: arm64
+            os: windows-11-arm
+            triple: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-${{ matrix.arch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/windows/ui/package-lock.json
+      - name: Install ffmpeg (pinned static build)
+        run: cargo run -q -p cutline-cli -- deps install ffmpeg
+      # Claude Code runs Bash tools and hooks through Git Bash; the runners ship Git for Windows.
+      - name: Git Bash
+        shell: pwsh
+        run: |
+          $bash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+          if (-not (Test-Path $bash)) { throw "Git Bash not found at $bash" }
+          "CLAUDE_CODE_GIT_BASH_PATH=$bash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Rust suites (core, CLI, FFI, Windows shell)
+        run: cargo test -p video-studio-core -p video-studio-cli -p video-studio-ffi -p video-studio-win -p cutline-html
+      - name: Clippy (Windows code)
+        run: cargo clippy -p video-studio-core -p video-studio-cli -p video-studio-win --all-targets -- -D warnings
+      - name: Bridge types are current
+        shell: pwsh
+        working-directory: apps/windows/ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run gen
+          git diff --exit-code -- src/generated
+      # Both write their logs and screenshots under %TEMP%, uploaded below.
+      - name: In-app self test
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: apps/windows/build.ps1 selftest
+      - name: UI Automation tests
+        # Hosted runners give the job an interactive desktop, but focus can be taken by the
+        # runner's own windows; a failure here is reported, not fatal.
+        continue-on-error: true
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+        run: apps/windows/build.ps1 uitest -SkipUi
+      - name: MSIX and portable CLI (self-signed)
+        shell: pwsh
+        run: apps/windows/build.ps1 package -Arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: video-studio-windows-${{ matrix.arch }}
+          path: |
+            target/package/*.msix
+            target/package/*.msixbundle
+            target/package/*.zip
+            target/package/*.cer
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: video-studio-windows-${{ matrix.arch }}-test-output
+          path: |
+            ${{ runner.temp }}/vs-selftest-*
+            ${{ runner.temp }}/vs-uitest-*
+          if-no-files-found: ignore
+
   deny:
     runs-on: ubuntu-latest
     steps:

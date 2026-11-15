@@ -47,7 +47,8 @@ pub struct World {
 impl World {
     pub fn new() -> World {
         let dir = tempfile::tempdir().unwrap();
-        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(dir.path()).unwrap()).unwrap();
+        // canonical, without the verbatim `\\?\` prefix Windows' canonicalize adds
+        let root = video_studio_core::paths::canonical_or_normal(Utf8Path::from_path(dir.path()).unwrap());
         let lib = root.join("library");
         let out = root.join("out");
         std::fs::create_dir_all(root.join("footage")).unwrap();

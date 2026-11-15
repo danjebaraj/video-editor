@@ -84,7 +84,7 @@ fn init_validate_dryrun_preview() {
     );
     let (code, v, err) = run_json(bin().arg("review").arg(&teaser).args(["--ocr", "off"]));
     assert_eq!(code, 0, "{err} {v}");
-    assert!(v["dir"].as_str().unwrap().ends_with("review/proj teaser"), "{v}");
+    assert!(std::path::Path::new(v["dir"].as_str().unwrap()).ends_with("review/proj teaser"), "{v}");
     for sub in ["proj", "proj teaser"] {
         let dir = proj.join("review").join(sub);
         assert!(dir.join("summary.md").exists() && dir.join("contact_sheet.jpg").exists(), "{sub}");

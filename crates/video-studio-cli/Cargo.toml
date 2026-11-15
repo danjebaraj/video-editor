@@ -19,8 +19,29 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 video-studio-core = { version = "0.1.0", path = "../video-studio-core" }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[target.'cfg(windows)'.dev-dependencies]
+image = { version = "0.25.6", default-features = false, features = ["png"] }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [lints]
 workspace = true
@@ -35,4 +56,10 @@ test = false
 [[bin]]
 name = "vs-fake-cutline"
 path = "src/bin/fake_cutline.rs"
+test = false
+
+# The Win32 app the Windows recording backend is tested against (ui/spec.md §23.7)
+[[bin]]
+name = "vs-capture-target"
+path = "src/bin/capture_target.rs"
 test = false

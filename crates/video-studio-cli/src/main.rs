@@ -217,6 +217,13 @@ fn fail(e: &Error) -> i32 {
 }
 
 fn main() {
+    // Windows: the recording worker `capture record start` launches (Windows.Graphics.Capture and
+    // WASAPI process loopback in a process of its own, so `record wait` / `cancel` can follow it).
+    #[cfg(windows)]
+    if std::env::args().nth(1).as_deref() == Some(video_studio_core::capture::windows::RECORD_WORKER) {
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        std::process::exit(video_studio_core::capture::windows::record_worker(&args));
+    }
     // Called as `cutline` from a run folder's .bin: act as the logging proxy.
     let argv0 = std::env::args().next().unwrap_or_default();
     let called_as = Utf8Path::new(&argv0).file_stem().unwrap_or("").to_ascii_lowercase();
@@ -476,6 +483,12 @@ fn execute_run(
     *handle_slot.lock().unwrap() = Some(handle.clone());
 
     // Ctrl-C: a graceful stop first, a kill on the second (Ctrl-Break does the same on Windows).
+    // A parent that started this process in a new process group turned Ctrl-C off for it;
+    // turn it back on so Ctrl-C works however the CLI was started.
+    #[cfg(windows)]
+    unsafe {
+        let _ = windows::Win32::System::Console::SetConsoleCtrlHandler(None, false);
+    }
     let for_signal = handle.clone();
     let _ = ctrlc::set_handler(move || {
         if INTERRUPTS.fetch_add(1, Ordering::SeqCst) == 0 {

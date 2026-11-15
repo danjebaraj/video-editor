@@ -74,7 +74,7 @@ impl Session {
     /// Runs the PreToolUse hook the way the CLI does: the tool call on stdin, a decision on stdout.
     fn run_hook(&self, tool: &str, input: &Value) -> Option<(String, String)> {
         let command = self.hook.as_ref()?;
-        let mut child = Command::new("sh")
+        let mut child = shell()
             .arg("-c")
             .arg(command)
             .stdin(Stdio::piped())
@@ -144,15 +144,57 @@ impl Session {
     }
 }
 
+/// The shell the real CLI uses for Bash and hooks: `sh` on Unix, Git Bash on Windows (found as
+/// Claude Code finds it: `CLAUDE_CODE_GIT_BASH_PATH`, then next to `git`, then the usual places).
+fn shell() -> Command {
+    #[cfg(windows)]
+    {
+        Command::new(git_bash())
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("sh")
+    }
+}
+
+#[cfg(windows)]
+fn git_bash() -> std::path::PathBuf {
+    use std::path::PathBuf;
+    if let Some(p) = std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH").map(PathBuf::from).filter(|p| p.is_file()) {
+        return p;
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    for dir in std::env::split_paths(&path) {
+        // git.exe in <Git>\cmd or <Git>\bin: bash.exe is <Git>\bin\bash.exe
+        if dir.join("git.exe").is_file() {
+            if let Some(root) = dir.parent() {
+                let b = root.join("bin").join("bash.exe");
+                if b.is_file() {
+                    return b;
+                }
+            }
+        }
+    }
+    for c in [r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files (x86)\Git\bin\bash.exe"] {
+        if std::path::Path::new(c).is_file() {
+            return PathBuf::from(c);
+        }
+    }
+    // A bash on PATH that isn't WSL's launcher in System32.
+    for dir in std::env::split_paths(&path) {
+        let b = dir.join("bash.exe");
+        if b.is_file() && !dir.to_string_lossy().to_lowercase().contains("system32") {
+            return b;
+        }
+    }
+    PathBuf::from("bash.exe")
+}
+
 fn execute(tool: &str, input: &Value) -> (String, bool) {
     let path = input["file_path"].as_str().unwrap_or("");
     match tool {
         "Bash" => {
-            let out = Command::new("sh")
-                .arg("-c")
-                .arg(input["command"].as_str().unwrap_or("true"))
-                .stdin(Stdio::null())
-                .output();
+            let out = shell().arg("-c").arg(input["command"].as_str().unwrap_or("true")).stdin(Stdio::null()).output();
             match out {
                 Ok(o) => {
                     let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
@@ -228,6 +270,17 @@ fn main() {
     let interrupted = Arc::new(AtomicBool::new(false));
     let int_flag = interrupted.clone();
     let ignore_interrupt = std::env::var("FAKE_CLAUDE_IGNORE_INTERRUPT").is_ok();
+    // A stuck CLI on Windows also ignores the Ctrl-Break the host sends after the interrupt, so
+    // only ending its Job Object stops it.
+    #[cfg(windows)]
+    if ignore_interrupt {
+        unsafe extern "system" fn swallow(_event: u32) -> windows::core::BOOL {
+            windows::core::BOOL(1)
+        }
+        unsafe {
+            let _ = windows::Win32::System::Console::SetConsoleCtrlHandler(Some(swallow), true);
+        }
+    }
     std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines().map_while(|l| l.ok()) {
             let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
@@ -304,13 +357,8 @@ fn main() {
             eprintln!("fake claude: simulated crash");
             std::process::exit(code as i32);
         } else if let Some(cmd) = step["spawn"].as_str() {
-            if let Ok(child) = Command::new("sh")
-                .arg("-c")
-                .arg(cmd)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
+            if let Ok(child) =
+                shell().arg("-c").arg(cmd).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
             {
                 trace(json!({"spawned": child.id()}));
             }

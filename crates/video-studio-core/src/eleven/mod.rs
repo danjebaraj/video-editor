@@ -417,7 +417,7 @@ pub fn clear_cache(dir: &Utf8Path) -> Result<()> {
 
 /// The shared cache folder in the app library.
 pub fn cache_dir(library: &Utf8Path) -> Utf8PathBuf {
-    library.join("cache/eleven")
+    crate::paths::cache_root(library).join("eleven")
 }
 
 /// Settings › ElevenLabs › Test: checks the key against the API and returns the remaining credits.

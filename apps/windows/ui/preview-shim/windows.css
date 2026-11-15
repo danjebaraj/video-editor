@@ -1,0 +1,11 @@
+/* Windows look for the shared preview: Segoe UI Variable and Cascadia for code. */
+body, .markdown-body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+}
+.markdown-body code, .markdown-body pre, .markdown-body kbd {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+html { background: transparent; }
+@media (forced-colors: active) {
+  .media-card, .spec-block { border: 1px solid CanvasText; forced-color-adjust: auto; }
+}

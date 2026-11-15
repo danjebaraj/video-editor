@@ -2,8 +2,8 @@
 //! and a fake ElevenLabs server (ui/spec.md §20): validate → run → logs, JSON events, exit
 //! codes, the permission broker, the dry run's limits, and cancellation.
 
-// The fakes run commands through `sh`, as Claude Code does on macOS and Linux.
-#![cfg(unix)]
+// The fakes run commands through `sh`, as Claude Code does on macOS and Linux, and through Git
+// Bash on Windows, as Claude Code does there.
 
 mod common;
 
@@ -92,7 +92,7 @@ fn full_run_produces_outputs_events_and_complete_logs() {
     assert_eq!(manifest[0]["id"], "m-hero");
     assert_eq!(
         manifest[0]["path"].as_str().unwrap(),
-        w.root.join("footage/hero.mov").as_str(),
+        video_studio_core::paths::normalize(&w.root.join("footage/hero.mov")).as_str(),
         "media is referenced in place"
     );
     assert_eq!(manifest[0]["probe"]["width"], 1920);
@@ -201,7 +201,9 @@ fn full_run_produces_outputs_events_and_complete_logs() {
             && stdout(&report).contains("No cutline command failed (3 ran).")
     );
     let listing = w.run(&["logs", run.as_str()]);
-    assert!(stdout(&listing).contains("claude.jsonl") && stdout(&listing).contains("cutline/003-render.log"));
+    // full paths, in the platform's own form
+    let listed = stdout(&listing).replace('\\', "/");
+    assert!(listed.contains("claude.jsonl") && listed.contains("cutline/003-render.log"), "{listed}");
 }
 
 fn walk(dir: &Utf8Path) -> Vec<String> {
@@ -230,10 +232,11 @@ fn broker_blocks_everything_outside_the_run_scope() {
         {"tool": "Bash", "input": {"command": "ls -la"}},
         {"tool": "Bash", "input": {"command": "cat /etc/hosts | head -2"}},
         {"tool": "Bash", "input": {"command": "cutline render project.json5 > render.log"}},
-        {"tool": "Bash", "input": {"command": format!("cutline render project.json5 --out {}/stolen.mp4", w.root)}},
+        // (forward slashes: in a shell command unquoted backslashes are escapes, in Git Bash too)
+        {"tool": "Bash", "input": {"command": format!("cutline render project.json5 --out {}/stolen.mp4", w.root.as_str().replace('\\', "/"))}},
         {"tool": "Bash", "input": {"command": "cutline deps install --all"}},
         {"tool": "Bash", "input": {"command": "video-studio secret status"}},
-        {"tool": "Bash", "input": {"command": format!("{VIDEO_STUDIO} runs {}", w.project)}},
+        {"tool": "Bash", "input": {"command": format!("{} runs {}", VIDEO_STUDIO.replace('\\', "/"), w.project.as_str().replace('\\', "/"))}},
         {"tool": "Write", "input": {"file_path": format!("{}/escape.txt", w.root), "content": "x"}},
         {"tool": "Write", "input": {"file_path": "../escape2.txt", "content": "x"}},
         {"tool": "Write", "input": {"file_path": "logs/events.ndjson", "content": "forged"}},
@@ -556,6 +559,13 @@ fn spawn_until(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
+    // On Windows the run gets its own process group, so Ctrl-C and Ctrl-Break can be sent to it
+    // alone, as a terminal would send them to the CLI.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0000_0200);
+    }
     let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     let mut reader = BufReader::new(child.stdout.take().unwrap());
     let mut seen = Vec::new();
@@ -576,6 +586,7 @@ fn spawn_until(
     (child, seen, reader)
 }
 
+#[cfg(unix)]
 fn alive(pid: u64) -> bool {
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
@@ -585,18 +596,49 @@ fn alive(pid: u64) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(windows)]
+fn alive(pid: u64) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    unsafe {
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid as u32) else { return false };
+        let mut code = 0u32;
+        let running = GetExitCodeProcess(h, &mut code).is_ok() && code == STILL_ACTIVE.0 as u32;
+        let _ = CloseHandle(h);
+        running
+    }
+}
+
+/// Ctrl-C to the CLI.
+#[cfg(unix)]
 fn interrupt(child: &std::process::Child) {
     std::process::Command::new("kill").args(["-INT", &child.id().to_string()]).status().unwrap();
 }
 
-#[cfg(unix)]
+/// Ctrl-C to the CLI's process group (it shares this test's console).
+#[cfg(windows)]
+fn interrupt(child: &std::process::Child) {
+    use windows::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_C_EVENT};
+    unsafe { GenerateConsoleCtrlEvent(CTRL_C_EVENT, child.id()).unwrap() };
+}
+
+/// Ctrl-Break to the CLI's process group.
+#[cfg(windows)]
+fn ctrl_break(child: &std::process::Child) {
+    use windows::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
+    unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()).unwrap() };
+}
+
+/// A command the fake Claude leaves running, to show the whole tree is stopped.
+const LONG_CHILD: &str = "sleep 300";
+
 #[test]
 fn ctrl_c_stops_gracefully_kills_the_tree_and_leaves_complete_logs() {
     let w = World::new();
     w.set_script(json!([
         {"tool": "Write", "input": {"file_path": "project.json5", "content": PROJECT_JSON5}},
         {"tool": "Bash", "input": {"command": "cutline render project.json5"}},
-        {"spawn": "sleep 300"},
+        {"spawn": LONG_CHILD},
         {"say": "Waiting on a long render."},
         {"hang": true}
     ]));
@@ -643,11 +685,28 @@ fn ctrl_c_stops_gracefully_kills_the_tree_and_leaves_complete_logs() {
     );
 }
 
-#[cfg(unix)]
+/// Windows: Ctrl-Break stops a run the same way Ctrl-C does (ui/spec.md §13, §23.5).
+#[cfg(windows)]
+#[test]
+fn ctrl_break_stops_a_run_like_ctrl_c() {
+    let w = World::new();
+    w.set_script(json!([{"spawn": LONG_CHILD}, {"say": "Busy."}, {"hang": true}]));
+    let (mut child, _seen, mut reader) = spawn_until(&w, &[], "Busy.");
+    let spawned = w.trace().iter().find_map(|t| t["spawned"].as_u64()).unwrap();
+    assert!(alive(spawned));
+    ctrl_break(&child);
+    let mut rest = String::new();
+    std::io::Read::read_to_string(&mut reader, &mut rest).unwrap();
+    assert_eq!(child.wait().unwrap().code(), Some(4), "cancelled");
+    assert!(rest.contains("\"cancelled\""), "{rest}");
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(!alive(spawned), "the process tree is gone");
+}
+
 #[test]
 fn a_claude_that_ignores_the_interrupt_is_killed_after_the_grace_period() {
     let w = World::new();
-    w.set_script(json!([{"spawn": "sleep 300"}, {"say": "Busy."}, {"hang": true}]));
+    w.set_script(json!([{"spawn": LONG_CHILD}, {"say": "Busy."}, {"hang": true}]));
     let (mut child, _seen, mut reader) = spawn_until(&w, &[("FAKE_CLAUDE_IGNORE_INTERRUPT", "1")], "Busy.");
     let spawned = w.trace().iter().find_map(|t| t["spawned"].as_u64()).unwrap();
     let at = Instant::now();
@@ -668,7 +727,6 @@ fn a_claude_that_ignores_the_interrupt_is_killed_after_the_grace_period() {
     assert_eq!(run_json["status"], "cancelled");
 }
 
-#[cfg(unix)]
 #[test]
 fn a_second_ctrl_c_kills_immediately() {
     let w = World::new();
@@ -719,7 +777,8 @@ fn a_run_drives_and_records_an_app_through_the_helper() {
     let o = run(&w);
     assert_eq!(o.status.code(), Some(0), "stdout:\n{}\nstderr:\n{}", stdout(&o), stderr(&o));
     let folder = w.run_folder();
-    assert!(folder.join("captures/look.png").is_file() && folder.join("captures/scene1.mov").is_file());
+    let scene1 = format!("captures/scene1.{}", video_studio_core::capture::RECORDING_EXT);
+    assert!(folder.join("captures/look.png").is_file() && folder.join(&scene1).is_file());
     assert!(!w.root.join("escape.png").exists() && !folder.join("sneaky.mov").exists());
     let did: Vec<String> = ndjson(&log).iter().map(|a| a["do"].as_str().unwrap().to_string()).collect();
     for expected in ["activate", "set_window", "screenshot", "record_start", "menu", "type", "key", "click"] {

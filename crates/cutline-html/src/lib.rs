@@ -62,9 +62,30 @@ pub fn chrome() -> Option<PathBuf> {
     cutline_deps::paths::find_chrome()
 }
 
+/// `p` without a Windows verbatim prefix: `\\?\C:\x` → `C:\x`, `\\?\UNC\srv\share` →
+/// `\\srv\share`. `canonicalize` returns verbatim paths on Windows, and neither Chrome's URLs nor
+/// `Path::starts_with` treat them as the same place as the plain form. Elsewhere `p` unchanged.
+pub(crate) fn plain_path(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => p.to_path_buf(),
+    }
+}
+
 pub(crate) fn file_url(p: &Path) -> String {
-    let s = p.to_string_lossy().replace('\\', "/");
-    let s = if s.starts_with('/') { s } else { format!("/{s}") };
+    let s = plain_path(p).to_string_lossy().replace('\\', "/");
+    // `//server/share/x` (UNC) becomes `file://server/share/x`; `C:/x` becomes `file:///C:/x`.
+    let s = if let Some(unc) = s.strip_prefix("//") {
+        unc.to_string()
+    } else if s.starts_with('/') {
+        s
+    } else {
+        format!("/{s}")
+    };
     let mut out = String::from("file://");
     for b in s.bytes() {
         match b {
@@ -94,7 +115,15 @@ pub(crate) fn url_to_path(u: &str) -> Option<PathBuf> {
     }
     let s = String::from_utf8(bytes).ok()?;
     #[cfg(windows)]
-    let s = s.trim_start_matches('/').to_string();
+    let s = match s.strip_prefix('/') {
+        // `file:///C:/x`
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        // `file:////server/share` (a UNC path written with an empty host)
+        Some(rest) if rest.starts_with('/') => format!("/{rest}"),
+        Some(rest) => format!("/{rest}"),
+        // `file://server/share/x`
+        None => format!("//{s}"),
+    };
     Some(PathBuf::from(s))
 }
 
@@ -238,7 +267,8 @@ async fn drive(browser: &Browser, spec: &RenderSpec, work: &Path) -> Result<Rend
             .await?;
     }
     // network sandbox
-    let mut allow: Vec<PathBuf> = spec.allow_dirs.iter().filter_map(|d| d.canonicalize().ok()).collect();
+    let mut allow: Vec<PathBuf> =
+        spec.allow_dirs.iter().filter_map(|d| d.canonicalize().ok()).map(|d| plain_path(&d)).collect();
     if let Some(d) = spec.source.parent().and_then(|d| d.canonicalize().ok()) {
         allow.push(d);
     }
@@ -248,6 +278,7 @@ async fn drive(browser: &Browser, spec: &RenderSpec, work: &Path) -> Result<Rend
     if let Ok(d) = work.canonicalize() {
         allow.push(d);
     }
+    let allow: Vec<PathBuf> = allow.iter().map(|d| plain_path(d)).collect();
     page.execute(EnableParams {
         patterns: Some(vec![RequestPattern {
             url_pattern: Some("*".into()),
@@ -268,6 +299,7 @@ async fn drive(browser: &Browser, spec: &RenderSpec, work: &Path) -> Result<Rend
                 || url.starts_with("blob:")
                 || url_to_path(&url)
                     .and_then(|p| p.canonicalize().ok())
+                    .map(|p| plain_path(&p))
                     .map(|p| allow.iter().any(|a| p.starts_with(a)))
                     .unwrap_or(false);
             if ok {
@@ -397,10 +429,23 @@ mod tests {
     use super::*;
     #[test]
     fn urls_roundtrip() {
-        let p = PathBuf::from("/tmp/ü dir/a b.html");
+        #[cfg(not(windows))]
+        let (p, prefix) = (PathBuf::from("/tmp/ü dir/a b.html"), "file:///tmp/%C3%BC%20dir/");
+        #[cfg(windows)]
+        let (p, prefix) = (PathBuf::from(r"C:\tmp\ü dir\a b.html"), "file:///C:/tmp/%C3%BC%20dir/");
         let u = file_url(&p);
-        assert!(u.starts_with("file:///tmp/%C3%BC%20dir/"));
-        assert_eq!(url_to_path(&u).unwrap(), p);
+        assert!(u.starts_with(prefix), "{u}");
+        assert_eq!(url_to_path(&u).unwrap(), PathBuf::from(p.to_string_lossy().replace('\\', "/")));
         assert!(url_to_path("https://x").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_verbatim_and_unc_paths() {
+        assert_eq!(file_url(Path::new(r"\\?\C:\a b\x.html")), "file:///C:/a%20b/x.html");
+        assert_eq!(file_url(Path::new(r"\\server\share\x.html")), "file://server/share/x.html");
+        assert_eq!(file_url(Path::new(r"\\?\UNC\server\share\x.html")), "file://server/share/x.html");
+        assert_eq!(url_to_path("file://server/share/x.html").unwrap(), PathBuf::from("//server/share/x.html"));
+        assert!(plain_path(Path::new(r"\\?\C:\a")).starts_with(r"C:\"));
     }
 }

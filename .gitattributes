@@ -1,0 +1,22 @@
+# Files are LF on every platform (ui/spec.md §3, §23.5): schemas, goldens and snapshots are
+# compared byte for byte, so a Windows checkout with core.autocrlf must not rewrite them.
+* text=auto eol=lf
+
+# Windows scripts keep CRLF so cmd.exe and older PowerShell read them as expected.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.onnx binary
+*.mp4 binary
+*.mov binary
+*.wav binary
+*.mp3 binary
+*.cube text eol=lf

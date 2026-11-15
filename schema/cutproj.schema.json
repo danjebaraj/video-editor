@@ -453,6 +453,13 @@
             "null"
           ]
         },
+        "file_id_windows": {
+          "description": "`<volume serial>:<128-bit file ID>` (hex), when made on Windows. Each platform uses its own\nentry, ignores the other's and keeps it when saving (ui/spec.md §6.2).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "relative": {
           "description": "Relative to the project file's folder, with forward slashes.",
           "type": [

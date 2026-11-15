@@ -1,6 +1,6 @@
-//! Platform traits (spec §3). Each has a macOS implementation now and a Windows stub or
-//! cross-platform fallback. Mac-only APIs that need Foundation (bookmarks, notifications, Finder)
-//! are implemented by the Swift shell and passed in through these traits.
+//! Platform traits (spec §3). Each has a macOS and a Windows implementation. Mac-only APIs that
+//! need Foundation (bookmarks, notifications, Finder) are implemented by the Swift shell and
+//! passed in through these traits; the Windows ones live in [`windows`] (ui/spec.md §23.4).
 
 use std::process::{Child, Command};
 use std::sync::Mutex;
@@ -8,6 +8,21 @@ use std::sync::Mutex;
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::{Error, Result, BUNDLE_ID};
+
+#[cfg(windows)]
+pub mod windows;
+
+/// The secret store's service and account for a secret. macOS keeps the bundle ID and the
+/// secret's name; Windows uses the service and account names the spec gives for Credential
+/// Manager (`Syncfusion Video Studio` / `elevenlabs`).
+fn secret_entry(name: &str) -> Result<keyring::Entry> {
+    let (service, account) = if cfg!(windows) {
+        (crate::APP_NAME, if name == ELEVEN_KEY { "elevenlabs" } else { name })
+    } else {
+        (BUNDLE_ID, name)
+    };
+    keyring::Entry::new(service, account).map_err(|e| Error::other(format!("secret store: {e}")))
+}
 
 /// Secret storage: Keychain on macOS, Credential Manager on Windows.
 pub trait Secrets: Send + Sync {
@@ -24,7 +39,7 @@ pub struct OsSecrets;
 
 impl Secrets for OsSecrets {
     fn get(&self, name: &str) -> Result<Option<String>> {
-        let entry = keyring::Entry::new(BUNDLE_ID, name).map_err(|e| Error::other(format!("secret store: {e}")))?;
+        let entry = secret_entry(name)?;
         match entry.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -32,11 +47,11 @@ impl Secrets for OsSecrets {
         }
     }
     fn set(&self, name: &str, value: &str) -> Result<()> {
-        let entry = keyring::Entry::new(BUNDLE_ID, name).map_err(|e| Error::other(format!("secret store: {e}")))?;
+        let entry = secret_entry(name)?;
         entry.set_password(value).map_err(|e| Error::other(format!("secret store: {e}")))
     }
     fn delete(&self, name: &str) -> Result<()> {
-        let entry = keyring::Entry::new(BUNDLE_ID, name).map_err(|e| Error::other(format!("secret store: {e}")))?;
+        let entry = secret_entry(name)?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(Error::other(format!("secret store: {e}"))),
@@ -79,6 +94,19 @@ pub trait FileRefs: Send + Sync {
     fn resolve(&self, reference: &str) -> Option<Utf8PathBuf>;
 }
 
+/// This platform's own file references for code that has no shell to supply them (the CLI, the
+/// Windows shell): file IDs on Windows, none elsewhere (macOS bookmarks come from the Swift shell).
+pub fn system_file_refs() -> Box<dyn FileRefs> {
+    #[cfg(windows)]
+    {
+        Box::new(windows::WinFileRefs)
+    }
+    #[cfg(not(windows))]
+    {
+        Box::new(NoFileRefs)
+    }
+}
+
 /// No durable references: resolution falls back to relative path, absolute path and search roots.
 pub struct NoFileRefs;
 
@@ -116,6 +144,9 @@ pub struct SystemOpener;
 
 impl RevealInFileManager for SystemOpener {
     fn reveal(&self, path: &Utf8Path) -> Result<()> {
+        #[cfg(windows)]
+        return windows::WinShell.reveal(path);
+        #[allow(unreachable_code)]
         let status = if cfg!(target_os = "macos") {
             Command::new("open").arg("-R").arg(path.as_str()).status()
         } else if cfg!(windows) {
@@ -129,6 +160,9 @@ impl RevealInFileManager for SystemOpener {
 
 impl OpenWith for SystemOpener {
     fn open(&self, path: &Utf8Path, application: Option<&str>) -> Result<()> {
+        #[cfg(windows)]
+        return windows::WinShell.open(path, application);
+        #[allow(unreachable_code)]
         let mut cmd = if cfg!(target_os = "macos") {
             let mut c = Command::new("open");
             if let Some(app) = application {
@@ -153,7 +187,9 @@ impl OpenWith for SystemOpener {
 pub struct ProcessGroup;
 
 impl ProcessGroup {
-    /// Makes `cmd` the leader of a new process group so the whole tree can be signalled.
+    /// Makes `cmd` the leader of a new process group so the whole tree can be signalled. On
+    /// Windows the child is also created suspended: start it with [`ProcessGroup::spawn`], which
+    /// puts it in its Job Object and resumes it.
     pub fn configure(cmd: &mut Command) {
         #[cfg(unix)]
         {
@@ -161,26 +197,29 @@ impl ProcessGroup {
             cmd.process_group(0);
         }
         #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            // CREATE_NEW_PROCESS_GROUP: the tree is killed with `taskkill /T` below.
-            // A Job Object (windows-rs) replaces this in the Windows shell milestone (S10).
-            cmd.creation_flags(0x0000_0200);
-        }
+        windows::configure(cmd);
         #[cfg(not(any(unix, windows)))]
         let _ = cmd;
     }
 
-    /// Asks the tree to stop (SIGTERM / taskkill).
+    /// Starts `cmd` as the root of its own tree: a new process group on Unix; on Windows also a
+    /// kill-on-close Job Object, joined before the child runs, so nothing it starts escapes.
+    pub fn spawn(cmd: &mut Command) -> std::io::Result<Child> {
+        Self::configure(cmd);
+        let child = cmd.spawn()?;
+        #[cfg(windows)]
+        windows::adopt(&child)?;
+        Ok(child)
+    }
+
+    /// Asks the tree to stop (SIGTERM on Unix, Ctrl-Break to the process group on Windows).
     pub fn terminate(child: &Child) {
         #[cfg(unix)]
         unsafe {
             libc::killpg(child.id() as libc::pid_t, libc::SIGTERM);
         }
         #[cfg(windows)]
-        {
-            let _ = Command::new("taskkill").args(["/T", "/PID", &child.id().to_string()]).output();
-        }
+        windows::ctrl_break(child.id());
         #[cfg(not(any(unix, windows)))]
         let _ = child;
     }
@@ -192,24 +231,44 @@ impl ProcessGroup {
             libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
         }
         #[cfg(windows)]
-        {
-            let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &child.id().to_string()]).output();
-        }
+        windows::terminate_tree(child.id());
         let _ = child.kill();
     }
 
-    /// Kills a process group by its leader's PID (used when only the PID is known).
+    /// Kills a process tree by its root's PID (used when only the PID is known). On Windows
+    /// only trees started by [`ProcessGroup::spawn`] are touched: a PID alone may since have
+    /// been reused by an unrelated process.
     pub fn kill_pid(pid: u32) {
         #[cfg(unix)]
         unsafe {
             libc::killpg(pid as libc::pid_t, libc::SIGKILL);
         }
         #[cfg(windows)]
-        {
-            let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &pid.to_string()]).output();
-        }
+        windows::terminate_tree(pid);
         #[cfg(not(any(unix, windows)))]
         let _ = pid;
+    }
+
+    /// The tree's root has been reaped: forget it. On Windows this closes its job, which ends
+    /// anything it left running.
+    pub fn release(pid: u32) {
+        #[cfg(windows)]
+        windows::release(pid);
+        #[cfg(not(windows))]
+        let _ = pid;
+    }
+}
+
+/// A command that runs `exe` directly. On Windows an npm `.cmd` shim (`claude.cmd`) is resolved
+/// to the script it starts, so arguments aren't parsed again by `cmd.exe`.
+pub fn command(exe: &Utf8Path) -> Command {
+    #[cfg(windows)]
+    {
+        windows::command_for(exe)
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new(exe.as_str())
     }
 }
 
@@ -218,8 +277,16 @@ pub fn run_capture(cmd: &mut Command, timeout: std::time::Duration) -> Result<(i
     use std::io::Read;
     use std::process::Stdio;
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    ProcessGroup::configure(cmd);
-    let mut child = cmd.spawn()?;
+    let mut child = ProcessGroup::spawn(cmd)?;
+    let pid = child.id();
+    // Whatever the command leaves running when it ends (or times out) goes with it.
+    struct Release(u32);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            ProcessGroup::release(self.0);
+        }
+    }
+    let _release = Release(pid);
     let mut out = child.stdout.take().unwrap();
     let mut err = child.stderr.take().unwrap();
     let t_out = std::thread::spawn(move || {
@@ -244,6 +311,8 @@ pub fn run_capture(cmd: &mut Command, timeout: std::time::Duration) -> Result<(i
             None => std::thread::sleep(std::time::Duration::from_millis(15)),
         }
     };
+    // Ends anything the command left holding its output pipes, so the readers can finish.
+    ProcessGroup::release(pid);
     Ok((status.code().unwrap_or(-1), t_out.join().unwrap_or_default(), t_err.join().unwrap_or_default()))
 }
 

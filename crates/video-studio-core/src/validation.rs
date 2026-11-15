@@ -322,6 +322,16 @@ fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, ne
                     )),
                     FixLink::target("settings", "claude"),
                 );
+            } else if cfg!(windows) && info.git_bash.is_none() {
+                c.add(
+                    "git_bash_missing",
+                    None,
+                    Severity::Blocker,
+                    "environment",
+                    "Git for Windows isn't installed".into(),
+                    Some("Claude Code runs commands through Git Bash on Windows. Install Git for Windows (git-scm.com), or set CLAUDE_CODE_GIT_BASH_PATH to its bash.exe, then re-check.".into()),
+                    FixLink::target("settings", "claude"),
+                );
             } else if env.claude_signed_in(&info) == Some(false) {
                 c.add(
                     "claude_signed_out",
@@ -1030,6 +1040,7 @@ impl Default for FakeEnv {
                 effort_levels: vec![],
                 login_path: None,
                 supported: true,
+                git_bash: Some("bash".into()),
             }),
             signed_in: Some(true),
             cutline: Some(CutlineInfo { path: "/bin/cutline".into(), version: "0.1.0".into() }),
@@ -1188,6 +1199,10 @@ mod tests {
         f.env = FakeEnv::default();
         f.env.signed_in = Some(false);
         assert!(has(&f.run(), "claude_signed_out", Severity::Blocker));
+        // Windows: no Git Bash means no shell tool for Claude
+        f.env = FakeEnv::default();
+        f.env.claude.as_mut().unwrap().git_bash = None;
+        assert_eq!(has(&f.run(), "git_bash_missing", Severity::Blocker), cfg!(windows));
         f.env = FakeEnv::default();
         f.env.cutline = None;
         assert!(has(&f.run(), "cutline_missing", Severity::Blocker));

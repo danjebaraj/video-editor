@@ -2,8 +2,8 @@
 //! list / relink on a moved project, the ElevenLabs helper against a fake server, the hook, the
 //! spec assistant with per-hunk review, answering questions in a run, and Revise.
 
-// The fakes run commands through `sh`, as Claude Code does on macOS and Linux.
-#![cfg(unix)]
+// The fakes run commands through `sh`, as Claude Code does on macOS and Linux, and through Git
+// Bash on Windows, as Claude Code does there.
 
 mod common;
 
@@ -230,7 +230,7 @@ fn eleven_helper_budget_cache_and_logging() {
     assert_eq!(rows[3], ("tts".into(), true, 11, "miss".into()));
     assert!(
         log[0]["request"]["text"].as_str().unwrap().contains("fastest way")
-            && log[0]["out"].as_str().unwrap().ends_with("audio/scene1.mp3")
+            && Utf8Path::new(log[0]["out"].as_str().unwrap()).ends_with("audio/scene1.mp3")
             && log[0]["response"]["request_id"] == "req-test"
     );
     assert!(!std::fs::read_to_string(run.join("logs/eleven.ndjson")).unwrap().contains("test-key"));
@@ -355,6 +355,7 @@ fn fake_claude_info() -> ClaudeInfo {
         effort_levels: vec!["low".into(), "high".into()],
         login_path: None,
         supported: true,
+        git_bash: video_studio_core::claude::locate::find_git_bash().map(|b| b.to_string()),
     }
 }
 

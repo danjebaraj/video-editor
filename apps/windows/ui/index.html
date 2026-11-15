@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Nothing remote loads (ui/spec.md §23.3): the app host, the media host, inline styles that
+     CodeMirror and the Fluent components inject, and data: URLs for pasted images. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://media.video-studio.invalid; media-src https://media.video-studio.invalid blob:; font-src 'self' data:; connect-src 'self' https://media.video-studio.invalid; frame-src 'self'; child-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Syncfusion Video Studio</title>
+<link rel="stylesheet" href="./src/styles/app.css">
+</head>
+<body>
+<div id="app" role="application" aria-label="Syncfusion Video Studio"></div>
+<script type="module" src="./src/main.ts"></script>
+</body>
+</html>

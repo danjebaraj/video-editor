@@ -31,6 +31,46 @@ pub struct ClaudeInfo {
     /// PATH from the login shell, used when launching the CLI (it may need node and friends).
     pub login_path: Option<String>,
     pub supported: bool,
+    /// Windows: the Git Bash the CLI's shell tool runs in. Without it Claude Code silently starts
+    /// with no Bash tool at all (verified with 2.1.319), so runs can't work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_bash: Option<String>,
+}
+
+/// Git Bash for Claude Code's shell tool on Windows, found as the CLI looks for it
+/// (`CLAUDE_CODE_GIT_BASH_PATH`) and then where Git for Windows installs it: next to `git` on
+/// PATH (including Scoop's shims), Program Files, and the per-user and Scoop locations. WSL's
+/// `bash.exe` in System32 is not Git Bash and never chosen. `None` elsewhere.
+pub fn find_git_bash() -> Option<Utf8PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
+    if let Some(p) = std::env::var("CLAUDE_CODE_GIT_BASH_PATH").ok().filter(|s| !s.is_empty()) {
+        let p = Utf8PathBuf::from(p);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let mut candidates: Vec<Utf8PathBuf> = Vec::new();
+    if let Some(git) = std::env::var("PATH").ok().and_then(|p| which_in("git", &p)) {
+        if let Some(root) = git.parent().and_then(|d| d.parent()) {
+            candidates.push(root.join("bin").join("bash.exe"));
+            // Scoop: <scoop>\shims\git.exe → <scoop>\apps\git\current\bin\bash.exe
+            candidates.push(root.join("apps").join("git").join("current").join("bin").join("bash.exe"));
+        }
+    }
+    for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Ok(pf) = std::env::var(var) {
+            candidates.push(Utf8PathBuf::from(pf).join("Git").join("bin").join("bash.exe"));
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidates.push(Utf8PathBuf::from(local).join("Programs").join("Git").join("bin").join("bash.exe"));
+    }
+    if let Some(home) = paths::home_dir() {
+        candidates.push(home.join("scoop").join("apps").join("git").join("current").join("bin").join("bash.exe"));
+    }
+    candidates.into_iter().find(|c| c.is_file() && !c.as_str().to_ascii_lowercase().contains("system32"))
 }
 
 pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
@@ -99,9 +139,14 @@ fn is_executable(p: &Utf8Path) -> bool {
     }
 }
 
-/// Looks a program up in a PATH string.
+/// Looks a program up in a PATH string. On Windows `claude` finds `claude.exe` before
+/// `claude.cmd`, and an extension-less file (a Unix shell script) isn't taken for a program.
 pub fn which_in(program: &str, path: &str) -> Option<Utf8PathBuf> {
-    let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
+    let has_ext = Utf8Path::new(program).extension().is_some();
+    let exts: &[&str] = match (cfg!(windows), has_ext) {
+        (true, false) => &[".exe", ".cmd", ".bat"],
+        _ => &[""],
+    };
     for dir in std::env::split_paths(path) {
         let Ok(dir) = paths::utf8(dir) else { continue };
         for ext in exts {
@@ -147,6 +192,12 @@ pub fn child_env(login: Option<&str>) -> HashMap<String, String> {
     }
     env.remove("CLAUDECODE");
     env.remove("CLAUDE_CODE_ENTRYPOINT");
+    // Windows: tell the CLI where Git Bash is, so its shell tool exists (docs/decisions.md).
+    if cfg!(windows) && !env.contains_key("CLAUDE_CODE_GIT_BASH_PATH") {
+        if let Some(b) = find_git_bash() {
+            env.insert("CLAUDE_CODE_GIT_BASH_PATH".into(), b.to_string());
+        }
+    }
     env
 }
 
@@ -156,13 +207,30 @@ fn run_with_env(
     login: Option<&str>,
     timeout: Duration,
 ) -> Option<(i32, String, String)> {
-    let mut cmd = Command::new(exe.as_str());
+    let mut cmd = crate::platform::command(exe);
     cmd.args(args).env_clear().envs(child_env(login));
     run_capture(&mut cmd, timeout).ok()
 }
 
+#[cfg(not(windows))]
 const CLAUDE_LOCATIONS: [&str; 4] =
     ["~/.claude/local/claude", "~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"];
+
+/// Windows (ui/spec.md §23.5): after the configured path and `PATH`, the native installer's
+/// location, then npm's global shim.
+#[cfg(windows)]
+fn claude_locations() -> Vec<String> {
+    let mut v = vec!["~\\.local\\bin\\claude.exe".to_string()];
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        v.push(format!("{appdata}\\npm\\claude.cmd"));
+    }
+    v
+}
+
+#[cfg(not(windows))]
+fn claude_locations() -> Vec<String> {
+    CLAUDE_LOCATIONS.iter().map(|s| s.to_string()).collect()
+}
 
 /// Finds Claude Code. `VIDEO_STUDIO_CLAUDE` overrides everything (tests use a fake CLI), and
 /// `VIDEO_STUDIO_NO_CLAUDE` makes detection fail (to exercise the setup screen).
@@ -172,9 +240,11 @@ pub fn find_claude(custom_path: &str) -> Option<ClaudeInfo> {
     }
     let login = login_path();
     let forced = std::env::var("VIDEO_STUDIO_CLAUDE").ok().filter(|s| !s.is_empty());
+    let common = claude_locations();
+    let common: Vec<&str> = common.iter().map(String::as_str).collect();
     let list = match &forced {
         Some(f) => vec![Utf8PathBuf::from(f)],
-        None => candidates("claude", custom_path, &CLAUDE_LOCATIONS),
+        None => candidates("claude", custom_path, &common),
     };
     for c in list {
         if !is_executable(&c) {
@@ -195,6 +265,7 @@ pub fn find_claude(custom_path: &str) -> Option<ClaudeInfo> {
             effort_levels,
             login_path: login,
             supported: v >= MIN_CLAUDE_VERSION,
+            git_bash: find_git_bash().map(|b| b.to_string()),
         });
     }
     None
@@ -238,18 +309,20 @@ pub struct CutlineInfo {
 /// `VIDEO_STUDIO_CUTLINE` overrides everything.
 pub fn find_cutline(custom_path: &str, repo: &str) -> Option<CutlineInfo> {
     let forced = std::env::var("VIDEO_STUDIO_CUTLINE").ok().filter(|s| !s.is_empty());
+    let common: &[&str] = if cfg!(windows) {
+        &[]
+    } else {
+        &["~/.local/bin/cutline", "/opt/homebrew/bin/cutline", "/usr/local/bin/cutline"]
+    };
     let mut list = match &forced {
         Some(f) => vec![Utf8PathBuf::from(f)],
-        None => candidates(
-            "cutline",
-            custom_path,
-            &["~/.local/bin/cutline", "/opt/homebrew/bin/cutline", "/usr/local/bin/cutline"],
-        ),
+        None => candidates("cutline", custom_path, common),
     };
     if forced.is_none() && !repo.trim().is_empty() {
         let repo = paths::expand_tilde(repo.trim());
-        list.push(repo.join("bin/cutline"));
-        list.push(repo.join("target/release/cutline"));
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        list.push(repo.join(format!("bin/cutline{exe}")));
+        list.push(repo.join(format!("target/release/cutline{exe}")));
     }
     for c in list {
         if !is_executable(&c) {
@@ -344,7 +417,10 @@ mod tests {
         assert_eq!(parse_version("no digits"), None);
         assert!((2, 1, 311) >= MIN_CLAUDE_VERSION && (1, 9, 0) < MIN_CLAUDE_VERSION);
         let dir = claude_project_dir("/private/tmp/My Runs/2026-11-14-1753-shorts".into()).unwrap();
-        assert!(dir.as_str().ends_with("projects/-private-tmp-My-Runs-2026-11-14-1753-shorts"), "{dir}");
+        assert!(dir.ends_with("projects/-private-tmp-My-Runs-2026-11-14-1753-shorts"), "{dir}");
+        // Claude Code's slug for a Windows folder: `C:\GitHub\video-editor` → `C--GitHub-video-editor`
+        let win = claude_project_dir(r"C:\Runs\2026-11-14-1753-shorts".into()).unwrap();
+        assert!(win.ends_with("projects/C--Runs-2026-11-14-1753-shorts"), "{win}");
     }
 
     #[test]

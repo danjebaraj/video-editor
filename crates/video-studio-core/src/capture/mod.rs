@@ -16,6 +16,12 @@
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(windows)]
+pub mod windows;
+
+/// The container recordings are written in: what the system recorder makes (QuickTime on macOS,
+/// H.264 MP4 from Media Foundation on Windows).
+pub const RECORDING_EXT: &str = if cfg!(windows) { "mp4" } else { "mov" };
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -61,6 +67,55 @@ const GUARDED_APPS: [&str; 22] = [
     "Finder",
 ];
 
+/// The Windows apps a run may never drive unless the project lists them (ui/spec.md §23.7):
+/// terminals, Settings, Registry Editor, Task Manager, password managers, File Explorer and
+/// the UAC prompt. Matched against window owners' executable names and display names.
+#[cfg(windows)]
+pub const GUARDED_APPS_WINDOWS: [&str; 30] = [
+    "cmd",
+    "Command Prompt",
+    "powershell",
+    "Windows PowerShell",
+    "pwsh",
+    "PowerShell",
+    "WindowsTerminal",
+    "Windows Terminal",
+    "wt",
+    "conhost",
+    "OpenConsole",
+    "SystemSettings",
+    "Settings",
+    "control",
+    "Control Panel",
+    "regedit",
+    "Registry Editor",
+    "Taskmgr",
+    "Task Manager",
+    "mmc",
+    "explorer",
+    "File Explorer",
+    "consent",
+    "KeePass",
+    "KeePassXC",
+    "1Password",
+    "Bitwarden",
+    "Dashlane",
+    "LastPass",
+    "CredentialUIBroker",
+];
+
+fn is_guarded(app: &str) -> bool {
+    let name = app.trim().trim_end_matches(".app");
+    #[cfg(windows)]
+    {
+        let stem = name.strip_suffix(".exe").or_else(|| name.strip_suffix(".EXE")).unwrap_or(name);
+        if GUARDED_APPS_WINDOWS.iter().any(|g| g.eq_ignore_ascii_case(stem)) {
+            return true;
+        }
+    }
+    GUARDED_APPS.iter().any(|g| g.eq_ignore_ascii_case(name))
+}
+
 /// What the run's project allows, passed to the helper in its run context.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CaptureSettings {
@@ -89,7 +144,7 @@ impl CaptureSettings {
                 self.apps.join(", ")
             )));
         }
-        if GUARDED_APPS.iter().any(|g| g.eq_ignore_ascii_case(app.trim().trim_end_matches(".app"))) {
+        if is_guarded(app) {
             return Err(Error::Denied(format!(
                 "\"{app}\" can't be driven during a run unless the user lists it under Project › App recording."
             )));
@@ -404,7 +459,11 @@ pub fn backend() -> Box<dyn Backend> {
     {
         Box::new(macos::MacBackend)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        Box::new(windows::WinBackend)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         Box::new(Unsupported)
     }
@@ -497,8 +556,15 @@ impl Session {
             )));
         }
         let mut p = self.run_folder.join(CAPTURES_DIR).join(rel);
-        if p.extension().map(|e| e.eq_ignore_ascii_case(ext)) != Some(true) {
-            p = Utf8PathBuf::from(format!("{p}.{ext}"));
+        let given = p.extension().map(|e| e.to_ascii_lowercase());
+        if given.as_deref() != Some(&ext.to_ascii_lowercase()) {
+            if ext == RECORDING_EXT && matches!(given.as_deref(), Some("mov" | "mp4")) {
+                // `scene1.mov` on Windows (or `.mp4` on a Mac) names the recording, not a format:
+                // the system recorder decides the container.
+                p.set_extension(ext);
+            } else {
+                p = Utf8PathBuf::from(format!("{p}.{ext}"));
+            }
         }
         if let Some(dir) = p.parent() {
             std::fs::create_dir_all(dir)?;
@@ -506,8 +572,11 @@ impl Session {
         Ok(p)
     }
 
+    /// A path in the run folder as Claude should write it: relative, with forward slashes.
     fn rel(&self, p: &Utf8Path) -> String {
-        p.strip_prefix(&self.run_folder).map(|r| r.to_string()).unwrap_or_else(|_| p.to_string())
+        paths::strip_path_prefix(&paths::normalize(p), &paths::normalize(&self.run_folder))
+            .map(|r| r.as_str().replace('\\', "/"))
+            .unwrap_or_else(|| p.to_string())
     }
 
     fn need_accessibility(&self) -> Result<()> {
@@ -769,7 +838,7 @@ impl Session {
                 )));
             }
         }
-        let path = self.out_path(out, "mov")?;
+        let path = self.out_path(out, RECORDING_EXT)?;
         let rect = self.frame_rect(app, frame)?;
         let _ = std::fs::remove_file(&path);
         let pid = self.backend.record_start(rect, &path, seconds, show_clicks).map_err(|e| self.screen_error(e))?;
@@ -950,13 +1019,17 @@ mod tests {
         assert!(s.record_start("long", 99_999, None, Frame::Window, false).is_err());
         assert!(s.record_start("none", 0, None, Frame::Window, false).is_err());
         let started = s.record_start("scene1", 45, None, Frame::Window, true).unwrap();
-        assert!(started.contains("captures/scene1.mov") && started.contains("for 45 s"), "{started}");
-        assert!(s.record_wait().unwrap().contains("captures/scene1.mov"));
+        let scene1 = format!("captures/scene1.{RECORDING_EXT}");
+        assert!(started.contains(&scene1) && started.contains("for 45 s"), "{started}");
+        assert!(s.record_wait().unwrap().contains(&scene1));
         assert!(s.record_wait().is_err());
         let a = actions(&dir);
         assert!(a.iter().any(|v| v["do"] == "record_start" && v["clicks"] == true && v["seconds"] == 45));
         s.record_start("scene2", 20, None, Frame::Window, false).unwrap();
-        assert!(s.record_cancel().unwrap().contains("discarded") && !dir.join("run/captures/scene2.mov").exists());
+        assert!(
+            s.record_cancel().unwrap().contains("discarded")
+                && !dir.join(format!("run/captures/scene2.{RECORDING_EXT}")).exists()
+        );
         // a run that ends while recording has its recorder ended
         s.record_start("scene3", 20, None, Frame::Window, false).unwrap();
         std::env::set_var(FAKE_ENV, dir.join("fake.ndjson").as_str());

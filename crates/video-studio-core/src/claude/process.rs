@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -123,14 +123,12 @@ impl ClaudeProcess {
     /// process with the channel its events arrive on. The last message is always `Exit`.
     pub fn start(options: &ClaudeOptions, prompt: &str) -> Result<(ClaudeProcess, Receiver<Incoming>)> {
         let args = options.arguments();
-        let mut cmd = Command::new(options.executable.as_str());
+        let mut cmd = crate::platform::command(&options.executable);
         cmd.args(&args).current_dir(options.working_dir.as_str()).env_clear().envs(&options.env);
         // The CLI takes its working directory from $PWD; an app launched from Finder has PWD=/.
         cmd.env("PWD", options.working_dir.as_str()).env_remove("OLDPWD");
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        ProcessGroup::configure(&mut cmd);
-        let mut child = cmd
-            .spawn()
+        let mut child = ProcessGroup::spawn(&mut cmd)
             .map_err(|e| Error::Environment(format!("couldn't start Claude Code ({}): {e}", options.executable)))?;
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("piped stdout");
@@ -204,6 +202,8 @@ impl ClaudeProcess {
                     Err(_) => break -1,
                 }
             };
+            // On Windows this closes the tree's job: nothing Claude started outlives it.
+            ProcessGroup::release(out_shared.child.lock().unwrap().id());
             out_shared.exited.store(true, Ordering::SeqCst);
             let stderr = err_text.lock().unwrap().clone();
             out_shared.log_line(
@@ -290,8 +290,18 @@ impl ClaudeProcess {
         );
         self.interrupt();
         self.finish_input();
-        let deadline = std::time::Instant::now() + grace;
+        let started = std::time::Instant::now();
+        let deadline = started + grace;
+        // Windows (ui/spec.md §23.4): after the interrupt, Ctrl-Break goes to the whole process
+        // group, so cutline and ffmpeg get the chance to stop cleanly before the job is ended.
+        #[cfg(windows)]
+        let mut broke = false;
         while self.is_running() && std::time::Instant::now() < deadline {
+            #[cfg(windows)]
+            if !broke && started.elapsed() >= grace / 2 {
+                broke = true;
+                ProcessGroup::terminate(&self.shared.child.lock().unwrap());
+            }
             std::thread::sleep(Duration::from_millis(25));
         }
         if self.is_running() {
