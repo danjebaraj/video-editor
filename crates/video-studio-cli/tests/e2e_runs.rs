@@ -315,7 +315,11 @@ fn dry_run_cannot_render_finals_or_call_the_helper() {
         {"tool": "Bash", "input": {"command": "video-studio eleven music --prompt calm --length 10 --out m.mp3"}},
         {"tool": "Bash", "input": {"command": "video-studio eleven quote tts --text 'Hello there'"}},
         {"tool": "Bash", "input": {"command": "video-studio standin video --out captures/scene-2.mov --seconds 22"}},
-        {"tool": "Bash", "input": {"command": "video-studio standin audio --out audio/vo-1.mp3 --seconds 9.5"}},
+        {"tool": "Write", "input": {"file_path": "audio/vo-1.txt", "content": "Meet the fastest way to ship your product today."}},
+        {"tool": "Bash", "input": {"command": "video-studio standin audio --out audio/vo-1.mp3 --text-file audio/vo-1.txt"}},
+        {"tool": "Bash", "input": {"command": "video-studio standin audio --out audio/music.mp3 --seconds 30"}},
+        {"tool": "Write", "input": {"file_path": "check-linkedin.json5", "content": PROJECT_JSON5}},
+        {"tool": "Bash", "input": {"command": "cutline review check-linkedin.json5 --out work/review-linkedin"}},
         {"tool": "Bash", "input": {"command": "video-studio standin video --out ../escape.mov --seconds 5"}},
         {"tool": "Write", "input": {"file_path": "readiness.json", "content": json!({"ready": false, "ambiguities": [{"text": "Which logo opens the video?", "spec_line": 3}], "assumptions": ["Voice-over in English"], "missing_media": [], "risks": [{"text": "Scene 2 has no footage", "spec_line": 12}], "planned": [{"text": "Recording captures/scene-2.mov, 22 s", "spec_line": 12}, "Voice-over audio/vo-1.mp3, 9.5 s"], "estimated_durations": {"youtube-shorts": 44.0}}).to_string()}},
     ]));
@@ -332,7 +336,6 @@ fn dry_run_cannot_render_finals_or_call_the_helper() {
     assert_eq!(by("eleven music"), vec!["deny"]);
     assert_eq!(by("eleven quote"), vec!["allow"]);
     assert_eq!(by("validate"), vec!["allow"]);
-    assert_eq!(by("review"), vec!["allow"]);
     assert_eq!(eleven.count("/v1/text-to-speech"), 0, "the API was never called");
     // The dry run works in a scratch folder in the library, not in the output folder.
     assert!(!w.out.exists());
@@ -345,8 +348,15 @@ fn dry_run_cannot_render_finals_or_call_the_helper() {
         !folder.join("outputs/youtube-shorts/youtube-shorts.mp4").exists() && !folder.join("audio/vo.mp3").exists()
     );
     // Stand-ins hold the place of what the production run will record and generate.
-    assert_eq!(by("standin"), vec!["allow", "allow", "allow"]);
+    assert_eq!(by("standin"), vec!["allow", "allow", "allow", "allow"]);
     assert!(folder.join("captures/scene-2.mov").is_file() && folder.join("audio/vo-1.mp3").is_file());
+    // A voice-over stand-in comes with a transcript made from its script, for captions and cues.
+    let transcript: Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join("audio/vo-1.json")).unwrap()).unwrap();
+    assert_eq!(transcript["words"].as_array().map(Vec::len), Some(9));
+    assert!(folder.join("audio/music.mp3").is_file() && !folder.join("audio/music.json").exists());
+    // Another export's shape is reviewed from a scratch copy of the project.
+    assert_eq!(by("review"), vec!["allow", "allow"]);
     assert!(!folder.parent().unwrap().join("escape.mov").exists(), "the helper keeps stand-ins in their folders");
     assert_eq!(p.runs[0].model.as_deref(), Some("haiku"), "the dry run uses the cheaper model");
     // Findings join the validation report as warnings linked to spec lines.

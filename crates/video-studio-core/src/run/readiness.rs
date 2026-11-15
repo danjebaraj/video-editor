@@ -124,7 +124,7 @@ impl ReadinessReport {
 
     /// The findings as a prompt for "Ask Claude to fix the spec" (spec §11.2).
     pub fn fix_prompt(&self) -> String {
-        let mut s = String::from("A dry run of this spec found the points below. Update spec.md so a production run has what it needs. Ask me about anything only I can decide.\n");
+        let mut s = String::from("A dry run of this spec found the points below. Update spec.md so a production run has what it needs. Ask me about anything only I can decide.\n\nThe spec describes the video, not this computer or the project's settings. Some points can't be fixed in spec.md: a missing permission, a voice that isn't chosen, an output that isn't added to the run, an API key. Don't write those into the spec as notes or status; tell me in your reply what I need to change and where. If the spec already carries such notes from an earlier dry run, remove them.\n");
         for (title, list) in [
             ("Unclear", &self.ambiguities),
             ("Missing media", &self.missing_media),
@@ -178,6 +178,7 @@ mod tests {
         let prompt = r.fix_prompt();
         assert!(prompt.contains("- Which logo opens the video? (spec.md line 12) — Two logos are attached"));
         assert!(prompt.contains("Missing media:") && prompt.contains("Assumptions"));
+        assert!(prompt.contains("not this computer or the project's settings"));
         assert!(ReadinessReport::parse("not json").is_none());
         assert!(ReadinessReport::parse("[]").is_none());
         assert!(ReadinessReport::parse(r#"{"ready": true}"#).unwrap().is_clean());
