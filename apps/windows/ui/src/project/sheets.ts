@@ -5,6 +5,7 @@ import { effect } from '../store';
 import { sheet, openFiles, openFolders, Filters, toast } from '../dialogs';
 import { modelName } from '../app-state';
 import { modelPicker } from '../widgets';
+import { copyButton, copyable } from '../text-tools';
 import type { ProjectWindow } from './window';
 import type { RunPlan } from './runs';
 import type { Finding, Readiness } from '../types';
@@ -96,18 +97,37 @@ export function showRunConfirm(w: ProjectWindow, plan: RunPlan) {
   });
 }
 
+export function findingText(f: Finding): string {
+  let s = f.text;
+  if (f.spec_line) s += ` (spec line ${f.spec_line})`;
+  if (f.detail) s += `\n${f.detail}`;
+  return s;
+}
+
+/** The findings as Markdown, section by section, ready to paste into a note or an issue. */
+export function findingsMarkdown(r: Readiness): string {
+  const sections: [string, Finding[]][] = [
+    ['Unclear in the spec', r.ambiguities], ['Missing media', r.missing_media], ['Risks', r.risks],
+    ['Assumptions the dry run made', r.assumptions], ['Made during the production run', r.planned ?? []],
+  ];
+  const out = sections.filter(([, items]) => items.length).map(([title, items]) => `## ${title}\n\n${items.map((f) => `- ${findingText(f).replace(/\n/g, '\n  ')}`).join('\n')}`);
+  if (r.notes) out.push(`## Notes\n\n${r.notes}`);
+  return `${out.join('\n\n')}\n`;
+}
+
 /** After a dry run with findings: fix the spec, stop, or run anyway. */
 export function showFindings(w: ProjectWindow, r: Readiness) {
   const s = sheet('The dry run found things to check', { wide: true });
   s.el.dataset.sheet = 'findings';
   const section = (title: string, list: Finding[]) =>
     list.length
-      ? h('section', null, h('h3', null, title), h('ul', null, list.map((f) => h('li', null, f.text, f.detail ? h('div', { class: 'muted small' }, f.detail) : null, f.spec_line ? h('button', { class: 'link small', onclick: () => {
+      ? h('section', null, h('h3', null, title), h('ul', null, list.map((f) => h('li', { class: 'finding' }, h('div', { class: 'grow' }, f.text, f.detail ? h('div', { class: 'muted small' }, f.detail) : null), copyButton('Copy this finding', () => findingText(f)), f.spec_line ? h('button', { class: 'link small', onclick: () => {
           s.close();
           w.jumpToLine(f.spec_line!);
         } }, `Line ${f.spec_line}`) : null))))
       : null;
-  clear(s.body, section('Unclear in the spec', r.ambiguities), section('Missing media', r.missing_media), section('Risks', r.risks), section('Assumptions', r.assumptions), section('Made during the production run (nothing to do)', r.planned ?? []), r.notes ? h('p', null, r.notes) : null);
+  const notes = r.notes;
+  clear(s.body, section('Unclear in the spec', r.ambiguities), section('Missing media', r.missing_media), section('Risks', r.risks), section('Assumptions the dry run made', r.assumptions), section('Made during the production run (nothing to do)', r.planned ?? []), notes ? copyable(h('p', { class: 'muted' }, notes), 'Copy the notes', () => notes) : null);
   s.footer.append(
     button('Ask Claude to Fix the Spec', () => {
       s.close('fix');
@@ -115,6 +135,7 @@ export function showFindings(w: ProjectWindow, r: Readiness) {
       w.runs.pendingPlan = null;
       w.assistant.askToFix(r);
     }),
+    copyButton('Copy every finding as Markdown', () => findingsMarkdown(r), { title: 'Copy All' }),
     button('Stop Here', () => {
       s.close('stop');
       w.runs.findings.value = null;

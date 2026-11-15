@@ -7,6 +7,8 @@
 import { core, request, on, errorText } from './bridge';
 import { scriptedAnswers } from './dialogs';
 import { environment, keyStatus, detect, brands, reloadLibrary } from './app-state';
+import { clipboardText, copyText, markdownBlocks, parseMarkdown } from './text-tools';
+import { reportText } from './project/inspector/validation';
 import type { ProjectWindow } from './project/window';
 
 interface Fixture {
@@ -273,6 +275,25 @@ async function run(w: ProjectWindow, fx: Fixture) {
     check(report.includes('# cutline issue report') && report.includes('Blocked tool calls'), 'the issue report');
     const n = await core<number>('logs.export', { folder: rec.folder, destination: `${fx.out}\\logs.zip`, redact: true });
     check(n > 8, `logs exported (${n} files)`);
+    check(names.includes('prompt-system.md') && names.includes('prompt.md'), 'a run keeps the instructions Claude was given');
+
+    // Copy and Markdown preview
+    const blocks = parseMarkdown('# Title\n\nA *short* paragraph\nin two lines.\n\n- one\n  - nested\n1. first\n\n```\ncode here\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n> quoted\n\n---\n');
+    check(JSON.stringify(blocks) === JSON.stringify([
+      { kind: 'heading', level: 1, text: 'Title' }, { kind: 'paragraph', text: 'A *short* paragraph in two lines.' },
+      { kind: 'item', indent: 0, marker: '•', text: 'one' }, { kind: 'item', indent: 1, marker: '•', text: 'nested' },
+      { kind: 'item', indent: 0, marker: '1.', text: 'first' }, { kind: 'code', text: 'code here' },
+      { kind: 'table', rows: [['A', 'B'], ['1', '2']] }, { kind: 'quote', text: 'quoted' }, { kind: 'rule' },
+    ]), `Markdown previews as headings, lists, code, tables, quotes and rules (${JSON.stringify(blocks)})`);
+    const md = markdownBlocks('Use `cutline` **now**, see [docs](https://example.com) and <b>no tags</b>');
+    check(md.querySelector('code')?.textContent === 'cutline' && md.querySelector('strong') && md.querySelector('a')?.getAttribute('href') === 'https://example.com' && !md.querySelector('b'), 'inline Markdown, with no HTML from the text');
+    const before = await clipboardText();
+    check(await copyText('copied by the self test ✓'), 'one click puts text on the clipboard');
+    const pasted = await clipboardText();
+    check(pasted === 'copied by the self test ✓', `the clipboard holds the copied text (${pasted})`);
+    if (before !== null) await copyText(before);
+    const rep = d.report.value;
+    if (rep?.issues.length) check(reportText(rep.issues).includes(rep.issues[0].title), 'validation results copy as text');
     w.showTab('run');
     return `${rec.status}, ${out.bytes} bytes`;
   });

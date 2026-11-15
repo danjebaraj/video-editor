@@ -26,6 +26,81 @@ use video_studio_core::platform::{OpenWith, RevealInFileManager};
 
 use crate::protocol::{ProgressState, ThemeInfo, Topic};
 
+// MARK: Clipboard
+
+const CF_UNICODETEXT: u32 = 13;
+
+/// Opens the clipboard, retrying briefly: another app may hold it for a moment.
+fn open_clipboard() -> Result<(), String> {
+    use windows::Win32::System::DataExchange::OpenClipboard;
+    let mut last = String::new();
+    for _ in 0..10 {
+        match unsafe { OpenClipboard(None) } {
+            Ok(()) => return Ok(()),
+            Err(e) => last = e.message(),
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    Err(format!("the clipboard is in use by another app ({last})"))
+}
+
+/// Puts text on the clipboard as Unicode text.
+pub fn copy_text(text: &str) -> Result<(), String> {
+    use windows::Win32::Foundation::{GlobalFree, HANDLE};
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, SetClipboardData};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    open_clipboard()?;
+    let result = unsafe {
+        (|| -> windows::core::Result<()> {
+            EmptyClipboard()?;
+            let mem = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2)?;
+            let dst = GlobalLock(mem) as *mut u16;
+            if dst.is_null() {
+                let _ = GlobalFree(Some(mem));
+                return Err(windows::core::Error::from_thread());
+            }
+            std::ptr::copy_nonoverlapping(wide.as_ptr(), dst, wide.len());
+            let _ = GlobalUnlock(mem);
+            // on success the clipboard owns the memory
+            if let Err(e) = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(mem.0))) {
+                let _ = GlobalFree(Some(mem));
+                return Err(e);
+            }
+            Ok(())
+        })()
+    };
+    unsafe {
+        let _ = CloseClipboard();
+    }
+    result.map_err(|e| e.message())
+}
+
+/// The clipboard's Unicode text, if it holds any.
+pub fn clipboard_text() -> Option<String> {
+    use windows::Win32::Foundation::HGLOBAL;
+    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    open_clipboard().ok()?;
+    let text = unsafe {
+        GetClipboardData(CF_UNICODETEXT).ok().and_then(|h| {
+            let mem = HGLOBAL(h.0);
+            let p = GlobalLock(mem) as *const u16;
+            if p.is_null() {
+                return None;
+            }
+            let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+            let _ = GlobalUnlock(mem);
+            Some(s)
+        })
+    };
+    unsafe {
+        let _ = CloseClipboard();
+    }
+    text
+}
+
 // MARK: Theme
 
 fn reg_dword(key: &str, value: &str) -> Option<u32> {

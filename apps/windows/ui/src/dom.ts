@@ -1,6 +1,6 @@
 // A small DOM toolkit: element builder, formatting helpers and Segoe Fluent Icons.
 
-type Child = Node | string | number | false | null | undefined | Child[];
+export type Child = Node | string | number | false | null | undefined | Child[];
 type Props = Record<string, any> & { class?: string; style?: string | Record<string, string> };
 
 /** `h('button', {onclick, 'aria-label': 'Run'}, 'Run')` */

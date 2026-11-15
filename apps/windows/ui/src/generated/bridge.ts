@@ -43,13 +43,14 @@ export type ProgressState = ("none" | "normal" | "indeterminate" | "error" | "pa
  * This interface was referenced by `Bridge`'s JSON-Schema
  * via the `definition` "Method".
  */
-export type Method = (("run.cancel" | "run.kill" | "run.answer" | "assistant.stop" | "assistant.answer" | "assistant.dismiss" | "shell.info" | "shell.reveal" | "shell.open" | "shell.open_url" | "shell.notify" | "shell.set_title" | "shell.set_dirty" | "shell.quit" | "shell.recent" | "shell.add_recent" | "secret.set" | "secret.test" | "secret.delete") | "core" | "project.store_pasted_image" | "run.start" | "assistant.start" | "dialog.open" | "dialog.save" | "dialog.confirm" | "shell.progress" | "shell.open_window" | "shell.close_window" | "shell.watch" | "shell.allow_media" | "shell.media_url" | "secret.status" | "shell.write_text" | "shell.recycle" | "assistant.load_sessions" | "assistant.save_sessions" | "assistant.delete_session" | "shell.cutline" | "shell.snapshot" | "selftest.report" | "selftest.fs")
+export type Method = (("run.cancel" | "run.kill" | "run.answer" | "assistant.stop" | "assistant.answer" | "assistant.dismiss" | "shell.info" | "shell.reveal" | "shell.open" | "shell.open_url" | "shell.notify" | "shell.set_title" | "shell.set_dirty" | "shell.quit" | "shell.recent" | "shell.add_recent" | "secret.set" | "secret.test" | "secret.delete") | "core" | "project.store_pasted_image" | "run.start" | "assistant.start" | "dialog.open" | "dialog.save" | "dialog.confirm" | "shell.progress" | "shell.open_window" | "shell.close_window" | "shell.watch" | "shell.allow_media" | "shell.media_url" | "secret.status" | "shell.write_text" | "shell.copy_text" | "shell.clipboard_text" | "shell.recycle" | "assistant.load_sessions" | "assistant.save_sessions" | "assistant.delete_session" | "shell.cutline" | "shell.snapshot" | "selftest.report" | "selftest.fs")
 
 export interface Bridge {
 allow_media_args: AllowMediaArgs
 answer_args: AnswerArgs
 assistant_start_args: AssistantStartArgs
 confirm_args: ConfirmArgs
+copy_text_args: CopyTextArgs
 core_args: CoreArgs
 cutline_args: CutlineArgs
 dirty_args: DirtyArgs
@@ -130,6 +131,13 @@ buttons: string[]
 message: string
 title: string
 warning?: boolean
+}
+/**
+ * This interface was referenced by `Bridge`'s JSON-Schema
+ * via the `definition` "CopyTextArgs".
+ */
+export interface CopyTextArgs {
+text: string
 }
 /**
  * This interface was referenced by `Bridge`'s JSON-Schema

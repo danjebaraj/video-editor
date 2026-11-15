@@ -234,7 +234,39 @@ fluent-progress-bar { width: 100%; margin-top: 4px; }
 .result-head { padding: 12px 0 8px; }
 .output-card { background: var(--card); border: 1px solid var(--stroke); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
 .player { width: 100%; max-height: 360px; background: black; border-radius: 4px; margin: 8px 0; }
-.summary-text, .log-view { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--code-bg); border-radius: var(--radius); padding: 8px; overflow: auto; max-height: 420px; margin: 8px 0; }
+.log-view { font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; background: var(--code-bg); border-radius: var(--radius); padding: 8px; overflow: auto; max-height: 420px; margin: 8px 0; }
+.log-view > pre { margin: 0; font: inherit; white-space: pre-wrap; }
+.log-view > .md { font-family: var(--font); white-space: normal; }
+.summary-text { margin: 8px 0; }
+
+/* One-click copy and Markdown preview (text-tools.ts) */
+.copy-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 22px; height: 22px; padding: 0 3px; border: none; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.copy-btn.labelled { height: 32px; padding: 0 10px; font-size: 13px; border: 1px solid var(--stroke-strong); }
+.copy-btn:hover { background: var(--hover); color: var(--text); }
+.copy-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.copy-btn:disabled { opacity: 0.4; cursor: default; }
+.copy-btn.copied { color: var(--ok); }
+.copyable, .markdown-text, .md-code, .finding { display: flex; align-items: flex-start; gap: 4px; }
+.copyable > .grow, .markdown-text > .md, .markdown-text > .md-source { flex: 1; min-width: 0; }
+.md-tools { display: flex; flex-direction: column; gap: 2px; }
+.md-source { margin: 0; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
+.md { display: flex; flex-direction: column; gap: 6px; user-select: text; }
+.md p, .md blockquote, .md h3, .md h4, .md h5, .md h6, .md hr { margin: 0; }
+.md .md-h1 { font-size: 1.2em; font-weight: 600; padding-top: 4px; }
+.md .md-h2 { font-size: 1.08em; font-weight: 600; padding-top: 4px; }
+.md .md-h3, .md .md-h4, .md .md-h5, .md .md-h6 { font-size: 1em; font-weight: 600; padding-top: 2px; }
+.md-item { display: flex; gap: 6px; }
+.md-marker { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
+.md blockquote { color: var(--text-muted); border-left: 2px solid var(--stroke-strong); padding-left: 8px; }
+.md code, .md-inline code { font-family: var(--font-mono); font-size: 0.92em; background: var(--code-bg); border-radius: 3px; padding: 0 3px; }
+.md-code { background: var(--code-bg); border-radius: var(--radius-sm); padding: 6px; }
+.md-code > pre { flex: 1; min-width: 0; margin: 0; font-family: var(--font-mono); font-size: 11px; overflow-x: auto; }
+.md-table { border-collapse: collapse; font-size: 0.95em; }
+.md-table th { text-align: left; font-weight: 600; border-bottom: 1px solid var(--stroke-strong); }
+.md-table th, .md-table td { padding: 2px 12px 2px 0; vertical-align: baseline; }
+.md hr { border: none; border-top: 1px solid var(--stroke-strong); width: 100%; }
+.row.top { align-items: flex-start; }
+.finding { padding: 2px 0; }
 .log-split { display: grid; grid-template-columns: 160px 1fr; gap: 8px; }
 .log-files { max-height: 420px; overflow: auto; }
 .outputs > fluent-button { margin-top: 6px; }

@@ -116,9 +116,35 @@ pub fn os_version() -> Option<String> {
     } else {
         ("uname", &["-r"])
     };
-    let out = std::process::Command::new(program).args(args).output().ok()?;
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args);
+    #[cfg(windows)]
+    {
+        // the app has no console: without this a console window flashes up at each run's start
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd.output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let text = if cfg!(windows) { windows_version_number(&text) } else { text };
     (out.status.success() && !text.is_empty()).then_some(text)
+}
+
+/// `ver` prints "Microsoft Windows [Version 10.0.26200.6584]"; the run log wants the number.
+fn windows_version_number(ver: &str) -> String {
+    match (ver.rfind(' '), ver.rfind(']')) {
+        (Some(a), Some(b)) if a < b => ver[a + 1..b].to_string(),
+        _ => ver.to_string(),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn the_windows_version_number_is_read_from_ver() {
+    assert_eq!(windows_version_number("Microsoft Windows [Version 10.0.26200.6584]"), "10.0.26200.6584");
+    assert_eq!(windows_version_number("something else"), "something else");
+    #[cfg(windows)]
+    assert!(os_version().is_some_and(|v| v.starts_with("10.") && !v.contains(' ')), "{:?}", os_version());
 }
 
 /// No durable references: resolution falls back to relative path, absolute path and search roots.

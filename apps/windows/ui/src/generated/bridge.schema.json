@@ -90,6 +90,17 @@
       ],
       "type": "object"
     },
+    "CopyTextArgs": {
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
     "CoreArgs": {
       "properties": {
         "args": {
@@ -321,6 +332,16 @@
         {
           "const": "shell.write_text",
           "description": "[`WriteTextArgs`]: writes a text file the user just chose in a Save dialog (Export Spec).",
+          "type": "string"
+        },
+        {
+          "const": "shell.copy_text",
+          "description": "[`CopyTextArgs`]: puts text on the clipboard. Through the shell rather than\n`navigator.clipboard`, which fails while the page doesn't have focus (right after a\ndialog closes, for example).",
+          "type": "string"
+        },
+        {
+          "const": "shell.clipboard_text",
+          "description": "→ the clipboard's text, or `null` (the self test checks its copy with it).",
           "type": "string"
         },
         {
@@ -917,6 +938,9 @@
     "confirm_args": {
       "$ref": "#/$defs/ConfirmArgs"
     },
+    "copy_text_args": {
+      "$ref": "#/$defs/CopyTextArgs"
+    },
     "core_args": {
       "$ref": "#/$defs/CoreArgs"
     },
@@ -1023,6 +1047,7 @@
     "cutline_args",
     "sessions_args",
     "write_text_args",
+    "copy_text_args",
     "self_test_fs_args",
     "recycle_args",
     "self_test_report",

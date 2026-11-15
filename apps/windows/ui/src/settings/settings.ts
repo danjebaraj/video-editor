@@ -7,6 +7,7 @@ import { Signal, effect } from '../store';
 import { settings, saveSettings, environment, keyStatus, detect, models, libraryDir } from '../app-state';
 import { openFolders, openFiles, confirm, toast, Filters } from '../dialogs';
 import { modelPicker, effortPicker } from '../widgets';
+import { copyable } from '../text-tools';
 import type { Settings } from '../types';
 
 type Pane = 'general' | 'claude' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
@@ -101,7 +102,7 @@ export async function mount(root: HTMLElement) {
           h('div', { class: 'row' },
             button('Run Doctor', () => runCutline('doctor'), { disabled: !cl }),
             button('Install Dependencies', () => runCutline('install_deps'), { disabled: !cl })),
-          cutlineOutput ? h('pre', { class: 'log-view' }, cutlineOutput) : null);
+          cutlineOutput ? copyable(h('pre', { class: 'log-view' }, cutlineOutput), 'Copy the output', () => cutlineOutput) : null);
         break;
       }
       case 'elevenlabs': {

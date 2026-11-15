@@ -132,6 +132,14 @@ pub enum Method {
     /// [`WriteTextArgs`]: writes a text file the user just chose in a Save dialog (Export Spec).
     #[serde(rename = "shell.write_text")]
     WriteText,
+    /// [`CopyTextArgs`]: puts text on the clipboard. Through the shell rather than
+    /// `navigator.clipboard`, which fails while the page doesn't have focus (right after a
+    /// dialog closes, for example).
+    #[serde(rename = "shell.copy_text")]
+    CopyText,
+    /// → the clipboard's text, or `null` (the self test checks its copy with it).
+    #[serde(rename = "shell.clipboard_text")]
+    ClipboardText,
     /// [`RecycleArgs`] → `{moved}`: moves pasted images from a `.cutproj.assets` sidecar to the
     /// Recycle Bin (Clean Up Pasted Images). Nothing else can be deleted this way.
     #[serde(rename = "shell.recycle")]
@@ -390,6 +398,11 @@ pub struct WriteTextArgs {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CopyTextArgs {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RecycleArgs {
     pub paths: Vec<String>,
 }
@@ -489,6 +502,7 @@ pub fn schema() -> Value {
         cutline_args: CutlineArgs,
         sessions_args: SessionsArgs,
         write_text_args: WriteTextArgs,
+        copy_text_args: CopyTextArgs,
         self_test_fs_args: SelfTestFsArgs,
         recycle_args: RecycleArgs,
         self_test_report: SelfTestReport,

@@ -7,6 +7,7 @@ import { effect } from '../../store';
 import { environment, claudeAvailable, modelName } from '../../app-state';
 import { prompt, confirm, openFolders } from '../../dialogs';
 import { questionCard } from '../../widgets';
+import { copyButton, copyable, inline, markdownText } from '../../text-tools';
 import type { ProjectWindow } from '../window';
 import type { ChatMessage } from '../assistant';
 
@@ -116,18 +117,19 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
   function message(m: ChatMessage): HTMLElement {
     switch (m.role) {
       case 'user':
-        return h('div', { class: 'msg user' }, h('div', { class: 'bubble' }, m.text), m.attachment ? h('div', { class: 'muted small' }, m.attachment) : null);
+        return h('div', { class: 'msg user' }, h('div', { class: 'row top' }, copyButton('Copy your message', () => m.text), h('div', { class: 'bubble' }, m.text)), m.attachment ? h('div', { class: 'muted small' }, m.attachment) : null);
       case 'assistant':
-        return h('div', { class: 'msg assistant' }, m.text);
+        return h('div', { class: 'msg assistant', 'aria-label': `Claude: ${m.text}` }, markdownText(m.text));
       case 'tool': {
-        const det = h('details', { class: `msg tool${m.failed ? ' failed' : ''}` }, h('summary', null, icon(m.failed ? Icons.dismiss : Icons.wrench), ' ', m.text), m.detail ? h('pre', null, m.detail) : null);
+        const detail = m.detail;
+        const det = h('details', { class: `msg tool${m.failed ? ' failed' : ''}` }, h('summary', { class: 'md-inline' }, icon(m.failed ? Icons.dismiss : Icons.wrench), ' ', ...inline(m.text)), detail ? copyable(h('pre', null, detail), 'Copy the details', () => detail) : null);
         return det;
       }
       case 'question':
         if (m.question?.state === 'pending') return questionCard(m.question.questions, (ans) => a.answer(m, ans), () => a.skip(m));
         return h('div', { class: 'msg note' }, m.question?.state === 'answered' ? `Answered: ${m.question.answer}` : 'Not answered');
       case 'error':
-        return h('div', { class: 'msg error', role: 'alert' }, m.text);
+        return h('div', { class: 'msg error', role: 'alert' }, copyable(h('span', null, m.text), 'Copy the error', () => m.text));
       case 'usage':
         return h('div', { class: 'msg usage muted small' }, m.text);
       default:

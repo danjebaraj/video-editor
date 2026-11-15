@@ -272,6 +272,12 @@ pub fn handle(window: u64, text: &str) {
             });
             respond(window, id, r);
         }
+        Method::CopyText => {
+            let r = parse::<CopyTextArgs>(&args)
+                .and_then(|a| crate::shell::copy_text(&a.text).map_err(|e| err("shell", e)).map(|_| Value::Bool(true)));
+            respond(window, id, r);
+        }
+        Method::ClipboardText => respond(window, id, Ok(json!(crate::shell::clipboard_text()))),
         Method::Recycle => {
             let r = parse::<RecycleArgs>(&args).map(|a| {
                 let moved: Vec<String> =

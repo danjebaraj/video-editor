@@ -6,6 +6,7 @@ import { core, request, on, errorText } from '../bridge';
 import { Signal, effect } from '../store';
 import { brands, claudeAvailable, environment, detect, libraryDir } from '../app-state';
 import { confirm, saveFile, openFiles, openFolders, Filters, toast, sheet } from '../dialogs';
+import { clipboardText, copyButton } from '../text-tools';
 import { ProjectDocument } from './document';
 import { RunController } from './runs';
 import { Assistant } from './assistant';
@@ -254,7 +255,8 @@ export class ProjectWindow {
       return h('fluent-message-bar', { intent: 'warning', class: 'banner' }, 'This project changed on disk while you have unsaved edits.', h('div', { slot: 'actions', class: 'row' }, button('Compare', () => this.compare()), button('Reload', () => this.doc.reload()), button('Keep Mine', () => this.doc.keepMine(), { appearance: 'primary' })));
     if (b.kind === 'brand')
       return h('fluent-message-bar', { intent: 'info', class: 'banner' }, `The brand preset “${b.name}” changed in the library.`, h('div', { slot: 'actions', class: 'row' }, button('Keep Snapshot', () => (this.doc.banner.value = null)), button('Update to Latest', () => this.doc.updateBrandToLatest(), { appearance: 'primary' })));
-    return h('fluent-message-bar', { intent: 'error', class: 'banner' }, b.message, h('div', { slot: 'actions' }, button('Dismiss', () => (this.doc.banner.value = null))));
+    const message = b.message;
+    return h('fluent-message-bar', { intent: 'error', class: 'banner' }, message, h('div', { slot: 'actions', class: 'row' }, copyButton('Copy the message', () => message), button('Dismiss', () => (this.doc.banner.value = null))));
   }
 
   // MARK: Actions
@@ -467,7 +469,7 @@ export class ProjectWindow {
       case 'redo': this.editor.redo(); break;
       case 'cut': document.execCommand('cut'); break;
       case 'copy': document.execCommand('copy'); break;
-      case 'paste': navigator.clipboard.readText().then((t) => this.editor.view.dispatch(this.editor.view.state.replaceSelection(t))).catch(() => {}); break;
+      case 'paste': clipboardText().then((t) => t != null && this.editor.view.dispatch(this.editor.view.state.replaceSelection(t))); break;
       case 'select_all': document.execCommand('selectAll'); break;
       case 'find':
       case 'replace': this.previewOn.value = false; this.editor.find(); break;

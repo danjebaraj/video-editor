@@ -6,6 +6,8 @@ import { request } from '../bridge';
 import { effect, Signal } from '../store';
 import { openFiles, openFolders, Filters, confirm, toast } from '../dialogs';
 import { MEDIA_KINDS, MEDIA_ROLES, STATUS_LABEL } from '../types';
+import { exportLogs, copyIssueReport } from './inspector/run';
+import { copyText } from '../text-tools';
 import type { ProjectWindow } from './window';
 import type { MediaItem, RunRecord } from '../types';
 
@@ -161,7 +163,7 @@ export function sidebar(w: ProjectWindow): { el: HTMLElement; tab: Signal<Sideba
         'div',
         { class: 'row wrap' },
         button('Insert in Spec', () => w.insertMediaRef(m.id)),
-        button('Copy Reference', () => navigator.clipboard.writeText(`![${m.id}](media:${m.id})`)),
+        button('Copy Reference', () => copyText(`![${m.id}](media:${m.id})`)),
         r?.status === 'changed' ? button('Accept Change', () => d.acceptChanged(m.id)) : null,
         button('Relink…', () => w.locate(m.id)),
         r?.path ? button('Reveal', () => request('shell.reveal', { path: r.path })) : null,
@@ -204,10 +206,12 @@ export function sidebar(w: ProjectWindow): { el: HTMLElement; tab: Signal<Sideba
           },
           oncontextmenu: async (e: MouseEvent) => {
             e.preventDefault();
-            const c = await confirm(rc?.name ?? 'Run', r.folder, ['Reveal in File Explorer', 'Locate…', 'Copy Folder Path', 'Cancel']);
+            const c = await confirm(rc?.name ?? 'Run', r.folder, ['Reveal in File Explorer', 'Locate…', 'Copy Folder Path', 'Export Logs…', 'Copy Issue Report', 'Cancel']);
             if (c === 0) request('shell.reveal', { path: r.folder });
             else if (c === 1) relocate(r);
-            else if (c === 2) navigator.clipboard.writeText(r.folder);
+            else if (c === 2) copyText(r.folder);
+            else if (c === 3) exportLogs(r.folder);
+            else if (c === 4) copyIssueReport(r.folder);
           },
         },
         h('span', { class: `status ${r.status}`, title: STATUS_LABEL[r.status] }, icon(STATUS_ICON[r.status] ?? Icons.info)),

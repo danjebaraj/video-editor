@@ -36,7 +36,9 @@ fn redactions(manifest: &Value) -> Vec<(String, String)> {
             if let Some(p) = item["path"].as_str() {
                 let ext = Utf8Path::new(p).extension().map(|e| format!(".{e}")).unwrap_or_default();
                 let placeholder = format!("<media-{}{ext}>", i + 1);
-                v.push((p.to_string(), placeholder.clone()));
+                for form in path_forms(p) {
+                    v.push((form, placeholder.clone()));
+                }
                 if let Some(name) = Utf8Path::new(p).file_name() {
                     if name.len() >= 4 {
                         v.push((name.to_string(), placeholder));
@@ -47,6 +49,21 @@ fn redactions(manifest: &Value) -> Vec<(String, String)> {
     }
     v.sort_by_key(|r| std::cmp::Reverse(r.0.len()));
     v
+}
+
+/// The ways one absolute path shows up in logs. A Windows path (`C:\Users\ana`) also appears
+/// with forward slashes (`C:/Users/ana`) and in Git Bash's form (`/c/Users/ana`), since Claude
+/// runs its commands through Git Bash; the JSON-escaped forms are handled by [`redact_text`].
+fn path_forms(p: &str) -> Vec<String> {
+    let mut forms = vec![p.to_string()];
+    let b = p.as_bytes();
+    if b.len() > 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/') {
+        let slashed = p.replace('\\', "/");
+        forms.push(format!("/{}{}", (b[0] as char).to_ascii_lowercase(), &slashed[2..]));
+        forms.push(slashed);
+    }
+    forms.dedup();
+    forms
 }
 
 fn redact_text(text: &str, redactions: &[(String, String)]) -> String {
@@ -77,7 +94,9 @@ pub fn export_logs(run_folder: &Utf8Path, dest: &Utf8Path, redact: bool) -> Resu
     if redact {
         // The home folder names the person; keep the shape of the path without it.
         if let Some(home) = paths::home_dir().filter(|h| h.as_str().len() > 3) {
-            rules.push((home.to_string(), "<home>".to_string()));
+            for form in path_forms(home.as_str()) {
+                rules.push((form, "<home>".to_string()));
+            }
         }
     }
     let mut buf = std::io::Cursor::new(Vec::new());
@@ -542,6 +561,19 @@ mod tests {
         assert!(sources.contains(&"prompt".to_string()) && sources.contains(&"helper".to_string()));
         let readme = unzip(&zip)["README.md"].clone();
         assert!(readme.contains("- Run: run_1 (production, failed)") && readme.contains("Not redacted"), "{readme}");
+    }
+
+    #[test]
+    fn redaction_covers_the_forms_a_windows_path_takes_in_logs() {
+        assert_eq!(path_forms("/Users/ana"), vec!["/Users/ana"]);
+        assert_eq!(path_forms(r"C:\Users\ana"), vec![r"C:\Users\ana", "/c/Users/ana", "C:/Users/ana"]);
+        let rules: Vec<(String, String)> =
+            path_forms(r"C:\Users\ana").into_iter().map(|f| (f, "<home>".into())).collect();
+        let log =
+            r#"{"file_path":"C:\\Users\\ana\\run\\a.md"} cd /c/Users/ana/run && ls C:/Users/ana/x C:\Users\ana\y"#;
+        let out = redact_text(log, &rules);
+        assert!(!out.contains("ana"), "{out}");
+        assert_eq!(out.matches("<home>").count(), 4, "{out}");
     }
 
     fn unzip_names(path: &Utf8Path) -> Vec<String> {

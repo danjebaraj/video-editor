@@ -7,6 +7,7 @@ import { effect, Signal } from '../../store';
 import { claudeAvailable, modelName } from '../../app-state';
 import { saveFile, Filters, toast, sheet } from '../../dialogs';
 import { questionCard } from '../../widgets';
+import { copyButton, copyable, copyText, inline, markdownBlocks, markdownText, previewToggle } from '../../text-tools';
 import { STATUS_LABEL } from '../../types';
 import type { ProjectWindow } from '../window';
 import type { RunRecord, RunResults, LogFile, OutputFile } from '../../types';
@@ -67,9 +68,18 @@ export function runTab(w: ProjectWindow): HTMLElement {
         h('dt', null, 'Claude'), h('dd', null, usd(cost?.claude_usd, cost?.claude_estimated)),
         l.kind === 'production' ? [h('dt', null, 'ElevenLabs'), h('dd', null, `${cost?.eleven_credits ?? 0} of ${cost?.eleven_cap ?? 0} credits`)] : null),
       l.warnings.length ? h('ul', { class: 'warnings small' }, l.warnings.map((x) => h('li', { class: 'warn' }, x))) : null,
-      h('details', { class: 'live-transcript' }, h('summary', null, 'Transcript'), h('div', { class: 'transcript small' }, l.transcript.slice(-200).map((t) => h('div', { class: `msg ${t.role}${t.role === 'tool' && /failed$/.test(t.text) ? ' failed' : ''}` }, t.role === 'tool' ? icon(Icons.wrench) : null, ' ', t.text)), l.streaming ? h('div', { class: 'msg assistant' }, l.streaming) : null)),
+      h('details', { class: 'live-transcript' }, h('summary', null, 'Transcript'), h('div', { class: 'transcript small' }, l.transcript.slice(-200).map((t) => transcriptItem(t)), l.streaming ? h('div', { class: 'msg assistant' }, l.streaming) : null)),
       h('div', { class: 'row end' }, button('Reveal Folder', () => request('shell.reveal', { path: l.folder }), { glyph: Icons.openFolder }), button(l.stopping ? 'Stopping…' : 'Stop', () => w.runs.stop(), { glyph: Icons.stop, disabled: l.stopping })),
     );
+  }
+
+  function transcriptItem(t: { role: string; text: string }): HTMLElement {
+    const failed = t.role === 'tool' && /failed$/.test(t.text);
+    const cls = `msg ${t.role}${failed ? ' failed' : ''}`;
+    if (t.role === 'assistant') return h('div', { class: cls }, markdownText(t.text));
+    if (t.role === 'error') return h('div', { class: cls }, copyable(h('span', null, t.text), 'Copy the error', () => t.text));
+    if (t.role === 'tool') return h('div', { class: `${cls} md-inline` }, icon(Icons.wrench), ' ', ...inline(t.text));
+    return h('div', { class: cls }, t.text);
   }
 
   function renderResult(rec: RunRecord) {
@@ -78,7 +88,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
     const head = h('div', { class: 'result-head' },
       h('div', { class: 'row' }, h('strong', { class: `status ${rec.status}` }, STATUS_LABEL[rec.status] ?? rec.status), rec.kind === 'dry_run' ? h('span', { class: 'pill' }, 'Dry run') : null),
       h('div', { class: 'muted small' }, [rc?.name ?? rec.run_config, when(rec.started), rec.model ? modelName(rec.model) : null, rec.cost_usd != null ? usd(rec.cost_usd) : null, rec.eleven_credits ? `${rec.eleven_credits} credits` : null].filter(Boolean).join(' · ')),
-      results?.run?.message ? h('div', { class: failed ? 'danger small' : 'small' }, results.run.message) : null,
+      results?.run?.message ? copyable(h('div', { class: failed ? 'danger small' : 'small' }, results.run.message), 'Copy the message', () => results?.run?.message ?? '') : null,
     );
     if (results && !results.exists) {
       clear(root, head, emptyState('The run folder has moved', rec.folder, button('Locate…', async () => {
@@ -124,7 +134,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
         button('Reveal in File Explorer', () => request('shell.reveal', { path: o.path })),
         button('Open', () => request('shell.open', { path: o.path })),
         button('Open With…', () => request('shell.open', { path: o.path, application: '' })),
-        button('Copy Path', () => navigator.clipboard.writeText(o.path)),
+        button('Copy Path', () => copyText(o.path)),
         o.captions_srt ? button('Captions', () => request('shell.open', { path: o.captions_srt })) : null) : null,
     );
   }
@@ -140,7 +150,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
           await w.doc.validate('production', rd);
           w.showTab('validation');
         })) : null,
-      r.summary ? h('pre', { class: 'summary-text' }, r.summary) : h('p', { class: 'muted' }, 'No summary.'));
+      r.summary ? markdownText(r.summary, 'summary-text') : h('p', { class: 'muted' }, 'No summary was written.'));
   }
 
   function logs(rec: RunRecord): HTMLElement {
@@ -149,44 +159,56 @@ export function runTab(w: ProjectWindow): HTMLElement {
     let severity = 'all';
     let query = '';
     let file: LogFile | undefined = r.logs.find((l) => l.name === 'summary.md') ?? r.logs[0];
+    // A Markdown log (the summary, the prompts) is read as a preview while no filter is on.
+    let preview = true;
+    let fullText = '';
+    let shown = '';
     const list = h('ul', { class: 'log-files', 'aria-label': 'Log files' });
-    const view = h('pre', { class: 'log-view', tabindex: '0', 'aria-label': 'Log contents' });
+    const view = h('div', { class: 'log-view', tabindex: '0', 'aria-label': 'Log contents' });
+    const tools = h('span', { class: 'row' });
+    const isMarkdown = () => !!file?.name.toLowerCase().endsWith('.md');
+    const filtered = () => !!query || severity !== 'all';
+    const showsPreview = () => isMarkdown() && preview && !filtered();
+    const renderView = () => {
+      clear(view, showsPreview() ? markdownBlocks(fullText) : h('pre', null, shown));
+      clear(tools,
+        isMarkdown() ? previewToggle(preview, () => ((preview = !preview), renderView()), { disabled: filtered() }) : null,
+        copyButton('Copy what is shown of this log', () => (showsPreview() ? fullText : shown)));
+    };
     const refresh = async () => {
       clear(list, r.logs.filter((l) => source === 'all' || l.source === source).map((l) => h('li', null, h('button', { class: `link-row${l === file ? ' selected' : ''}`, onclick: () => ((file = l), refresh()) }, h('span', { class: 'grow' }, l.name), h('span', { class: 'muted small' }, bytes(l.bytes))))));
-      if (!file) return clear(view, '');
+      fullText = shown = '';
+      if (!file) return renderView();
       try {
         const url = await request<string>('shell.allow_media', { files: r.logs.map((l) => l.path), add: true }).then(() => request<string>('shell.media_url', { path: file!.path }));
         const res = await fetch(url, { headers: { Range: 'bytes=0-1500000' } });
-        let text = await res.text();
+        fullText = await res.text();
         const warnRe = /warn|W_|error|failed|E_|deny/i;
         const errRe = /error|failed|"is_error":true|E_|exit: 1|deny/i;
-        let lines = text.split(/\r?\n/);
+        let lines = fullText.split(/\r?\n/);
         if (severity === 'warning') lines = lines.filter((l) => warnRe.test(l));
         if (severity === 'error') lines = lines.filter((l) => errRe.test(l));
         if (query) lines = lines.filter((l) => l.toLowerCase().includes(query.toLowerCase()));
-        text = lines.slice(0, 4000).join('\n');
-        view.textContent = text;
+        shown = lines.slice(0, 4000).join('\n');
       } catch (e) {
-        view.textContent = errorText(e);
+        shown = errorText(e);
       }
+      renderView();
     };
     const search = h('input', { type: 'search', placeholder: 'Search', 'aria-label': 'Search logs' }) as HTMLInputElement;
     search.addEventListener('input', () => ((query = search.value), refresh()));
     refresh();
     return h('div', { class: 'logs' },
       h('div', { class: 'row wrap' },
-        select(['all', 'app', 'claude', 'cutline', 'eleven', 'validation', 'qa', 'summary'].map((s) => [s, s === 'all' ? 'All sources' : s] as [string, string]), source, (v) => ((source = v), refresh()), { 'aria-label': 'Log source' }),
+        select(['all', 'app', 'claude', 'cutline', 'eleven', 'helper', 'prompt', 'validation', 'qa', 'summary'].map((s) => [s, s === 'all' ? 'All sources' : s] as [string, string]), source, (v) => ((source = v), refresh()), { 'aria-label': 'Log source' }),
         select([['all', 'All lines'], ['warning', 'Warnings and errors'], ['error', 'Errors']], severity, (v) => ((severity = v), refresh()), { 'aria-label': 'Severity' }),
-        search),
+        search,
+        tools),
       h('div', { class: 'log-split' }, list, view),
       h('div', { class: 'row wrap' },
         button('Reveal Logs Folder', () => request('shell.reveal', { path: `${rec.folder}\\logs` })),
-        button('Export Logs…', () => exportLogs(rec.folder)),
-        button('Copy Issue Report', async () => {
-          const md = await core<string>('logs.issue_report', { folder: rec.folder });
-          await navigator.clipboard.writeText(md);
-          toast('Issue report copied.');
-        })));
+        button('Export Logs…', () => exportLogs(rec.folder), { title: 'A zip of everything needed to study this run: logs, the instructions Claude was given, the spec and the edit. Media paths can be redacted.' }),
+        button('Copy Issue Report', () => copyIssueReport(rec.folder))));
   }
 
   async function revise(rec: RunRecord) {
@@ -207,10 +229,26 @@ export async function exportLogs(folder: string) {
   const dest = await saveFile('Export logs', Filters.zip, `${fileName(folder)}-logs.zip`);
   if (!dest) return;
   const { confirm } = await import('../../dialogs');
-  const redact = (await confirm('Redact media paths?', 'Replace media paths and file names in the exported logs with placeholders.', ['Keep Paths', 'Redact'])) === 1;
+  const redact =
+    (await confirm(
+      'Replace paths with placeholders?',
+      "The zip holds this run's logs, the instructions Claude was given, the spec and the edit. No media is included. Replace media paths, media file names and your home folder with placeholders?",
+      ['Keep Paths', 'Redact'],
+    )) === 1;
   try {
     const n = await core<number>('logs.export', { folder, destination: dest, redact });
-    toast(`Exported ${n} files${redact ? ' (media paths redacted)' : ''}.`);
+    toast(`Exported ${n} files${redact ? ' (paths replaced with placeholders)' : ''}.`);
+  } catch (e) {
+    toast(errorText(e), 'error');
+  }
+}
+
+/** A Markdown summary of cutline errors, warnings, failed QA checks and blocked tool calls. */
+export async function copyIssueReport(folder: string) {
+  try {
+    const md = await core<string>('logs.issue_report', { folder });
+    if (!(await copyText(md))) throw new Error('The clipboard is in use by another app. Try again.');
+    toast('Issue report copied.');
   } catch (e) {
     toast(errorText(e), 'error');
   }

@@ -4,6 +4,7 @@
 import { h, clear, button, icon, Icons, usd, bytes, duration, spinner, emptyState, checkbox } from '../../dom';
 import { effect } from '../../store';
 import { brands } from '../../app-state';
+import { copyButton } from '../../text-tools';
 import type { ProjectWindow } from '../window';
 import type { Issue } from '../../types';
 
@@ -12,6 +13,19 @@ const SEV: Record<string, [string, string, string]> = {
   warning: [Icons.warning, 'warn', 'Warning'],
   info: [Icons.info, 'muted', 'Note'],
 };
+
+/** "Warning: title", its detail, and the spec line when it has one. */
+export function issueText(i: Issue): string {
+  let s = `${i.severity[0].toUpperCase()}${i.severity.slice(1)}: ${i.title}`;
+  if (i.detail) s += `\n${i.detail}`;
+  if (i.fix?.line) s += `\n(spec line ${i.fix.line})`;
+  return s;
+}
+
+/** The report as plain text, one issue per paragraph. */
+export function reportText(issues: Issue[]): string {
+  return issues.map(issueText).join('\n\n');
+}
 
 const FIX_LABEL: Record<string, string> = {
   spec: 'Line',
@@ -33,6 +47,7 @@ export function validationTab(w: ProjectWindow): HTMLElement {
       { class: 'tab-header' },
       r ? h('span', { class: 'counts' }, h('span', { class: 'danger' }, `${r.blockers} blocker(s)`), ' · ', h('span', { class: 'warn' }, `${r.warnings} warning(s)`), ' · ', h('span', { class: 'muted' }, `${r.infos} note(s)`)) : h('span', { class: 'muted' }, 'Not validated yet'),
       h('span', { class: 'grow' }),
+      r && r.issues.length ? copyButton('Copy all validation results', () => reportText(r.issues)) : null,
       d.validating.value ? spinner('Validating') : null,
       button('Validate', () => d.validate(), { glyph: Icons.validate, disabled: d.validating.value || w.runs.running }),
       button('Dry Run…', () => w.runs.requestDryRun(), { appearance: 'subtle', disabled: d.validating.value || w.runs.running }),
@@ -85,6 +100,7 @@ export function validationTab(w: ProjectWindow): HTMLElement {
           i.severity === 'warning' ? checkbox('Acknowledge', d.acknowledged.has(i.id), (v) => (v ? d.acknowledged.add(i.id) : d.acknowledged.delete(i.id))) : null,
         ),
       ),
+      copyButton('Copy this result', () => issueText(i)),
     );
   }
   return root;
