@@ -623,13 +623,29 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
     let (needs_voice, _) = needs_generated_audio(p);
     let brand_voice = p.brand.as_ref().map(|b| b.snapshot.voice.voice_id.trim()).unwrap_or("");
     if needs_voice && brand_voice.is_empty() && input.settings.eleven_default_voice.trim().is_empty() {
+        // A voice added to the preset in the library doesn't reach a project that already holds a
+        // copy of the preset: say so, or the warning looks wrong.
+        let waiting_in_library = p.brand.as_ref().is_some_and(|b| {
+            brand::get(input.library, &b.preset_id).is_some_and(|lib| !lib.voice.voice_id.trim().is_empty())
+        });
+        let (title, detail) = if waiting_in_library {
+            (
+                "This project's copy of the brand preset has no voice",
+                "The preset in the library has a voice, but the project keeps the copy it was given earlier. Open Brand and choose Update to Latest to take it.",
+            )
+        } else {
+            (
+                "No voice is chosen for the voice-over",
+                "Claude would have to pick one itself. Choose a voice in the brand preset, or set a default voice in Settings › ElevenLabs.",
+            )
+        };
         c.add(
             "voice_unset",
             None,
             Severity::Warning,
             "brand",
-            "No voice is chosen for the voice-over".into(),
-            Some("Claude would have to pick one itself. Choose a voice in the brand preset, or set a default voice in Settings › ElevenLabs.".into()),
+            title.into(),
+            Some(detail.into()),
             if p.brand.is_some() { FixLink::to("brand") } else { FixLink::target("settings", "elevenlabs") },
         );
     }
@@ -1287,6 +1303,24 @@ mod tests {
         f.settings.eleven_default_voice = String::new();
         let r = f.run();
         assert!(has(&r, "voice_unset", Severity::Warning), "{:?}", rules(&r));
+        assert_eq!(
+            r.issues.iter().find(|i| i.rule == "voice_unset").unwrap().title,
+            "No voice is chosen for the voice-over"
+        );
+        // the voice was added to the preset in the library after the project took its copy
+        let lib = f.root().join("lib");
+        let mut preset = brand::BrandPreset::new("Acme");
+        brand::save(&lib, &mut preset).unwrap();
+        f.project.brand = Some(brand::BrandRef::of(&preset));
+        preset.voice.voice_id = "voice_lib".into();
+        brand::save(&lib, &mut preset).unwrap();
+        let r = f.run();
+        let i = r.issues.iter().find(|i| i.rule == "voice_unset").expect("still a warning: the run uses the copy");
+        assert_eq!(i.title, "This project's copy of the brand preset has no voice");
+        assert!(i.detail.as_deref().unwrap().contains("Update to Latest"));
+        f.project.brand = Some(brand::BrandRef::of(&preset));
+        assert!(!has(&f.run(), "voice_unset", Severity::Warning));
+        f.project.brand = None;
         f.settings.eleven_default_voice = "voice_1".into();
         assert!(!has(&f.run(), "voice_unset", Severity::Warning));
 
