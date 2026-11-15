@@ -714,6 +714,8 @@ struct ReadinessReport: Codable, Equatable {
     var assumptions: [ReadinessFinding] = []
     var missing_media: [ReadinessFinding] = []
     var risks: [ReadinessFinding] = []
+    /// What the production run records or generates itself; not a problem.
+    var planned: [ReadinessFinding]?
     var estimated_durations: [String: Double] = [:]
     var notes: String?
 }

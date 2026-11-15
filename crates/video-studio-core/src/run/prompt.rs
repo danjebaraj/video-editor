@@ -95,8 +95,14 @@ pub fn project_summary(project: &Project, outputs: &[ResolvedOutput], manifest: 
         s.push_str("Outputs:\n");
         for o in outputs {
             let cap = o.limits.max_duration_s.map(|d| format!(", at most {}", format_duration(d))).unwrap_or_default();
+            let captions = match o.captions.as_str() {
+                "burn" => "captions burned in",
+                "sidecar" => "captions as a separate file, not burned in",
+                "none" => "no captions",
+                other => other,
+            };
             s.push_str(&format!(
-                "- {} ({}, {}×{}, {}{cap})\n",
+                "- {} ({}, {}×{}, {}, {captions}{cap})\n",
                 o.name,
                 o.platform,
                 o.width,
@@ -127,7 +133,11 @@ fn brand_section(project: &Project) -> String {
             .into();
     };
     let b = &b.snapshot;
-    let mut s = format!("Brand preset: {} (full details in brand.json).\n", b.name);
+    let cutline = b.for_cutline();
+    let mut s = format!(
+        "Brand preset: {}. The app has already written it as a cutline brand file, brand/default.json, which cutline loads on its own: leave `brand` out of project.json5 and keep that file's fonts, colors, logo and watermark as they are. brand-preset.json is the app's own copy with everything the brand owner entered; it is not a cutline file, so never point `brand` at it.\n",
+        b.name
+    );
     let c = &b.colors;
     s.push_str(&format!(
         "- Colors: primary {}, secondary {}, accent {}, background {}, text {}.\n",
@@ -145,12 +155,17 @@ fn brand_section(project: &Project) -> String {
             s.push_str(&format!("- {label}: {}\n", a.path));
         }
     }
-    if b.watermark.asset.is_some() {
+    if cutline.watermark {
         s.push_str(&format!(
-            "- Watermark position {}, opacity {}.\n",
+            "- Watermark: the logo, {}, opacity {}. brand/default.json already says so; cutline draws it over the edit.\n",
             b.watermark.position.replace('_', " "),
             b.watermark.opacity
         ));
+    } else {
+        s.push_str("- No watermark: set `watermark: false` in project.json5.\n");
+    }
+    for note in &cutline.notes {
+        s.push_str(&format!("- {note} Say so once under assumptions (dry run) or Assumptions (summary.md).\n"));
     }
     for (label, v) in [
         ("Lower-third style", &b.lower_third_style),
@@ -160,6 +175,9 @@ fn brand_section(project: &Project) -> String {
         if !v.trim().is_empty() {
             s.push_str(&format!("- {label}: {}\n", v.trim()));
         }
+    }
+    if !b.lower_third_style.trim().is_empty() || !b.caption_style.trim().is_empty() {
+        s.push_str("  The caption and lower-third styles are the brand owner's own words, not cutline names: pick the closest cutline caption style, position and template. That is expected, so don't report the choice as a risk.\n");
     }
     if !b.rules.trim().is_empty() {
         s.push_str("Brand rules, verbatim from the brand owner. Follow them exactly:\n");
@@ -173,7 +191,13 @@ fn brand_section(project: &Project) -> String {
 fn audio_section(input: &PromptInput) -> String {
     let rc = input.run_config;
     if input.kind == RunKind::DryRun {
-        return "Audio: this is a dry run, so no audio is generated. Where the edit needs voice-over or music, plan for it (use `video-studio eleven quote …` to estimate credits) and note it in the readiness report.\n".into();
+        let voice = match input.default_voice {
+            Some(v) => format!("The voice for this project is `{v}`; plan with it unless the spec names another."),
+            None => {
+                "No voice is chosen for this project. Report that once under ambiguities; don't pick one.".to_string()
+            }
+        };
+        return format!("Audio: this is a dry run, so no audio is generated. Where the edit needs voice-over, music or sound effects, plan each file under audio/, estimate credits with `video-studio eleven quote …`, and hold its place with `video-studio standin audio --out audio/<name>.mp3 --seconds <n>` (a quiet sound of that length). For voice-over, use the seconds its words take at about 150 words per minute. {voice}\n");
     }
     if !input.eleven_available {
         return "Audio: no ElevenLabs key is configured, so nothing can be generated. Use only audio files from the media manifest; if the spec needs narration or music that isn't attached, say so in summary.md under Known issues.\n".into();
@@ -209,7 +233,7 @@ fn capture_section(input: &PromptInput) -> String {
     };
     if input.kind == RunKind::DryRun {
         return format!(
-            "You (Claude Code) can drive desktop apps and web apps and record the screen during the production run; cutline does not do this, it only edits the recordings afterwards. Nothing is driven or recorded in a dry run. Where the spec asks for footage of an app that isn't attached, plan it: which app or web address, which steps, and which file under captures/ each recording will be. Reference those paths in project.json5 and list them in the readiness report's notes. `video-studio capture check` shows whether the computer allows recording and control; report a missing permission as a risk. {apps}\n"
+            "You (Claude Code) can drive desktop apps and web apps and record the screen during the production run; cutline does not do this, it only edits the recordings afterwards. Nothing is driven or recorded in a dry run. Where the spec asks for footage of an app that isn't attached, plan it: which app or web address, which steps, and which file under captures/ each recording will be. You choose each recording's length in production (recordings have a fixed length), so plan it as the scene's length plus about 3 seconds; the length is then known, not a risk. Hold each recording's place with `video-studio standin video --out captures/<name>.mov --seconds <n> [--size 1280x800]` (a flat-colored clip) and reference those paths in project.json5. Zooms and crops onto parts of the app can only be measured from the real recording: leave them out of the dry-run edit and say so once under assumptions. `video-studio capture check` shows whether the computer allows recording and control; report a missing permission as a risk. {apps}\n"
         );
     }
     format!(
@@ -250,26 +274,26 @@ pub fn system_prompt(input: &PromptInput) -> String {
 {}         - outputs.json — the deliverables for this run and the matching cutline `target` and `exports`.\n\
          - run.json — the resolved run settings.\n\n",
         input.folder,
-        if p.brand.is_some() { "         - brand.json — the brand preset.\n".trim_start() } else { "" }
+        if p.brand.is_some() { "         - brand/default.json — the brand as a cutline brand file; brand-preset.json — the brand preset as the user entered it.\n".trim_start() } else { "" }
     ));
     s.push_str("## What you must do\n");
     if dry {
         s.push_str(
             "This is a DRY RUN: a cheap rehearsal that finds problems before an expensive production run.\n\
-             1. Read spec.md, media-manifest.json, brand.json and outputs.json.\n\
-             2. Write project.json5 for the whole edit, exactly as you would for production. Where generated audio is needed, reference the paths it would have under audio/ and note that in the report. Do the same for app recordings (see Recording apps): reference the paths they would have under captures/.\n\
+             1. Read spec.md, media-manifest.json, outputs.json and, when there is a brand, brand-preset.json.\n\
+             2. Write project.json5 for the whole edit, exactly as you would for production. For every file the production run will make itself — app recordings under captures/ (see Recording apps) and generated audio under audio/ (see Audio) — write a stand-in of the planned length with `video-studio standin …` and reference that path, so cutline can check the rest of the edit.\n\
              3. Run `cutline validate --json project.json5` and fix what it reports. Then `cutline expand project.json5`, and `cutline cues project.json5` when the project uses cues.\n\
-             4. Run `cutline review project.json5` when the edit can be reviewed without the missing audio (contact sheets, cut pairs and QA, no final render). Look at what it produced.\n\
+             4. Run `cutline review project.json5` and look at what it produced (contact sheets, cut pairs, captions, the reframe sheet for each output, QA; no final render). With the stand-ins in place this covers timing, text layout, captions against the watermark and each output's framing. It cannot cover what the real footage and audio look and sound like; don't report that as a risk, it is what a dry run is.\n\
              5. Write readiness.json (schema below) and finish with one short paragraph.\n\
-             You cannot render finals (`cutline render`), generate audio, or drive and record apps in a dry run; those commands are refused.\n\n",
+             You cannot render finals (`cutline render`), generate audio, or drive and record apps in a dry run; those commands are refused. Keep to the run folder itself: don't make a second copy of the project elsewhere to check it.\n\n",
         );
         s.push_str(
-            "readiness.json:\n```json\n{\n  \"ready\": true,\n  \"ambiguities\": [{\"text\": \"what is unclear\", \"spec_line\": 12, \"detail\": \"what you would need to know\"}],\n  \"assumptions\": [{\"text\": \"what you assumed in order to continue\", \"spec_line\": 20}],\n  \"missing_media\": [{\"text\": \"what is needed and not attached\", \"spec_line\": 31}],\n  \"risks\": [{\"text\": \"a choice that may disappoint, or a check that failed\", \"detail\": \"why\"}],\n  \"estimated_durations\": {\"<output folder name>\": 45.0},\n  \"notes\": \"anything else the user should know before paying for a full run\"\n}\n```\n\
-             `spec_line` is the 1-based line of spec.md the point is about; leave it out when there is none. Use empty lists when there is nothing to report, and set `ready` to false if a production run would fail or clearly disappoint as things stand. Be specific and brief: each entry is shown to the user as one line.\n\n",
+            "readiness.json:\n```json\n{\n  \"ready\": true,\n  \"ambiguities\": [{\"text\": \"what is unclear\", \"spec_line\": 12, \"detail\": \"what you would need to know\"}],\n  \"assumptions\": [{\"text\": \"what you assumed in order to continue\", \"spec_line\": 20}],\n  \"missing_media\": [{\"text\": \"what is needed and not attached\", \"spec_line\": 31}],\n  \"risks\": [{\"text\": \"a choice that may disappoint, or a check that failed\", \"detail\": \"why\"}],\n  \"planned\": [{\"text\": \"a file the production run will record or generate, with its length\", \"spec_line\": 43}],\n  \"estimated_durations\": {\"<output folder name>\": 45.0},\n  \"notes\": \"anything else the user should know before paying for a full run\"\n}\n```\n\
+             `spec_line` is the 1-based line of spec.md the point is about; leave it out when there is none. `missing_media` is only for media the user must supply: footage or audio the spec needs that isn't attached and that the production run can't record or generate. Files the run makes itself (app recordings, voice-over, music, sound effects) go under `planned`, one entry each, never under `missing_media` or `risks`. Use empty lists when there is nothing to report, and set `ready` to false if a production run would fail or clearly disappoint as things stand. Be specific and brief: each entry is shown to the user as one line.\n\n",
         );
     } else {
         s.push_str(&format!(
-            "1. Read spec.md, media-manifest.json, brand.json and outputs.json.\n\
+            "1. Read spec.md, media-manifest.json, outputs.json and, when there is a brand, brand-preset.json.\n\
              2. Record the app footage the spec asks for and that isn't attached (see Recording apps), and generate the audio the spec needs (see Audio).\n\
              3. Write project.json5: one cutline project that produces every output through `exports`.\n\
              4. `cutline validate --json project.json5` until it is clean. Use `cutline expand` and `cutline cues` to check timing.\n\
@@ -332,8 +356,9 @@ pub fn system_prompt(input: &PromptInput) -> String {
     s.push('\n');
     s.push_str(
         "## Rules of this environment\n\
-         - Shell: only `cutline …`, `video-studio eleven …` and `video-studio capture …` run. One plain command per call: no pipes, redirections, `cd`, variables or other programs (`ls`, `cat`, `ffmpeg`, `python`, `open`, `osascript`, `screencapture` are refused). Use the Read, Glob and Grep tools to look at files; they also show images, so open the review pack's PNGs with Read.\n\
+         - Shell: only `cutline …`, `video-studio eleven …`, `video-studio capture …` and, in a dry run, `video-studio standin …` run. One plain command per call: no pipes, redirections, `cd`, variables or other programs (`ls`, `cat`, `ffmpeg`, `python`, `open`, `osascript`, `screencapture` are refused). Use the Read, Glob and Grep tools to look at files; they also show images, so open the review pack's PNGs with Read.\n\
          - Files: you may write only inside the run folder, and may read the run folder, the media listed in the manifest, the brand assets and cutline's own folder. Reference media in project.json5 by the absolute paths in media-manifest.json; never copy media.\n\
+         - Run every command from the run folder and give paths relative to it (`--out work/review`, not a path that starts inside work/), so files land where you expect.\n\
          - Keep scratch files under work/. Screenshots and recordings you make go to captures/. logs/ belongs to the app.\n",
     );
     s.push_str(if rc.web_access {
@@ -560,6 +585,13 @@ mod tests {
         );
         assert!(s.contains("\"exports\""), "the same outputs as production");
         assert!(s.contains("Nothing is driven or recorded in a dry run") && !s.contains("capture record start"));
+        // run-made files get stand-ins and their own list, so they aren't reported as missing
+        assert!(
+            s.contains("video-studio standin video --out captures/")
+                && s.contains("video-studio standin audio --out audio/")
+        );
+        assert!(s.contains("\"planned\"") && s.contains("never under `missing_media`"));
+        assert!(s.contains("No voice is chosen for this project"));
         // a project that turns app recording off, or limits it, says so in both kinds of run
         let mut off = p.clone();
         off.app_capture.enabled = false;

@@ -31,6 +31,10 @@ pub struct ReadinessReport {
     pub missing_media: Vec<Finding>,
     #[serde(default)]
     pub risks: Vec<Finding>,
+    /// What the production run will record or generate itself. Not a problem, so it never
+    /// counts against the report.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub planned: Vec<Finding>,
     /// Output slug → estimated duration in seconds.
     #[serde(default)]
     pub estimated_durations: BTreeMap<String, f64>,
@@ -88,6 +92,7 @@ impl ReadinessReport {
             assumptions: o.get("assumptions").map(findings_from).unwrap_or_default(),
             missing_media: o.get("missing_media").map(findings_from).unwrap_or_default(),
             risks: o.get("risks").or_else(|| o.get("risky_choices")).map(findings_from).unwrap_or_default(),
+            planned: o.get("planned").or_else(|| o.get("made_by_the_run")).map(findings_from).unwrap_or_default(),
             estimated_durations: durations,
             notes: o.get("notes").and_then(Value::as_str).map(str::to_string),
         })
@@ -176,5 +181,10 @@ mod tests {
         assert!(ReadinessReport::parse("not json").is_none());
         assert!(ReadinessReport::parse("[]").is_none());
         assert!(ReadinessReport::parse(r#"{"ready": true}"#).unwrap().is_clean());
+        // What the run makes itself is listed but is not a finding.
+        let p =
+            ReadinessReport::parse(r#"{"ready": true, "planned": ["Recording captures/scene-2.mov, 22 s"]}"#).unwrap();
+        assert!(p.is_clean() && p.findings().is_empty() && p.planned.len() == 1);
+        assert!(!p.fix_prompt().contains("scene-2"));
     }
 }

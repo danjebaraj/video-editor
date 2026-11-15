@@ -298,7 +298,7 @@ Validation runs on demand (⌘B, or the Validate button) and automatically befor
 - One production run per project at a time. Runs of different projects can run in parallel, up to a limit set in Settings (default 1, because renders are CPU-heavy).
 
 ### 12.2 What happens in a run
-1. **Prepare**: create the run folder, write `run.json` (the resolved config), materialize `spec.md`, and write `media-manifest.json` (ID to resolved absolute path, kind, probe data) and `brand.json`.
+1. **Prepare**: create the run folder, write `run.json` (the resolved config), materialize `spec.md`, and write `media-manifest.json` (ID to resolved absolute path, kind, probe data) `brand-preset.json` (the preset as entered) and `brand/default.json` (the same brand in cutline's brand format).
 2. **Launch Claude Code** with the production model in the run folder.
    - The system prompt includes: the cutline workflow (`cutline guide`), the manifest, brand rules, intent, the output configs translated to cutline `target`, `exports` and `variants`, the locales, and the budget.
    - Claude must write `project.json5`, use `cutline validate`, `review` and `render`, and review its own output before finishing.

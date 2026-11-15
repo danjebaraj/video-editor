@@ -230,6 +230,7 @@ struct DryRunFindingsSheet: View {
                     section("Missing media", r?.missing_media ?? [])
                     section("Risks", r?.risks ?? [])
                     section("Assumptions the dry run made", r?.assumptions ?? [])
+                    section("Made during the production run (nothing to do)", r?.planned ?? [])
                     if let n = r?.notes, !n.isEmpty { Text(n).font(.callout).foregroundStyle(.secondary) }
                 }
             }

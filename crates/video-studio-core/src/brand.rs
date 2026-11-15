@@ -227,6 +227,119 @@ impl BrandPreset {
     }
 }
 
+/// The font families cutline bundles. It draws text only with these.
+pub const CUTLINE_FONTS: [&str; 6] = ["Anton", "Bebas Neue", "Inter", "Poppins", "Poppins Bold", "Poppins ExtraBold"];
+
+const CUTLINE_CORNERS: [&str; 4] = ["top_left", "top_right", "bottom_left", "bottom_right"];
+const CUTLINE_CAPTION_STYLES: [&str; 5] = ["bold_pop", "karaoke", "word_by_word", "clean_sentence", "boxed"];
+
+/// The preset in the shape cutline reads, with what could not be carried over.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutlineBrand {
+    /// The brand file for cutline (`brand/default.json` in a run folder).
+    pub file: Value,
+    /// False when the brand has no watermark, so the edit must say `watermark: false`.
+    pub watermark: bool,
+    /// Brand settings cutline can't honour, in words for Claude and the user.
+    pub notes: Vec<String>,
+}
+
+impl BrandPreset {
+    /// Translates the preset into cutline's brand file. The two differ: cutline wants font
+    /// names from its bundled set, one `logo`, and the watermark corner at the top level.
+    /// Paths are absolute, so the file works from any folder.
+    pub fn for_cutline(&self) -> CutlineBrand {
+        let mut notes = Vec::new();
+        let mut file = serde_json::Map::new();
+        file.insert("name".into(), Value::String(self.name.clone()));
+
+        let bundled = |f: &FontRef, role: &str, notes: &mut Vec<String>| -> Option<String> {
+            let family = f.family.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            match family {
+                Some(name) => match CUTLINE_FONTS.iter().find(|b| b.eq_ignore_ascii_case(name)) {
+                    Some(b) => Some(b.to_string()),
+                    None => {
+                        notes.push(format!(
+                            "The {role} font \"{name}\" isn't one cutline can draw (it has {}); Inter is used instead.",
+                            CUTLINE_FONTS[..4].join(", ")
+                        ));
+                        Some("Inter".into())
+                    }
+                },
+                None if f.file.is_some() => {
+                    notes.push(format!(
+                        "The {role} font is a font file, which cutline can't load (it has {}); Inter is used instead.",
+                        CUTLINE_FONTS[..4].join(", ")
+                    ));
+                    Some("Inter".into())
+                }
+                None => None,
+            }
+        };
+        let mut fonts = serde_json::Map::new();
+        if let Some(t) = bundled(&self.fonts.heading, "heading", &mut notes) {
+            fonts.insert("title".into(), Value::String(t));
+        }
+        if let Some(b) = bundled(&self.fonts.body, "body", &mut notes) {
+            fonts.insert("body".into(), Value::String(b));
+        }
+        if !fonts.is_empty() {
+            file.insert("fonts".into(), Value::Object(fonts));
+        }
+
+        let c = &self.colors;
+        // Text is outlined in whichever of black and white stands out from it.
+        let stroke = match parse_hex(&c.text).map(luminance) {
+            Some(l) if l < 0.4 => "#FFFFFF",
+            _ => "#000000",
+        };
+        file.insert(
+            "colors".into(),
+            serde_json::json!({
+                "primary": c.primary, "accent": c.accent, "text": c.text,
+                "stroke": stroke, "background": c.background,
+            }),
+        );
+
+        let usable = |a: &Option<AssetRef>| a.as_ref().filter(|a| a.exists()).map(|a| a.resolved().to_string());
+        let l = &self.logos;
+        let watermark_asset = usable(&self.watermark.asset);
+        let logo = [&l.primary, &l.horizontal, &l.icon, &l.dark, &l.light]
+            .into_iter()
+            .find_map(usable)
+            .or_else(|| watermark_asset.clone());
+        if let (Some(w), Some(lg)) = (&watermark_asset, &logo) {
+            if w != lg {
+                notes.push(
+                    "cutline draws the watermark from the brand logo, so the separate watermark image isn't used."
+                        .into(),
+                );
+            }
+        }
+        let watermark = watermark_asset.is_some() && logo.is_some();
+        if let Some(lg) = logo {
+            file.insert("logo".into(), Value::String(lg));
+        }
+        if watermark {
+            let corner = self.watermark.position.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+            let corner = if CUTLINE_CORNERS.contains(&corner.as_str()) { corner } else { "bottom_right".into() };
+            file.insert("watermark_position".into(), Value::String(corner));
+            file.insert("watermark".into(), serde_json::json!({"opacity": self.watermark.opacity.clamp(0.0, 1.0)}));
+        }
+        for (key, asset) in [("intro", &self.intro), ("outro", &self.outro)] {
+            if let Some(p) = usable(asset) {
+                file.insert(key.into(), Value::String(p));
+            }
+        }
+        // The caption style is free text; it carries over only when it is a cutline style name.
+        let style = self.caption_style.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+        if CUTLINE_CAPTION_STYLES.contains(&style.as_str()) {
+            file.insert("caption_style".into(), Value::String(style));
+        }
+        CutlineBrand { file: Value::Object(file), watermark, notes }
+    }
+}
+
 /// The preset a project uses: its library ID and a full copy taken when it was chosen.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct BrandRef {
@@ -485,6 +598,40 @@ mod tests {
         let b = ensure_default(&lib).unwrap();
         assert_eq!(a.id, b.id);
         assert_eq!(list(&lib).len(), 1);
+    }
+
+    #[test]
+    fn translates_the_preset_for_cutline() {
+        let (_t, dir) = lib();
+        let logo = dir.join("logo.png");
+        png(&logo, [255, 0, 0, 255]);
+        let mut b = BrandPreset::new("Acme");
+        b.logos.primary = Some(AssetRef::new(&logo));
+        b.watermark.asset = Some(AssetRef::new(&logo));
+        b.watermark.position = "bottom_right".into();
+        b.fonts.heading.family = Some("poppins".into());
+        b.fonts.body.family = Some("Helvetica Neue".into());
+        b.caption_style = "Sentence captions, bottom third".into();
+        let c = b.for_cutline();
+        // It must load as a cutline brand, which is the point of the translation.
+        let parsed: cutline_core::brand::Brand = serde_json::from_value(c.file.clone()).unwrap();
+        assert_eq!(parsed.fonts.title, "Poppins");
+        assert_eq!(parsed.fonts.body, "Inter");
+        assert_eq!(parsed.logo.as_deref(), Some(logo.as_str()));
+        assert_eq!(parsed.watermark_position.as_deref(), Some("bottom_right"));
+        assert_eq!(parsed.watermark.unwrap().opacity, 0.6);
+        assert_eq!(parsed.colors.stroke, "#FFFFFF", "dark text gets a light outline");
+        assert_eq!(parsed.caption_style, None, "free text is not a cutline style name");
+        assert!(c.watermark);
+        assert_eq!(c.notes.len(), 1);
+        assert!(c.notes[0].contains("Helvetica Neue"));
+
+        // A new preset has empty fonts and no logo: nothing invalid is written.
+        let plain = BrandPreset::new("Plain").for_cutline();
+        let parsed: cutline_core::brand::Brand = serde_json::from_value(plain.file.clone()).unwrap();
+        assert_eq!(parsed.fonts.title, "Anton", "cutline's own defaults apply");
+        assert!(parsed.logo.is_none() && !plain.watermark && plain.notes.is_empty());
+        assert!(plain.file.get("fonts").is_none());
     }
 
     #[test]

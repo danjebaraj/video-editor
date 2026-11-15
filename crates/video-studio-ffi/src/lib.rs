@@ -176,6 +176,9 @@ impl EnvProbe for ShellEnv {
     fn eleven_remaining(&self) -> Option<u64> {
         self.eleven_remaining
     }
+    fn capture_permissions(&self) -> Option<core::capture::Permissions> {
+        Some(core::capture::permissions(false))
+    }
 }
 
 fn environment_arg(args: &Value, settings: &Settings) -> R<Environment> {
