@@ -200,6 +200,15 @@ pub fn parse_line(line: &str) -> Vec<StreamEvent> {
         "result" => {
             let usage = obj["usage"].is_object().then(|| {
                 let mut u = Usage::from_json(&obj["usage"]);
+                // `usage` covers the last turn only; `modelUsage` holds the totals for the
+                // whole session, per model.
+                if let Some(models) = obj["modelUsage"].as_object().filter(|m| !m.is_empty()) {
+                    let sum = |k: &str| models.values().map(|m| m[k].as_u64().unwrap_or(0)).sum::<u64>();
+                    u.input_tokens = sum("inputTokens");
+                    u.output_tokens = sum("outputTokens");
+                    u.cache_read_tokens = sum("cacheReadInputTokens");
+                    u.cache_creation_tokens = sum("cacheCreationInputTokens");
+                }
                 u.cost_usd = obj["total_cost_usd"].as_f64();
                 u.duration_ms = obj["duration_ms"].as_u64();
                 u.num_turns = obj["num_turns"].as_u64();
@@ -328,6 +337,13 @@ mod tests {
         );
         assert!(
             matches!(&done[0], StreamEvent::Result { is_error: false, usage: Some(u), .. } if u.cost_usd == Some(0.25) && u.num_turns == Some(4))
+        );
+        // the session totals, not the last turn's usage
+        let done = parse_line(
+            r#"{"type":"result","subtype":"success","is_error":false,"total_cost_usd":11.0,"usage":{"input_tokens":18,"output_tokens":4895},"modelUsage":{"claude-opus-5-5":{"inputTokens":362,"outputTokens":125303,"cacheReadInputTokens":29206706,"cacheCreationInputTokens":333858}}}"#,
+        );
+        assert!(
+            matches!(&done[0], StreamEvent::Result { usage: Some(u), .. } if u.output_tokens == 125_303 && u.total_input() == 362 + 29_206_706 + 333_858)
         );
         assert!(parse_line("not json").is_empty());
     }

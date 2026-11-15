@@ -345,6 +345,11 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     if let Some(d) = locate::claude_project_dir(&folder) {
         add_read(d);
     }
+    // …and the output of a command it moved to the background (a render that outlasts the
+    // command timeout) in its temporary folder for this working directory.
+    for d in locate::claude_task_dirs(&folder) {
+        add_read(d);
+    }
 
     // The helper's context and the hook's policy live outside anything Claude can read.
     let context_dir = env.library.join("run-contexts").join(&run_id);
@@ -388,9 +393,11 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     let policy_file = context_dir.join("policy.json");
     paths::write_json_atomic(&policy_file, &policy)?;
 
+    // An empty model in the request means "not chosen", as it does in the project.
+    let requested_model = request.model.clone().filter(|m| !m.trim().is_empty());
     let model = match request.kind {
-        RunKind::DryRun => request.model.clone().unwrap_or_else(|| project.models.dry_run.clone()),
-        RunKind::Production => request.model.clone().unwrap_or_else(|| rc.production_model.clone()),
+        RunKind::DryRun => requested_model.unwrap_or_else(|| project.models.dry_run_or(&env.settings)),
+        RunKind::Production => requested_model.unwrap_or_else(|| rc.production_model.clone()),
     };
     let mut child_env = locate::child_env(env.claude.login_path.as_deref());
     let base_path = child_env.get("PATH").cloned().unwrap_or_default();

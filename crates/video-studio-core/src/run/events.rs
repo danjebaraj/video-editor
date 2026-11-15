@@ -43,6 +43,9 @@ pub enum EventKind {
         tool: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
+        /// A tool call that came back as an error. The run goes on; Claude usually retries.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        failed: bool,
     },
     /// Streaming assistant text for the live transcript. Not written to `events.ndjson`.
     TextDelta {
@@ -211,6 +214,13 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
                     }
                     _ => None,
                 }
+            } else if args.first() == Some(&"capture") {
+                // Driving and recording an app is its own stage; the permission check is not.
+                if args.contains(&"check") {
+                    None
+                } else {
+                    s("capture", "Recording")
+                }
             } else if args.first() == Some(&"eleven") {
                 match args.get(1).copied() {
                     Some("tts" | "music" | "sfx" | "scribe") => s("audio", "Audio"),
@@ -339,6 +349,13 @@ mod tests {
         assert_eq!(bash("/abs/path/cutline validate p.json5 && cutline review p.json5").as_deref(), Some("Review"));
         assert_eq!(bash("ls | wc"), None);
         assert_eq!(stage_for_tool("Write", &json!({"file_path": "project.json5"})).unwrap().0, "authoring");
+        let bash = |c: &str| stage_for_tool("Bash", &json!({"command": c}));
+        assert_eq!(
+            bash("video-studio capture click --x 10 --y 20").unwrap(),
+            ("capture".to_string(), "Recording".to_string())
+        );
+        assert_eq!(bash("video-studio capture record start --out captures/a.mov").unwrap().0, "capture");
+        assert_eq!(bash("video-studio capture check"), None);
         assert_eq!(stage_for_tool("Write", &json!({"file_path": "/run/summary.md"})).unwrap().0, "done");
         assert_eq!(stage_for_tool("Read", &json!({"file_path": "spec.md"})), None);
     }

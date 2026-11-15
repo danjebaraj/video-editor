@@ -295,6 +295,31 @@ pub fn claude_project_dir(cwd: &Utf8Path) -> Option<Utf8PathBuf> {
     Some(base.join("projects").join(slug))
 }
 
+/// Where Claude Code writes the output of a command it moved to the background, which happens
+/// to any command that outlasts its timeout (a long `cutline render`): a folder for the working
+/// directory under `/tmp/claude-<user id>`. Claude reads that file back to see how the command
+/// ended, so a run's policy has to allow reading it.
+pub fn claude_task_dirs(cwd: &Utf8Path) -> Vec<Utf8PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let Some(uid) = paths::home_dir().and_then(|h| std::fs::metadata(h).ok()).map(|m| m.uid()) else {
+            return Vec::new();
+        };
+        let slug: String = cwd.as_str().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        let mut roots = vec![Utf8PathBuf::from("/tmp"), Utf8PathBuf::from("/private/tmp")];
+        if let Some(t) = std::env::var("CLAUDE_CODE_TMPDIR").ok().filter(|s| !s.is_empty()) {
+            roots.push(Utf8PathBuf::from(t));
+        }
+        roots.into_iter().map(|r| r.join(format!("claude-{uid}")).join(&slug)).collect()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = cwd;
+        Vec::new()
+    }
+}
+
 pub fn min_version_text() -> String {
     format!("{}.{}.{}", MIN_CLAUDE_VERSION.0, MIN_CLAUDE_VERSION.1, MIN_CLAUDE_VERSION.2)
 }

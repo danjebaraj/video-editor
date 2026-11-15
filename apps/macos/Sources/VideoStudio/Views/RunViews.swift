@@ -215,7 +215,8 @@ struct RunConfirmSheet: View {
                 if plan.revise == nil {
                     GridRow {
                         Text("Dry run").foregroundStyle(.secondary)
-                        Toggle("Do a dry run first with \(app.models.displayName(document.project.models.dry_run))", isOn: $plan.dryRunFirst)
+                        Toggle("Do a dry run first with \(app.models.displayName(document.dryRunModel))", isOn: $plan.dryRunFirst)
+                            .help("The dry run model is set in Project › Models, or in Settings › Claude for projects that follow the default")
                     }
                 }
             }
@@ -470,8 +471,17 @@ struct TranscriptView: View {
                 case "assistant":
                     MarkdownText(text: item.text).font(.callout)
                 case "tool":
-                    Label { Text(Self.inline(item.text)) } icon: { Image(systemName: item.text.hasSuffix("failed") ? "xmark.circle" : "wrench.and.screwdriver") }.font(.caption)
-                        .foregroundStyle(item.text.hasSuffix("failed") ? Color.red : Color.secondary).lineLimit(2).help(item.detail ?? "")
+                    if item.failed {
+                        // Not the run failing: a step that didn't work, which Claude reads and retries.
+                        Label { Text(Self.inline(item.text)) } icon: { Image(systemName: "exclamationmark.circle") }.font(.caption)
+                            .foregroundStyle(.orange).lineLimit(3).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .help("This step didn't work. Claude sees the same message and usually tries again; the run continues.\n\n" + (item.detail ?? ""))
+                            .copyable("Copy the details") { item.text + "\n\n" + (item.detail ?? "") }
+                    } else {
+                        Label { Text(Self.inline(item.text)) } icon: { Image(systemName: "wrench.and.screwdriver") }.font(.caption)
+                            .foregroundStyle(.secondary).lineLimit(2).help(item.detail ?? "")
+                    }
                 case "error":
                     Label(item.text, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)

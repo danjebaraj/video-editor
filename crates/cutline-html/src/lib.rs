@@ -332,6 +332,9 @@ async fn drive(browser: &Browser, spec: &RenderSpec, work: &Path) -> Result<Rend
             format: Some(CaptureScreenshotFormat::Png),
             from_surface: Some(true),
             capture_beyond_viewport: Some(false),
+            // Still lossless: Chrome spends less time compressing each PNG, and the frames are
+            // re-encoded into the mezzanine straight away.
+            optimize_for_speed: Some(true),
             ..Default::default()
         };
         let png = tokio::time::timeout(FRAME_TIMEOUT, page.screenshot(shot))
@@ -376,16 +379,26 @@ pub fn encode(tc: &cutline_deps::Toolchain, spec: &RenderSpec, work: &Path, out:
     Ok(())
 }
 
+/// Another HTML page (as opposed to a style sheet, script, image or data file).
+fn is_page(p: &Path) -> bool {
+    matches!(p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("html" | "htm"))
+}
+
 /// Render to a cached mezzanine. Key: source content (+ sibling files for HTML), params, size,
 /// fps, duration, alpha, Chrome path.
 pub fn render_cached(tc: &cutline_deps::Toolchain, spec: &RenderSpec, cache_dir: &Path) -> Result<PathBuf> {
     let mut parts: Vec<Vec<u8>> = vec![std::fs::read(&spec.source)?];
     if spec.kind == Kind::Html {
         if let Some(dir) = spec.source.parent() {
+            // Files beside the page can be part of it (styles, scripts, images), so they are part
+            // of the key. Another page in the same folder is only part of it when this page names
+            // it: otherwise editing one slide would re-render every slide in the folder.
+            let own = std::fs::read_to_string(&spec.source).unwrap_or_default();
             let mut files: Vec<PathBuf> = std::fs::read_dir(dir)?
                 .flatten()
                 .map(|e| e.path())
                 .filter(|p| p.is_file() && p != &spec.source)
+                .filter(|p| !is_page(p) || p.file_name().and_then(|n| n.to_str()).is_some_and(|n| own.contains(n)))
                 .collect();
             files.sort();
             for f in files.iter().take(64) {

@@ -762,6 +762,7 @@ struct RunEvent: Codable, Equatable {
     var detail: String?
     var role: String?
     var text: String?
+    var failed: Bool?
     var tool: String?
     var id: String?
     var questions: [ClaudeQuestion]?

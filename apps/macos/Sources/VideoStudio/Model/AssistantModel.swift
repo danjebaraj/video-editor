@@ -201,7 +201,7 @@ final class AssistantModel: ObservableObject {
             "session_dir": scratch(session.id).path,
             "spec": document.editor.text,
             "prompt": composed.prompt,
-            "model": p.models.assistant,
+            "model": document.assistantModel,
             "web_access": p.models.web_access,
             "read_paths": summary?.read_paths ?? [],
             "reference_paths": p.assistant_folders,
@@ -291,6 +291,7 @@ final class AssistantModel: ObservableObject {
                 if let mi = sessions[si].messages.firstIndex(where: { $0.toolID == id && $0.role == .tool }) {
                     sessions[si].messages[mi].failed = true
                     sessions[si].messages[mi].detail = e.detail
+                    if let text = e.text, !text.isEmpty { sessions[si].messages[mi].text = text }
                 }
             }
         case "blocked":
