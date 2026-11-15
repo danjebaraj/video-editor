@@ -130,6 +130,28 @@ final class AssistantModel: ObservableObject {
         }
     }
 
+    // MARK: Shared folders
+
+    /// Lets Claude read a folder outside the project (briefs, docs, source material). Takes
+    /// effect on the next message.
+    func addFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Share with Claude"
+        panel.message = "Claude can read (never change) the folders you choose while helping with the spec."
+        guard panel.runModal() == .OK else { return }
+        let picked = panel.urls.map { $0.standardizedFileURL.path }
+        document.update { p in
+            for path in picked where !p.assistant_folders.contains(path) { p.assistant_folders.append(path) }
+        }
+    }
+
+    func removeFolder(_ path: String) {
+        document.update { $0.assistant_folders.removeAll { $0 == path } }
+    }
+
     // MARK: Running
 
     /// The selection in the editor with its line range, if any.
@@ -182,6 +204,7 @@ final class AssistantModel: ObservableObject {
             "model": p.models.assistant,
             "web_access": p.models.web_access,
             "read_paths": summary?.read_paths ?? [],
+            "reference_paths": p.assistant_folders,
             "project_summary": summary?.summary ?? "",
             "extra_env": extraEnv,
         ]

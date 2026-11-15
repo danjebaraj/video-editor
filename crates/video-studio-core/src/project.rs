@@ -50,6 +50,9 @@ pub struct Project {
     pub runs: Vec<RunRecord>,
     #[serde(default)]
     pub assistant_sessions: Vec<AssistantSessionRef>,
+    /// Extra folders (absolute paths) the spec assistant may read: briefs, docs, source material.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assistant_folders: Vec<String>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -364,6 +367,7 @@ impl Project {
             run_configs: Vec::new(),
             runs: Vec::new(),
             assistant_sessions: Vec::new(),
+            assistant_folders: Vec::new(),
             extra: BTreeMap::new(),
         }
     }

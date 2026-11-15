@@ -67,11 +67,13 @@ struct Project: Codable, Equatable {
     var run_configs: [RunConfig] = []
     var runs: [RunRecord] = []
     var assistant_sessions: [AssistantSessionRef] = []
+    /// Extra folders (absolute paths) the spec assistant may read.
+    var assistant_folders: [String] = []
     /// Top-level keys this version doesn't know, kept so a newer app's additions survive.
     var extra: [String: JSONValue] = [:]
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case format, version, id, name, created, modified, intent, spec, media, media_roots, brand, models, output_configs, run_configs, runs, assistant_sessions
+        case format, version, id, name, created, modified, intent, spec, media, media_roots, brand, models, output_configs, run_configs, runs, assistant_sessions, assistant_folders
     }
 
     init() {}
@@ -94,6 +96,7 @@ struct Project: Codable, Equatable {
         run_configs = try c.decodeIfPresent([RunConfig].self, forKey: .run_configs) ?? []
         runs = try c.decodeIfPresent([RunRecord].self, forKey: .runs) ?? []
         assistant_sessions = try c.decodeIfPresent([AssistantSessionRef].self, forKey: .assistant_sessions) ?? []
+        assistant_folders = try c.decodeIfPresent([String].self, forKey: .assistant_folders) ?? []
         let known = Set(CodingKeys.allCases.map(\.rawValue))
         let all = try decoder.container(keyedBy: AnyKey.self)
         for key in all.allKeys where !known.contains(key.stringValue) {
@@ -119,6 +122,7 @@ struct Project: Codable, Equatable {
         try c.encode(run_configs, forKey: .run_configs)
         try c.encode(runs, forKey: .runs)
         try c.encode(assistant_sessions, forKey: .assistant_sessions)
+        if !assistant_folders.isEmpty { try c.encode(assistant_folders, forKey: .assistant_folders) }
         var all = encoder.container(keyedBy: AnyKey.self)
         for (k, v) in extra { try all.encode(v, forKey: AnyKey(k)) }
     }

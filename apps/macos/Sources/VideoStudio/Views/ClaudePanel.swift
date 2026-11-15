@@ -88,6 +88,10 @@ struct ClaudePanel: View {
     @ObservedObject var chatFocus: FocusRequest
     @ObservedObject private var app = AppState.shared
     @FocusState private var composerFocused: Bool
+    /// Height of the message box; the handle above the composer changes it.
+    @AppStorage("claudeComposerHeight") private var composerHeight = 96.0
+    @State private var dragStartHeight: Double?
+    private static let minComposerHeight = 54.0
 
     init(document: ProjectDocument, chatFocus: FocusRequest) {
         self.document = document
@@ -96,6 +100,12 @@ struct ClaudePanel: View {
     }
 
     var body: some View {
+        GeometryReader { geo in
+            panel(maxComposer: max(Self.minComposerHeight, geo.size.height - 220))
+        }
+    }
+
+    private func panel(maxComposer: Double) -> some View {
         VStack(spacing: 0) {
             header
             Divider()
@@ -107,10 +117,88 @@ struct ClaudePanel: View {
             } else {
                 starters
             }
-            Divider()
-            composer
+            resizeHandle(maxComposer: maxComposer)
+            composer(height: min(composerHeight, maxComposer))
         }
         .onChange(of: chatFocus.count) { composerFocused = true }
+    }
+
+    /// The splitter between the conversation and the message box.
+    private func resizeHandle(maxComposer: Double) -> some View {
+        ZStack {
+            Divider()
+            Capsule().fill(Color.secondary.opacity(0.45)).frame(width: 36, height: 4)
+        }
+        .frame(maxWidth: .infinity).frame(height: 10)
+        .contentShape(Rectangle())
+        .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+        .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+            .onChanged { v in
+                let start = dragStartHeight ?? min(composerHeight, maxComposer)
+                dragStartHeight = start
+                composerHeight = min(max(start - v.translation.height, Self.minComposerHeight), maxComposer)
+            }
+            .onEnded { _ in dragStartHeight = nil })
+        .help("Drag to resize the message box")
+        .accessibilityElement()
+        .accessibilityLabel("Message box height")
+        .accessibilityValue("\(Int(composerHeight)) points")
+        .accessibilityAdjustableAction { direction in
+            let step = direction == .increment ? 40.0 : -40.0
+            composerHeight = min(max(composerHeight + step, Self.minComposerHeight), maxComposer)
+        }
+    }
+
+    private func actionRow(gatherTitle: Bool) -> some View {
+        HStack(spacing: 10) {
+            Button { chat.gatherMissingInfo() } label: {
+                if gatherTitle {
+                    Label("Gather missing info", systemImage: "questionmark.bubble").lineLimit(1)
+                } else {
+                    Image(systemName: "questionmark.bubble")
+                }
+            }
+            .buttonStyle(.borderless).controlSize(.small).fixedSize()
+            .disabled(chat.isRunning || !app.claudeAvailable || document.review.pending != nil)
+            .help("Gather missing info: Claude interviews you about gaps in the spec and folds your answers in (⌃⌘G)")
+            .accessibilityLabel("Gather missing info")
+            Spacer(minLength: 4)
+            foldersMenu
+            Toggle(isOn: Binding(get: { document.project.models.web_access }, set: { v in document.update { $0.models.web_access = v } })) {
+                Label("Web", systemImage: "globe").font(.caption).lineLimit(1)
+            }
+            .toggleStyle(.checkbox).controlSize(.small).fixedSize()
+            .help("Let Claude search and fetch web pages in this project's assistant sessions")
+        }
+    }
+
+    private var canSend: Bool {
+        !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && app.claudeAvailable && document.review.pending == nil
+    }
+
+    private var foldersMenu: some View {
+        let folders = document.project.assistant_folders
+        return Menu {
+            if folders.isEmpty {
+                Text("Claude can read only the spec and the media folders")
+            } else {
+                Section("Claude can read") {
+                    ForEach(folders, id: \.self) { path in
+                        Menu((path as NSString).abbreviatingWithTildeInPath) {
+                            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+                            Button("Remove") { chat.removeFolder(path) }
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Add Folder…") { chat.addFolders() }
+        } label: {
+            Label(folders.isEmpty ? "Folders" : "Folders (\(folders.count))", systemImage: "folder.badge.plus").font(.caption)
+        }
+        .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
+        .help("Folders Claude can read while helping with the spec, such as briefs, docs or source material. Changes apply from the next message.")
+        .accessibilityLabel("Folders shared with Claude")
     }
 
     private var header: some View {
@@ -197,7 +285,7 @@ struct ClaudePanel: View {
         }
     }
 
-    private var composer: some View {
+    private func composer(height: Double) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let sel = chat.currentSelection() {
                 Toggle(isOn: $chat.includeSelection) {
@@ -210,11 +298,21 @@ struct ClaudePanel: View {
                 Label("Review Claude's changes in the editor to continue.", systemImage: "arrow.left.circle").font(.caption).foregroundStyle(.orange)
             }
             HStack(alignment: .bottom, spacing: 6) {
-                TextField("Ask Claude to improve the spec…", text: $chat.draft, axis: .vertical)
-                    .lineLimit(1...8)
-                    .textFieldStyle(.roundedBorder)
+                // Return adds a line; ⌘Return sends (the Send button's shortcut).
+                TextEditor(text: $chat.draft)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 2).padding(.vertical, 5)
+                    .frame(height: height)
+                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(composerFocused ? Color.accentColor.opacity(0.7) : Color(nsColor: .separatorColor)))
+                    .overlay(alignment: .topLeading) {
+                        if chat.draft.isEmpty {
+                            Text("Ask Claude to improve the spec…  ⌘Return to send").foregroundStyle(.tertiary)
+                                .padding(.horizontal, 7).padding(.vertical, 5).allowsHitTesting(false)
+                        }
+                    }
                     .focused($composerFocused)
-                    .onSubmit { chat.send(chat.draft) }
                     .disabled(!app.claudeAvailable)
                     .accessibilityLabel("Message to Claude")
                 if chat.isRunning {
@@ -223,21 +321,15 @@ struct ClaudePanel: View {
                 } else {
                     Button { chat.send(chat.draft) } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
                         .buttonStyle(.borderless)
-                        .disabled(chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !app.claudeAvailable || document.review.pending != nil)
-                        .help("Send (Return)").accessibilityLabel("Send")
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(!canSend)
+                        .help("Send (⌘Return)").accessibilityLabel("Send")
                 }
             }
-            HStack(spacing: 10) {
-                Button { chat.gatherMissingInfo() } label: { Label("Gather missing info", systemImage: "questionmark.bubble") }
-                    .buttonStyle(.borderless).controlSize(.small)
-                    .disabled(chat.isRunning || !app.claudeAvailable || document.review.pending != nil)
-                    .help("Claude interviews you about gaps in the spec and folds your answers in (⌃⌘G)")
-                Spacer()
-                Toggle(isOn: Binding(get: { document.project.models.web_access }, set: { v in document.update { $0.models.web_access = v } })) {
-                    Label("Web", systemImage: "globe").font(.caption)
-                }
-                .toggleStyle(.checkbox).controlSize(.small)
-                .help("Let Claude search and fetch web pages in this project's assistant sessions")
+            // Full labels when the panel is wide enough; otherwise Gather shrinks to its icon.
+            ViewThatFits(in: .horizontal) {
+                actionRow(gatherTitle: true)
+                actionRow(gatherTitle: false)
             }
         }
         .padding(10)

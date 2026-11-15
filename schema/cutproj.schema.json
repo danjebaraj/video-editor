@@ -956,6 +956,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "assistant_folders": {
+      "description": "Extra folders (absolute paths) the spec assistant may read: briefs, docs, source material.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "assistant_sessions": {
       "default": [],
       "items": {
