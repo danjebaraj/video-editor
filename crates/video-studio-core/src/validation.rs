@@ -654,7 +654,7 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
                     "environment",
                     format!("{name} isn't allowed for Syncfusion Video Studio yet"),
                     Some(format!(
-                        "{scenes} for a recording, and the run needs this to {what}. Allow opens System Settings with Syncfusion Video Studio in the list: turn its switch on there.{}",
+                        "{scenes} for a recording, and the run needs this to {what}. Allow opens System Settings with Syncfusion Video Studio in the list, switched off: turn its switch on. If the switch was already on, it was for an earlier build of the app, and Allow replaces it.{}",
                         if key == "screen_recording" { " macOS then offers to quit and reopen the app." } else { "" }
                     )),
                     FixLink::target("permission", key),
