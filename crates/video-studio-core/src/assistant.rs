@@ -17,7 +17,7 @@ use crate::claude::locate::{child_env, ClaudeInfo};
 use crate::claude::process::{containing_dir, friendly_error, ClaudeOptions, ClaudeProcess, Incoming};
 use crate::claude::stream::{self, Question, StreamEvent};
 use crate::claude::Decision;
-use crate::run::orchestrator::tool_summary;
+use crate::run::orchestrator::{tool_failure, tool_summary};
 use crate::{paths, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -75,6 +75,9 @@ pub enum AssistantEvent {
         id: String,
         is_error: bool,
         detail: Option<String>,
+        /// For an error: what was tried and why it didn't work, to show in place of the summary.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
     },
     Blocked {
         reason: String,
@@ -237,7 +240,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         let mut saw_result = false;
         let mut ok = true;
         let mut stop_sent = false;
-        let mut tools: HashMap<String, String> = HashMap::new();
+        let mut tools: HashMap<String, (String, serde_json::Value)> = HashMap::new();
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut exit: Option<(i32, String)> = None;
         let check_spec = |last: &mut String| {
@@ -259,16 +262,21 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
                     StreamEvent::TextDelta(text) => emit(AssistantEvent::TextDelta { text }),
                     StreamEvent::AssistantText(text) => emit(AssistantEvent::Text { text }),
                     StreamEvent::ToolUse { id, name, input } => {
-                        tools.insert(id.clone(), name.clone());
+                        tools.insert(id.clone(), (name.clone(), input.clone()));
                         if name != "AskUserQuestion" {
                             let detail = serde_json::to_string_pretty(&input).ok().map(|d| d.chars().take(4000).collect());
                             emit(AssistantEvent::Tool { id, summary: tool_summary(&name, &input, &dir), name, detail });
                         }
                     }
                     StreamEvent::ToolResult { tool_use_id, content, is_error } => {
-                        let name = tools.remove(&tool_use_id).unwrap_or_default();
+                        let (name, input) = tools.remove(&tool_use_id).unwrap_or_default();
                         if name != "AskUserQuestion" {
-                            emit(AssistantEvent::ToolResult { id: tool_use_id, is_error, detail: is_error.then(|| content.chars().take(4000).collect()) });
+                            emit(AssistantEvent::ToolResult {
+                                id: tool_use_id,
+                                is_error,
+                                detail: is_error.then(|| content.chars().take(4000).collect()),
+                                text: is_error.then(|| tool_failure(&name, &input, &dir, &content)),
+                            });
                         }
                         if !is_error && matches!(name.as_str(), "Edit" | "Write" | "MultiEdit") {
                             check_spec(&mut last_spec);

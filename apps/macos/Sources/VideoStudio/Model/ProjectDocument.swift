@@ -346,6 +346,18 @@ final class ProjectDocument: ObservableObject, Identifiable {
         if case .brandUpdate = banner { banner = nil }
     }
 
+    /// The dry run model in force: the project's own choice, or the default in Settings.
+    var dryRunModel: String {
+        let own = project.models.dry_run.trimmingCharacters(in: .whitespaces)
+        return own.isEmpty ? AppState.shared.settings.default_dry_run_model : own
+    }
+
+    /// The spec assistant model in force: the project's own choice, or the default in Settings.
+    var assistantModel: String {
+        let own = project.models.assistant.trimmingCharacters(in: .whitespaces)
+        return own.isEmpty ? AppState.shared.settings.default_assistant_model : own
+    }
+
     /// True when the library holds a newer copy of the project's brand preset (the same test as
     /// the core's `brand.is_newer`, on the list the app already has).
     var brandUpdateAvailable: Bool {

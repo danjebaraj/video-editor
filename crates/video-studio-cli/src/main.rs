@@ -639,7 +639,11 @@ fn cmd_run(
         let rc = l.project.run_config(config).cloned().expect("validated above");
         if rc.dry_run_first && !no_dry_run {
             if !json {
-                eprintln!("Dry run for \"{}\" ({})…", rc.name, l.project.models.dry_run);
+                eprintln!(
+                    "Dry run for \"{}\" ({})…",
+                    rc.name,
+                    l.project.models.dry_run_or(&video_studio_core::settings::Settings::load(&library()))
+                );
             }
             let dry = RunRequest {
                 project_path: l.path.clone(),
@@ -969,8 +973,9 @@ fn cmd_new(path: &Utf8Path, name: Option<&str>, intent: &str, media_paths: &[Utf
     p.intent.kind = kind;
     let defaults = platforms.intent_defaults(kind);
     p.spec = video_studio_core::spec::template_for(&defaults.template, &name);
-    p.models.assistant = settings.default_assistant_model.clone();
-    p.models.dry_run = settings.default_dry_run_model.clone();
+    // Empty: the project follows the defaults in Settings until it chooses its own.
+    p.models.assistant = String::new();
+    p.models.dry_run = String::new();
     let mut taken = std::collections::HashSet::new();
     for preset in defaults.outputs.iter().filter_map(|id| platforms.preset(id)) {
         let cfg = video_studio_core::presets::OutputConfig::from_preset(preset, &taken);

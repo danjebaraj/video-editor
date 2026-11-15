@@ -191,14 +191,31 @@ impl Intent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct Models {
-    /// Spec assistant model: a CLI alias (`sonnet`) or a full model ID.
+    /// Spec assistant model: a CLI alias (`sonnet`) or a full model ID. Empty follows the
+    /// default in Settings.
     pub assistant: String,
-    /// Dry run model; cheaper than production by default.
+    /// Dry run model. Empty follows the default in Settings.
     pub dry_run: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     #[serde(default)]
     pub web_access: bool,
+}
+
+impl Models {
+    /// The dry run model in force: the project's own choice, or the Settings default.
+    pub fn dry_run_or(&self, settings: &crate::settings::Settings) -> String {
+        Self::chosen(&self.dry_run, &settings.default_dry_run_model, "haiku")
+    }
+
+    /// The spec assistant model in force: the project's own choice, or the Settings default.
+    pub fn assistant_or(&self, settings: &crate::settings::Settings) -> String {
+        Self::chosen(&self.assistant, &settings.default_assistant_model, "sonnet")
+    }
+
+    fn chosen(own: &str, default: &str, fallback: &str) -> String {
+        [own, default, fallback].into_iter().map(str::trim).find(|m| !m.is_empty()).unwrap_or(fallback).to_string()
+    }
 }
 
 impl Default for Models {
@@ -817,6 +834,22 @@ pub fn record_run(project_path: &Utf8Path, record: &RunRecord) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_project_follows_the_settings_models_until_it_chooses_its_own() {
+        let mut settings = crate::settings::Settings {
+            default_dry_run_model: "opus".into(),
+            default_assistant_model: "fable".into(),
+            ..Default::default()
+        };
+        let mut m = Models { assistant: String::new(), dry_run: " ".into(), effort: None, web_access: false };
+        assert_eq!((m.dry_run_or(&settings), m.assistant_or(&settings)), ("opus".to_string(), "fable".to_string()));
+        m.dry_run = "haiku".into();
+        assert_eq!(m.dry_run_or(&settings), "haiku", "the project's own choice wins");
+        settings.default_dry_run_model = String::new();
+        m.dry_run = String::new();
+        assert_eq!(m.dry_run_or(&settings), "haiku", "nothing chosen anywhere");
+    }
     use crate::media::{MediaItem, MediaKind};
 
     fn sample() -> Project {

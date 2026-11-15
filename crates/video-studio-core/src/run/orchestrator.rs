@@ -176,7 +176,8 @@ struct Driver {
     started: Instant,
     stage: Option<(String, String, Instant, bool)>,
     /// Tool use ID → (tool name, stage it started).
-    tools: HashMap<String, (String, Option<String>)>,
+    /// Tool calls waiting for their result: name, stage and input.
+    tools: HashMap<String, (String, Option<String>, Value)>,
     pending: HashMap<String, PendingQuestion>,
     usage: HashMap<String, Usage>,
     final_usage: Option<Usage>,
@@ -220,6 +221,71 @@ pub fn tool_summary(name: &str, input: &Value, root: &Utf8Path) -> String {
     }
 }
 
+/// A one-line description of a tool call that came back as an error, for the transcript: what
+/// was tried and why it didn't work, in place of a bare "Bash failed". Claude usually reads the
+/// same message and tries again, so this is a note on the way, not the run failing.
+pub fn tool_failure(name: &str, input: &Value, root: &Utf8Path, content: &str) -> String {
+    let rel = |p: &str| {
+        let path = Utf8Path::new(p);
+        path.strip_prefix(root).map(|r| r.to_string()).unwrap_or_else(|_| p.to_string())
+    };
+    let file = ["file_path", "notebook_path", "path"]
+        .iter()
+        .find_map(|k| input[*k].as_str())
+        .map(rel)
+        .unwrap_or_else(|| "file".into());
+    // The tool's own words, without wrappers: "<tool_use_error>…", "Exit code 2", "error: ".
+    let text = content.replace("<tool_use_error>", "").replace("</tool_use_error>", "");
+    let mut exit: Option<&str> = None;
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty()).peekable();
+    if let Some(code) = lines.peek().and_then(|l| l.strip_prefix("Exit code ")) {
+        exit = Some(code);
+        lines.next();
+    }
+    let body: Vec<&str> = lines.collect();
+    let strip = |l: &str| {
+        let l = l.trim_start_matches("[err] ").trim_start_matches("[out] ");
+        let l = l.strip_prefix("error: ").or_else(|| l.strip_prefix("Error: ")).unwrap_or(l);
+        truncate(l.split(" Note: your current working directory").next().unwrap_or(l).trim_end_matches('.'), 200)
+    };
+    let first = body.first().map(|l| strip(l)).unwrap_or_default();
+    let reason = |fallback: &str| if first.is_empty() { fallback.to_string() } else { first.clone() };
+    match name {
+        "Bash" => {
+            let command = input["command"].as_str().unwrap_or("").trim();
+            let shown = truncate(command, 80);
+            // A check that found problems is a result, not a breakdown: say what it found.
+            let json: Option<Value> = serde_json::from_str(&body.join("\n")).ok();
+            if let Some(errors) = json.as_ref().and_then(|v| v["errors"].as_array()).filter(|e| !e.is_empty()) {
+                let what = errors[0]["message"].as_str().unwrap_or("see the details");
+                let hint = errors[0]["hint"].as_str().map(|h| format!(" ({h})")).unwrap_or_default();
+                let more = if errors.len() > 1 { format!(", and {} more", errors.len() - 1) } else { String::new() };
+                let n = errors.len();
+                return format!(
+                    "`{shown}` found {n} problem{} to fix: {}{hint}{more}",
+                    if n == 1 { "" } else { "s" },
+                    truncate(what, 160)
+                );
+            }
+            match (first.is_empty(), exit) {
+                (false, Some(code)) => format!("`{shown}` didn't work (exit code {code}): {first}"),
+                (false, None) => format!("`{shown}` didn't work: {first}"),
+                (true, Some(code)) => format!("`{shown}` ended with exit code {code}"),
+                (true, None) => format!("`{shown}` didn't work"),
+            }
+        }
+        "Read" => format!("Couldn't read `{file}`: {}", reason("it couldn't be opened")),
+        "Edit" | "MultiEdit" if text.contains("No changes to make") => {
+            format!("No change made to `{file}`: the new text is the same as the old")
+        }
+        "Edit" | "MultiEdit" => format!("Couldn't edit `{file}`: {}", reason("the edit didn't apply")),
+        "Write" => format!("Couldn't write `{file}`: {}", reason("the file couldn't be saved")),
+        "Glob" | "Grep" => format!("The search didn't work: {}", reason("no details were given")),
+        "WebSearch" | "WebFetch" => format!("The web request didn't work: {}", reason("no details were given")),
+        other => format!("{other} didn't work: {}", reason("no details were given")),
+    }
+}
+
 impl Driver {
     fn new(
         p: Prepared,
@@ -257,7 +323,7 @@ impl Driver {
     }
 
     fn note(&self, role: &str, text: impl Into<String>) {
-        self.emit(EventKind::Message { role: role.into(), text: text.into(), tool: None, detail: None });
+        self.emit(EventKind::Message { role: role.into(), text: text.into(), tool: None, detail: None, failed: false });
     }
 
     fn warn(&mut self, message: impl Into<String>) {
@@ -304,8 +370,14 @@ impl Driver {
             return;
         }
         self.last_cost_emit = Instant::now();
-        let (est, input, output) = self.estimated_cost();
+        let (est, mut input, mut output) = self.estimated_cost();
         let reported = self.final_usage.as_ref().and_then(|u| u.cost_usd);
+        // Messages report their tokens as they start, which undercounts output; the totals
+        // Claude Code gives at the end are the real ones.
+        if let Some(u) = self.final_usage.as_ref().filter(|u| u.output_tokens > output) {
+            input = u.total_input();
+            output = u.output_tokens;
+        }
         self.emit(EventKind::Cost {
             claude_usd: reported.or(est),
             claude_estimated: reported.is_none(),
@@ -424,7 +496,7 @@ impl Driver {
                 if let Some((s, label)) = &stage {
                     self.start_stage(s, label);
                 }
-                self.tools.insert(id, (name.clone(), stage.map(|s| s.0)));
+                self.tools.insert(id, (name.clone(), stage.map(|s| s.0), input.clone()));
                 if name != "AskUserQuestion" {
                     let detail = serde_json::to_string_pretty(&input).ok().map(|d| truncate(&d, 4000));
                     self.emit(EventKind::Message {
@@ -432,11 +504,12 @@ impl Driver {
                         text: tool_summary(&name, &input, &self.p.folder),
                         tool: Some(name),
                         detail,
+                        failed: false,
                     });
                 }
             }
             StreamEvent::ToolResult { tool_use_id, content, is_error } => {
-                let Some((name, stage)) = self.tools.remove(&tool_use_id) else { return };
+                let Some((name, stage, input)) = self.tools.remove(&tool_use_id) else { return };
                 if is_error && content.contains("blocked by Syncfusion Video Studio") {
                     // Refused by the pre-tool hook: an answer Claude adapts to, not a failure.
                     let reason = content
@@ -453,9 +526,10 @@ impl Driver {
                     }
                     self.emit(EventKind::Message {
                         role: "tool".into(),
-                        text: format!("{name} failed"),
+                        text: tool_failure(&name, &input, &self.p.folder, &content),
                         tool: Some(name),
                         detail: Some(truncate(&content, 4000)),
+                        failed: true,
                     });
                 } else if let (Some(s), Some(cur)) = (&stage, self.stage.as_mut()) {
                     // a later success in the same stage clears an earlier failure (fix and retry)
@@ -900,6 +974,44 @@ impl Driver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_tool_call_says_what_was_tried_and_why() {
+        use serde_json::json;
+        let root = Utf8Path::new("/runs/r1");
+        let bash = |cmd: &str, out: &str| tool_failure("Bash", &json!({"command": cmd}), root, out);
+        assert_eq!(
+            bash("cutline validate --json project.json5", "Exit code 1\n{\n  \"errors\": [{\"code\": \"E_MISSING_FIELD\", \"hint\": \"add `version: 1`\", \"message\": \"missing field `version`\"}],\n  \"ok\": false\n}"),
+            "`cutline validate --json project.json5` found 1 problem to fix: missing field `version` (add `version: 1`)"
+        );
+        assert_eq!(
+            bash("cutline transcribe audio/a.mp3 audio/b.mp3", "Exit code 2\nerror: unexpected argument 'audio/b.mp3' found\nUsage: cutline transcribe [OPTIONS] <FILE>"),
+            "`cutline transcribe audio/a.mp3 audio/b.mp3` didn't work (exit code 2): unexpected argument 'audio/b.mp3' found"
+        );
+        assert_eq!(
+            bash("cutline render project.json5", "Exit code 3"),
+            "`cutline render project.json5` ended with exit code 3"
+        );
+        assert_eq!(
+            tool_failure(
+                "Read",
+                &json!({"file_path": "/runs/r1/work/notes.md"}),
+                root,
+                "File does not exist. Note: your current working directory is /runs/r1."
+            ),
+            "Couldn't read `work/notes.md`: File does not exist"
+        );
+        assert_eq!(
+            tool_failure(
+                "Edit",
+                &json!({"file_path": "/runs/r1/project.json5"}),
+                root,
+                "<tool_use_error>No changes to make: old_string and new_string are exactly the same.</tool_use_error>"
+            ),
+            "No change made to `project.json5`: the new text is the same as the old"
+        );
+        assert!(!bash("x", "Exit code 1\nboom").contains("failed"));
+    }
 
     #[test]
     fn tool_summaries() {

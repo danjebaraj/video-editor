@@ -531,7 +531,14 @@ fn transcribe(
         }
     };
     if let Some(o) = &out {
-        std::fs::write(o, serde_json::to_vec_pretty(&t).unwrap_or_default()).map_err(CliError::internal)?;
+        // `--out work/vo.json` should work before anything else has made `work/`.
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = o.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(o, serde_json::to_vec_pretty(&t).unwrap_or_default())
+        };
+        write().map_err(|e| CliError::internal(anyhow::anyhow!("couldn't write {}: {e}", o.display())))?;
     }
     let human = format!(
         "{} words, {} segments ({source})\n{}",

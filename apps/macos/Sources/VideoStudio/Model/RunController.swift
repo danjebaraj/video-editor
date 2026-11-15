@@ -16,6 +16,8 @@ struct TranscriptItem: Identifiable, Equatable {
     var text: String
     var tool: String?
     var detail: String?
+    /// A tool call that came back as an error; the run goes on.
+    var failed = false
 }
 
 struct PendingRunQuestion: Equatable {
@@ -83,7 +85,7 @@ final class RunController: ObservableObject {
     init(document: ProjectDocument) { self.document = document }
 
     static func freshStages() -> [StageState] {
-        [("prepare", "Prepare"), ("audio", "Audio"), ("authoring", "Authoring"), ("validate", "Validate"), ("review", "Review"), ("render", "Render"), ("qa", "QA"), ("done", "Done")].map { StageState(id: $0.0, label: $0.1) }
+        [("prepare", "Prepare"), ("audio", "Audio"), ("capture", "Recording"), ("authoring", "Authoring"), ("validate", "Validate"), ("review", "Review"), ("render", "Render"), ("qa", "QA"), ("done", "Done")].map { StageState(id: $0.0, label: $0.1) }
     }
 
     // MARK: Starting
@@ -139,7 +141,7 @@ final class RunController: ObservableObject {
             }
             let outputs = document.resolvedOutputs.filter { rc.outputs.contains($0.id) }
             continuation = nil
-            launch(RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: "", model: document.project.models.dry_run, dryRunFirst: false, revise: nil), kind: "dry_run")
+            launch(RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: "", model: document.dryRunModel, dryRunFirst: false, revise: nil), kind: "dry_run")
         }
     }
 
@@ -268,7 +270,7 @@ final class RunController: ObservableObject {
             streamingText += e.text ?? ""
         case "message":
             streamingText = ""
-            transcript.append(TranscriptItem(role: e.role ?? "note", text: e.text ?? "", tool: e.tool, detail: e.detail))
+            transcript.append(TranscriptItem(role: e.role ?? "note", text: e.text ?? "", tool: e.tool, detail: e.detail, failed: e.failed ?? false))
             if transcript.count > 600 { transcript.removeFirst(transcript.count - 600) }
         case "question":
             guard let id = e.id else { break }

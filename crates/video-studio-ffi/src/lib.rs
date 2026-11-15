@@ -249,8 +249,9 @@ pub fn call(method: String, args: String) -> R<String> {
             let defaults = platforms.intent_defaults(kind);
             let template = opt::<String>(&args, "template")?.unwrap_or_else(|| defaults.template.clone());
             p.spec = spec::template_for(&template, &name);
-            p.models.assistant = settings.default_assistant_model.clone();
-            p.models.dry_run = settings.default_dry_run_model.clone();
+            // Empty: the project follows the defaults in Settings until it chooses its own.
+            p.models.assistant = String::new();
+            p.models.dry_run = String::new();
             p.models.web_access = settings.web_access_default;
             let mut taken = HashSet::new();
             for preset in defaults.outputs.iter().filter_map(|id| platforms.preset(id)) {

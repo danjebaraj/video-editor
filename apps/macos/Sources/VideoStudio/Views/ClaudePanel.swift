@@ -6,6 +6,8 @@ import AppKit
 struct ModelPicker: View {
     var title: String
     @Binding var model: String
+    /// When set, the picker offers "Settings default": an empty model, which follows this one.
+    var settingsDefault: String?
     @ObservedObject private var app = AppState.shared
     @State private var customDraft = ""
     @State private var showCustom = false
@@ -17,6 +19,10 @@ struct ModelPicker: View {
     var body: some View {
         Field(title) {
             Menu {
+                if let settingsDefault {
+                    Button { model = "" } label: { check("Settings default (\(app.models.displayName(settingsDefault)))", model.isEmpty) }
+                    Divider()
+                }
                 ForEach(app.models.families) { family in
                     Menu(family.name) {
                         Button { model = family.alias } label: { check("Latest", model == family.alias) }
@@ -32,11 +38,11 @@ struct ModelPicker: View {
                     showCustom = true
                 }
             } label: {
-                Text(app.models.displayName(model)).lineLimit(1)
+                Text(shown).lineLimit(1)
             }
             .fixedSize()
             .accessibilityLabel(title)
-            .accessibilityValue(app.models.displayName(model))
+            .accessibilityValue(shown)
         }
         .popover(isPresented: $showCustom) {
             VStack(alignment: .leading, spacing: 8) {
@@ -52,6 +58,11 @@ struct ModelPicker: View {
             }
             .padding(14)
         }
+    }
+
+    private var shown: String {
+        if model.isEmpty, let settingsDefault { return "Settings default (\(app.models.displayName(settingsDefault)))" }
+        return app.models.displayName(model)
     }
 
     private func apply() {
@@ -227,7 +238,7 @@ struct ClaudePanel: View {
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityLabel("Claude session")
             Spacer()
-            Text(app.models.displayName(document.project.models.assistant)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(app.models.displayName(document.assistantModel)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 .help("The spec assistant model. Change it in the Project inspector.")
             Button { chat.newSession() } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.borderless).help("New session (⇧⌘N)").disabled(chat.isRunning)
@@ -365,13 +376,14 @@ struct MessageView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Button { showDetail.toggle() } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: message.failed ? "xmark.circle" : "wrench.and.screwdriver").font(.caption2)
-                        Text(markdown(message.text)).font(.caption).lineLimit(1)
+                        Image(systemName: message.failed ? "exclamationmark.circle" : "wrench.and.screwdriver").font(.caption2)
+                        Text(markdown(message.text)).font(.caption).lineLimit(message.failed ? 3 : 1).multilineTextAlignment(.leading)
                         if message.detail != nil { Image(systemName: showDetail ? "chevron.down" : "chevron.right").font(.system(size: 8)) }
                     }
-                    .foregroundStyle(message.failed ? Color.red : Color.secondary)
+                    .foregroundStyle(message.failed ? Color.orange : Color.secondary)
                 }
                 .buttonStyle(.plain)
+                .help(message.failed ? "This step didn't work. Claude sees the same message and usually tries again." : "")
                 if showDetail, let d = message.detail {
                     Text(d).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)

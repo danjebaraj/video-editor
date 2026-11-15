@@ -487,11 +487,11 @@
     "Models": {
       "properties": {
         "assistant": {
-          "description": "Spec assistant model: a CLI alias (`sonnet`) or a full model ID.",
+          "description": "Spec assistant model: a CLI alias (`sonnet`) or a full model ID. Empty follows the\ndefault in Settings.",
           "type": "string"
         },
         "dry_run": {
-          "description": "Dry run model; cheaper than production by default.",
+          "description": "Dry run model. Empty follows the default in Settings.",
           "type": "string"
         },
         "effort": {

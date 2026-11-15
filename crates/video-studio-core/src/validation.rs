@@ -1178,7 +1178,7 @@ fn check_budget(c: &mut Ctx, input: &ValidateInput, est: &Estimates, outputs: us
             );
         }
     }
-    let dry = &input.project.models.dry_run;
+    let dry = &input.project.models.dry_run_or(input.settings);
     if rc.dry_run_first && input.models.is_cheaper(dry, &rc.production_model) == Some(false) && outputs > 0 {
         c.add(
             "dry_run_model",
@@ -1257,7 +1257,7 @@ pub fn validate(input: &ValidateInput) -> Report {
         est.eleven_credits += (est.duration_s.unwrap_or(60.0) * pricing.music_credits_per_second).ceil() as u64;
     }
     let model = match input.kind {
-        RunKind::DryRun => p.models.dry_run.clone(),
+        RunKind::DryRun => p.models.dry_run_or(input.settings),
         RunKind::Production => input
             .run_config
             .map(|r| r.production_model.clone())

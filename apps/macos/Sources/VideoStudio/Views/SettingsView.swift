@@ -154,7 +154,8 @@ struct ClaudeSettings: View {
                     .onSubmit { app.detect(force: true) }
                 Text("Sign-in is handled by the CLI. The app never asks for or stores Anthropic credentials.").font(.caption).foregroundStyle(.secondary)
             }
-            Section("Default models for new projects") {
+            Section("Default models") {
+                Text("Projects use these unless they choose their own in Project › Models.").font(.caption).foregroundStyle(.secondary)
                 ModelPicker(title: "Spec assistant", model: $app.settings.default_assistant_model)
                 ModelPicker(title: "Dry run", model: $app.settings.default_dry_run_model)
                 ModelPicker(title: "Production", model: $app.settings.default_production_model)
