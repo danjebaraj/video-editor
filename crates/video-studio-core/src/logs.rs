@@ -73,7 +73,13 @@ pub fn export_logs(run_folder: &Utf8Path, dest: &Utf8Path, redact: bool) -> Resu
         return Err(Error::NotFound(format!("{run_folder} has no logs folder")));
     }
     let manifest: Value = paths::read_json(&run_folder.join("media-manifest.json")).unwrap_or(Value::Array(Vec::new()));
-    let rules = if redact { redactions(&manifest) } else { Vec::new() };
+    let mut rules = if redact { redactions(&manifest) } else { Vec::new() };
+    if redact {
+        // The home folder names the person; keep the shape of the path without it.
+        if let Some(home) = paths::home_dir().filter(|h| h.as_str().len() > 3) {
+            rules.push((home.to_string(), "<home>".to_string()));
+        }
+    }
     let mut buf = std::io::Cursor::new(Vec::new());
     let mut count = 0u64;
     {
@@ -94,13 +100,32 @@ pub fn export_logs(run_folder: &Utf8Path, dest: &Utf8Path, redact: bool) -> Resu
             count += 1;
             Ok(())
         };
+        add("README.md", export_readme(run_folder, redact).into_bytes())?;
+        add("issue-report.md", issue_report(run_folder).into_bytes())?;
         for f in collect::list_logs(run_folder) {
             add(&format!("logs/{}", f.name), std::fs::read(&f.path)?)?;
         }
-        for name in ["project.json5", "spec.md", "run.json", "outputs.json", "readiness.json"] {
+        for name in [
+            "project.json5",
+            "spec.md",
+            "run.json",
+            "outputs.json",
+            "readiness.json",
+            "summary.md",
+            "previous-summary.md",
+            "brand-preset.json",
+            "brand/default.json",
+        ] {
             let p = run_folder.join(name);
             if p.is_file() {
                 add(name, std::fs::read(&p)?)?;
+            }
+        }
+        // What Claude wrote and checked along the way: scratch copies of the edit, and the small
+        // text files of each review pack (QA results, reports). Frames and renders stay behind.
+        for p in extra_text_files(run_folder) {
+            if let Ok(rel) = p.strip_prefix(run_folder) {
+                add(&rel.as_str().replace('\\', "/"), std::fs::read(&p)?)?;
             }
         }
         let m = if redact { redact_manifest(&manifest) } else { manifest.clone() };
@@ -109,6 +134,83 @@ pub fn export_logs(run_folder: &Utf8Path, dest: &Utf8Path, redact: bool) -> Resu
     }
     paths::write_atomic(dest, buf.get_ref())?;
     Ok(count)
+}
+
+/// Scratch copies of the edit in the run folder and the text files of its review packs, each
+/// under 1 MB.
+fn extra_text_files(run_folder: &Utf8Path) -> Vec<Utf8PathBuf> {
+    const LIMIT: u64 = 1024 * 1024;
+    let small = |p: &Utf8Path| p.metadata().map(|m| m.is_file() && m.len() <= LIMIT).unwrap_or(false);
+    let mut out: Vec<Utf8PathBuf> = Vec::new();
+    if let Ok(entries) = run_folder.read_dir_utf8() {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension() == Some("json5") && p.file_name() != Some("project.json5") && small(p) {
+                out.push(p.to_owned());
+            }
+        }
+    }
+    for dir in ["work", "review"] {
+        for e in walkdir::WalkDir::new(run_folder.join(dir)).max_depth(4).into_iter().flatten() {
+            let Ok(p) = paths::utf8(e.path().to_path_buf()) else { continue };
+            if matches!(p.extension(), Some("json" | "md" | "txt" | "srt" | "vtt")) && small(&p) {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The first file in an export: what the run was and what each file holds, for whoever reads it.
+fn export_readme(run_folder: &Utf8Path, redacted: bool) -> String {
+    let run: Value = paths::read_json(&run_folder.join("logs/run.json")).unwrap_or(Value::Null);
+    let text = |v: &Value| v.as_str().unwrap_or("unknown").to_string();
+    let mut s = String::from("# Syncfusion Video Studio run logs\n\n");
+    s.push_str(&format!("- Run: {} ({}, {})\n", text(&run["run_id"]), text(&run["kind"]), text(&run["status"])));
+    s.push_str(&format!("- Started: {}\n", text(&run["started"])));
+    if let Some(m) = run["message"].as_str() {
+        s.push_str(&format!("- Message: {m}\n"));
+    }
+    s.push_str(&format!(
+        "- App core {}, cutline {}, Claude Code {}, model {}\n",
+        text(&run["app"]["core_version"]),
+        text(&run["cutline"]["version"]),
+        text(&run["claude"]["version"]),
+        text(&run["model_used"])
+    ));
+    s.push_str(&format!(
+        "- System: {} {} ({})\n",
+        text(&run["os"]["family"]),
+        run["os"]["version"].as_str().unwrap_or(""),
+        text(&run["os"]["arch"])
+    ));
+    s.push_str(&format!("- Exported: {}\n", timeutil::now_rfc3339()));
+    s.push_str(if redacted {
+        "- Media paths, media file names and the home folder are replaced with placeholders.\n"
+    } else {
+        "- Not redacted: paths and file names appear as they are on the computer.\n"
+    });
+    s.push_str(
+        "\n## Files\n\n\
+         | File | What it holds |\n|---|---|\n\
+         | `issue-report.md` | Errors, warnings, failed QA checks and blocked tool calls, with log excerpts |\n\
+         | `logs/run.json` | The run's settings, versions, outputs and final status |\n\
+         | `logs/prompt-system.md`, `logs/prompt.md` | The instructions Claude was given |\n\
+         | `logs/events.ndjson` | Stages, progress, messages, questions, costs, in order |\n\
+         | `logs/claude.jsonl` | Everything Claude Code said and did: messages, tool calls and their results |\n\
+         | `logs/permissions.ndjson` | Each tool call the app allowed or denied, and why |\n\
+         | `logs/helper.ndjson` | Each `video-studio` command Claude ran (voice, recording, stand-ins), its exit code and time |\n\
+         | `logs/cutline/` | One log per cutline command: arguments, output, exit code, time |\n\
+         | `logs/eleven.ndjson` | ElevenLabs requests and credits |\n\
+         | `logs/validation.json` | What validation reported before the run |\n\
+         | `logs/qa/` | cutline's QA result for each output |\n\
+         | `spec.md`, `project.json5`, `outputs.json`, `media-manifest.json` | What went in, and the edit Claude wrote |\n\
+         | `readiness.json`, `summary.md` | What Claude reported at the end |\n\
+         | `brand-preset.json`, `brand/default.json` | The brand as the app and cutline saw it |\n\
+         | `work/`, `review/`, `check-*.json5` | Text files from review packs and scratch copies of the edit |\n",
+    );
+    s
 }
 
 fn tail_lines(text: &str, n: usize) -> String {
@@ -400,6 +502,51 @@ mod tests {
             out.insert(f.name().to_string(), s);
         }
         out
+    }
+
+    #[test]
+    fn export_carries_what_is_needed_to_study_a_run() {
+        let d = tempfile::tempdir().unwrap();
+        let root = Utf8Path::from_path(d.path()).unwrap();
+        let run = run_fixture(root);
+        let w = |name: &str, text: &str| {
+            let p = run.join(name);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        w("logs/prompt-system.md", "You are producing a video.");
+        w("logs/prompt.md", "Produce the video.");
+        w("logs/helper.ndjson", "{\"argv\":[\"standin\",\"video\"],\"exit\":0}\n");
+        w("check-linkedin.json5", "{exports: []}");
+        w("work/review/qa.json", "{\"ok\":true}");
+        w("work/review/frames/0001.png", "not text");
+        w("brand/default.json", "{\"name\":\"Acme\"}");
+        let zip = root.join("all.zip");
+        export_logs(&run, &zip, false).unwrap();
+        let files = unzip_names(&zip);
+        for name in [
+            "README.md",
+            "issue-report.md",
+            "logs/prompt-system.md",
+            "logs/prompt.md",
+            "logs/helper.ndjson",
+            "summary.md",
+            "check-linkedin.json5",
+            "work/review/qa.json",
+            "brand/default.json",
+        ] {
+            assert!(files.contains(&name.to_string()), "{name} is missing from {files:?}");
+        }
+        assert!(!files.iter().any(|f| f.ends_with(".png")), "frames stay behind");
+        let sources: Vec<String> = collect::list_logs(&run).into_iter().map(|f| f.source).collect();
+        assert!(sources.contains(&"prompt".to_string()) && sources.contains(&"helper".to_string()));
+        let readme = unzip(&zip)["README.md"].clone();
+        assert!(readme.contains("- Run: run_1 (production, failed)") && readme.contains("Not redacted"), "{readme}");
+    }
+
+    fn unzip_names(path: &Utf8Path) -> Vec<String> {
+        let mut z = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
+        (0..z.len()).map(|i| z.by_index(i).unwrap().name().to_string()).collect()
     }
 
     #[test]

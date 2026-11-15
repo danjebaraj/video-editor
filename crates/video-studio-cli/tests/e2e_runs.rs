@@ -84,9 +84,20 @@ fn full_run_produces_outputs_events_and_complete_logs() {
         "logs/cutline/002-review.log",
         "logs/cutline/003-render.log",
         "logs/qa/youtube-shorts.qa.json",
+        "logs/prompt-system.md",
+        "logs/prompt.md",
+        "logs/helper.ndjson",
     ] {
         assert!(run.join(f).is_file(), "missing {f}");
     }
+    // the instructions Claude was given and the helper commands it ran are kept with the logs
+    assert!(std::fs::read_to_string(run.join("logs/prompt-system.md")).unwrap().contains("cutline"));
+    let helper = ndjson(&run.join("logs/helper.ndjson"));
+    assert!(
+        helper.iter().all(|h| h["argv"][0] == "eleven" && h["exit"].is_i64() && h["seconds"].is_number()),
+        "{helper:?}"
+    );
+    assert!(!std::fs::read_to_string(run.join("logs/helper.ndjson")).unwrap().contains("test-key"));
     let manifest: Value =
         serde_json::from_str(&std::fs::read_to_string(run.join("media-manifest.json")).unwrap()).unwrap();
     assert_eq!(manifest[0]["id"], "m-hero");

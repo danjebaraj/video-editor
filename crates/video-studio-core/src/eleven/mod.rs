@@ -98,6 +98,18 @@ impl HelperContext {
         Ok(ctx)
     }
 
+    /// Appends one line to `logs/helper.ndjson`: a `video-studio` command Claude ran in this run,
+    /// how it ended and how long it took. What it printed is in `claude.jsonl`.
+    pub fn log_helper(&self, argv: &[String], exit: i32, seconds: f64) {
+        let line = serde_json::json!({
+            "ts": crate::timeutil::now_rfc3339(),
+            "argv": argv,
+            "exit": exit,
+            "seconds": (seconds * 1000.0).round() / 1000.0,
+        });
+        crate::claude::broker::append_line(&self.logs_dir.join("helper.ndjson"), &line.to_string());
+    }
+
     pub fn audio_dir(&self) -> Utf8PathBuf {
         self.run_folder.join("audio")
     }

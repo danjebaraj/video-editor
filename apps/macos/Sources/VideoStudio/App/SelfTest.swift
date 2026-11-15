@@ -492,6 +492,32 @@ enum SelfTest {
         let zip = scratch.appendingPathComponent("logs.zip")
         let count: Int = (try? Core.run("logs.export", ["folder": folder.path, "destination": zip.path, "redact": true])) ?? 0
         check("logs export as a zip", count > 8 && fm.fileExists(atPath: zip.path), "\(count)")
+        let logNames = Set(((try? Core.run("run.results", ["folder": folder.path], as: RunResults.self))?.logs ?? []).map(\.name))
+        check("a run keeps the instructions Claude was given", logNames.contains("prompt-system.md") && logNames.contains("prompt.md"), "\(logNames.sorted())")
+        let unzip = Process()
+        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        unzip.arguments = ["-Z1", zip.path]
+        let pipe = Pipe()
+        unzip.standardOutput = pipe
+        try? unzip.run()
+        let listing = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        check("the export opens with an index and the issue report", listing.contains("README.md") && listing.contains("issue-report.md") && listing.contains("logs/prompt-system.md"), listing)
+
+        // MARK: Copy and Markdown preview
+        note("Copy and Markdown preview")
+        let blocks = MarkdownBlocks.parse("# Title\n\nA *short* paragraph\nin two lines.\n\n- one\n  - nested\n1. first\n\n```\ncode here\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n> quoted\n\n---\n")
+        check("Markdown previews as headings, lists, code, tables, quotes and rules", blocks == [
+            .heading(1, "Title"), .paragraph("A *short* paragraph in two lines."), .item(indent: 0, marker: "•", text: "one"), .item(indent: 1, marker: "•", text: "nested"),
+            .item(indent: 0, marker: "1.", text: "first"), .code("code here"), .table([["A", "B"], ["1", "2"]]), .quote("quoted"), .rule,
+        ], "\(blocks)")
+        let clipboardBefore = NSPasteboard.general.string(forType: .string)
+        Clipboard.copy("copied by the self test")
+        check("one click puts text on the clipboard", NSPasteboard.general.string(forType: .string) == "copied by the self test")
+        if let clipboardBefore { Clipboard.copy(clipboardBefore) }
+        if let report = doc.report {
+            let all = ValidationView.text(of: report)
+            check("validation results copy as text", report.issues.isEmpty || all.contains(report.issues[0].title))
+        }
 
         // MARK: Stop
         note("Stop")

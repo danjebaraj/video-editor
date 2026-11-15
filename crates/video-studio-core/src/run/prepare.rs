@@ -422,6 +422,10 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         platforms: &env.platforms,
     });
     let prompt = super::prompt::user_prompt(request.kind, request.revise.as_ref(), previous.as_ref());
+    // What Claude was told, kept with the logs: the instructions are half of any run that went
+    // wrong, and they change between versions of the app.
+    paths::write_atomic(&logs.join("prompt-system.md"), system.as_bytes())?;
+    paths::write_atomic(&logs.join("prompt.md"), prompt.as_bytes())?;
     let options = ClaudeOptions {
         executable: Utf8PathBuf::from(&env.claude.path),
         working_dir: folder.clone(),
@@ -478,7 +482,12 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         o.insert("app".into(), json!({"name": crate::APP_NAME, "core_version": CORE_VERSION}));
         o.insert("claude".into(), json!({"path": env.claude.path, "version": env.claude.version_text}));
         o.insert("cutline".into(), json!({"path": env.cutline.path, "version": env.cutline.version, "doctor": env.cutline_doctor.as_ref().map(doctor_brief)}));
-        o.insert("os".into(), json!({"family": std::env::consts::OS, "arch": std::env::consts::ARCH}));
+        o.insert(
+            "os".into(),
+            json!({"family": std::env::consts::OS, "arch": std::env::consts::ARCH, "version": crate::platform::os_version()}),
+        );
+        o.insert("tools".into(), json!(options.tools));
+        o.insert("effort".into(), json!(options.effort));
         o.insert("folder".into(), json!(folder));
         o.insert("started".into(), json!(record.started));
         o.insert("status".into(), json!("running"));
