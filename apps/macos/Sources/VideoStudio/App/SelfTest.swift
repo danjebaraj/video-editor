@@ -378,10 +378,11 @@ enum SelfTest {
         app.reloadBrands()
         let newer: Bool = (try? Core.run("brand.is_newer", ["brand": Core.arg(doc.project.brand!)])) ?? false
         check("a newer library copy is detected against the snapshot", newer)
+        check("the project offers Update to Latest (warning button and brand menu)", doc.brandUpdateAvailable)
         doc.banner = .brandUpdate(name: "Acme")
         await snapshot(wc2.window, "brand-banner")
         doc.updateBrandToLatest()
-        check("Update to Latest takes the library copy", doc.project.brand?.snapshot.rules.contains("end on the logo") == true && doc.banner == nil)
+        check("Update to Latest takes the library copy", doc.project.brand?.snapshot.rules.contains("end on the logo") == true && doc.banner == nil && !doc.brandUpdateAvailable)
         let exported = scratch.appendingPathComponent("acme.cutbrand")
         _ = try? Core.raw("brand.export", ["brand": Core.arg(acme), "destination": exported.path])
         check("a preset exports as .cutbrand with its assets", ((try? fm.attributesOfItem(atPath: exported.path))?[.size] as? Int ?? 0) > 200)

@@ -30,7 +30,8 @@ pub enum Severity {
 pub struct FixLink {
     /// `spec`, `media`, `brand`, `outputs`, `run_config`, `project` or `settings`.
     pub kind: String,
-    /// A media ID, output config ID, or settings pane.
+    /// A media ID, output config ID, or settings pane. `update` on a `brand` link offers the
+    /// library's newer copy of the preset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     /// 1-based spec line.
@@ -631,7 +632,7 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
         let (title, detail) = if waiting_in_library {
             (
                 "This project's copy of the brand preset has no voice",
-                "The preset in the library has a voice, but the project keeps the copy it was given earlier. Open Brand and choose Update to Latest to take it.",
+                "The preset in the library has a voice, but the project keeps the copy it was given earlier. Choose Update to Latest to take it.",
             )
         } else {
             (
@@ -646,7 +647,14 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
             "brand",
             title.into(),
             Some(detail.into()),
-            if p.brand.is_some() { FixLink::to("brand") } else { FixLink::target("settings", "elevenlabs") },
+            if waiting_in_library {
+                // the app turns this link into a one-click Update to Latest button
+                FixLink::target("brand", "update")
+            } else if p.brand.is_some() {
+                FixLink::to("brand")
+            } else {
+                FixLink::target("settings", "elevenlabs")
+            },
         );
     }
 
@@ -827,8 +835,8 @@ fn check_brand(c: &mut Ctx, input: &ValidateInput) {
             Severity::Info,
             "brand",
             format!("The brand preset \"{}\" has been updated in the library", s.name),
-            Some("The project uses its snapshot. Choose Update to Latest to take the changes.".into()),
-            FixLink::to("brand"),
+            Some("The project uses the copy it was given earlier. Choose Update to Latest to take the changes.".into()),
+            FixLink::target("brand", "update"),
         );
     }
 }
@@ -1318,6 +1326,7 @@ mod tests {
         let i = r.issues.iter().find(|i| i.rule == "voice_unset").expect("still a warning: the run uses the copy");
         assert_eq!(i.title, "This project's copy of the brand preset has no voice");
         assert!(i.detail.as_deref().unwrap().contains("Update to Latest"));
+        assert_eq!(i.fix.as_ref().unwrap().target.as_deref(), Some("update"));
         f.project.brand = Some(brand::BrandRef::of(&preset));
         assert!(!has(&f.run(), "voice_unset", Severity::Warning));
         f.project.brand = None;

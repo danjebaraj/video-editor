@@ -55,6 +55,10 @@ struct ProjectRootView: View {
                         if document.project.brand?.preset_id == b.id { Label(b.name, systemImage: "checkmark") } else { Text(b.name) }
                     }
                 }
+                if document.brandUpdateAvailable, let name = document.project.brand?.snapshot.name {
+                    Divider()
+                    Button("Update “\(name)” to Latest") { document.updateBrandToLatest() }
+                }
                 Divider()
                 Button("Edit Brand Presets…") { AppDelegate.shared.showLibrary(tab: .brands, select: document.project.brand?.preset_id) }
             } label: {
