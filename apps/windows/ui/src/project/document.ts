@@ -347,6 +347,16 @@ export class ProjectDocument {
     }
   }
 
+  /** True when the library holds a newer copy of the project's brand preset (the same test as
+   *  the core's `brand.is_newer`, on the list the app already has). */
+  get brandUpdateAvailable(): boolean {
+    const b = this.p.brand;
+    const latest = b && brands.value.find((x) => x.id === b.preset_id);
+    if (!b || !latest) return false;
+    const time = (s?: string) => (s ? Date.parse(s) || 0 : 0);
+    return JSON.stringify(latest) !== JSON.stringify(b.snapshot) && time(latest.modified) > time(b.snapshot.modified);
+  }
+
   updateBrandToLatest() {
     const b = brands.value.find((x) => x.id === this.p.brand?.preset_id);
     if (b) this.setBrand(b);

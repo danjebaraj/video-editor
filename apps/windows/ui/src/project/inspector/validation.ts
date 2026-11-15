@@ -3,6 +3,7 @@
 
 import { h, clear, button, icon, Icons, usd, bytes, duration, spinner, emptyState, checkbox } from '../../dom';
 import { effect } from '../../store';
+import { brands } from '../../app-state';
 import type { ProjectWindow } from '../window';
 import type { Issue } from '../../types';
 
@@ -25,7 +26,7 @@ const FIX_LABEL: Record<string, string> = {
 export function validationTab(w: ProjectWindow): HTMLElement {
   const root = h('div', { class: 'validation-tab' });
   const d = w.doc;
-  effect([d.report, d.validating, w.runs.live], () => {
+  effect([d.report, d.validating, w.runs.live, d.project, brands], () => {
     const r = d.report.value;
     const head = h(
       'div',
@@ -77,7 +78,10 @@ export function validationTab(w: ProjectWindow): HTMLElement {
         h(
           'div',
           { class: 'row small' },
-          fix ? h('button', { class: 'link', onclick: () => w.revealFix(fix) }, `${FIX_LABEL[fix.kind] ?? 'Fix'}${fix.kind === 'spec' && fix.line ? ` ${fix.line}` : ''} →`) : null,
+          fix?.kind === 'brand' && fix.target === 'update' && d.brandUpdateAvailable
+            ? // one click: the project takes the library's current copy of the preset
+              button('Update to Latest', () => d.updateBrandToLatest(), { title: "Replaces this project's copy of the brand preset with the one in the library" })
+            : fix ? h('button', { class: 'link', onclick: () => w.revealFix(fix) }, `${FIX_LABEL[fix.kind] ?? 'Fix'}${fix.kind === 'spec' && fix.line ? ` ${fix.line}` : ''} →`) : null,
           i.severity === 'warning' ? checkbox('Acknowledge', d.acknowledged.has(i.id), (v) => (v ? d.acknowledged.add(i.id) : d.acknowledged.delete(i.id))) : null,
         ),
       ),

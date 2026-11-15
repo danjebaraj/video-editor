@@ -147,7 +147,12 @@ export class ProjectWindow {
     const el = h('header', { class: 'toolbar', role: 'toolbar', 'aria-label': 'Project' });
     effect([d.project, d.runConfig, brands, this.runs.live, this.runs.preparing, d.validating, this.previewOn, environment], () => {
       const live = this.runs.live.value;
-      const brandSel = select([['', 'No brand'], ...brands.value.map((b) => [b.id, b.name] as [string, string]), ['__edit__', 'Edit Brand Presets…']], d.p.brand?.preset_id ?? '', (v) => {
+      const update: [string, string][] = d.brandUpdateAvailable && d.p.brand ? [['__update__', `Update “${d.p.brand.snapshot.name}” to Latest`]] : [];
+      const brandSel = select([['', 'No brand'], ...brands.value.map((b) => [b.id, b.name] as [string, string]), ...update, ['__edit__', 'Edit Brand Presets…']], d.p.brand?.preset_id ?? '', (v) => {
+        if (v === '__update__') {
+          d.updateBrandToLatest();
+          return;
+        }
         if (v === '__edit__') {
           brandSel.value = d.p.brand?.preset_id ?? '';
           request('shell.open_window', { kind: 'library', options: { tab: 'brands', brand: d.p.brand?.preset_id } });

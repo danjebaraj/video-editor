@@ -212,8 +212,9 @@ async function run(w: ProjectWindow, fx: Fixture) {
     await core('brand.save', { brand: acme });
     check(await core<boolean>('brand.is_newer', { brand: d.p.brand }), 'the library copy is newer');
     await reloadLibrary();
+    check(d.brandUpdateAvailable, 'the project offers Update to Latest (warning button and brand menu)');
     d.updateBrandToLatest();
-    check(d.p.brand?.snapshot.colors.primary === '#0066ff', 'Update to Latest');
+    check(d.p.brand?.snapshot.colors.primary === '#0066ff' && !d.brandUpdateAvailable, 'Update to Latest');
     await core('brand.export', { brand: acme, destination: `${fx.out}\\acme.cutbrand` });
     await request('shell.open_window', { kind: 'library', options: { tab: 'brands' } });
     await sleep(1500);
