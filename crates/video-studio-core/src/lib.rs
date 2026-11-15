@@ -9,6 +9,7 @@
 
 pub mod assistant;
 pub mod brand;
+pub mod capture;
 pub mod claude;
 pub mod eleven;
 pub mod error;

@@ -134,6 +134,7 @@ fn helper_context(w: &World, url: &str, cap: u64, mode: Mode) -> (Utf8PathBuf, U
         default_model: None,
         base_url: Some(url.to_string()),
         test_api_key: None,
+        capture: Some(Default::default()),
     };
     let file = w.root.join("context.json");
     std::fs::write(&file, serde_json::to_string(&ctx).unwrap()).unwrap();
@@ -302,6 +303,7 @@ fn hook_command_applies_the_policy_file() {
         write_files: Some(vec![work.join("spec.md")]),
         cutline: None,
         helper: None,
+        capture: false,
         path_dirs: vec![],
         web_access: false,
         log: Some(w.root.join("perm.ndjson")),

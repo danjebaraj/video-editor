@@ -354,3 +354,12 @@ The UI spec is implemented as three crates and a Swift app. Guide: `docs/video-s
   - *Left out:* notes storage, todos and due dates, tags, calendar, export, BoldCreate.
 - **Structured spec blocks are plain Markdown:** a scene is a heading that starts with "Scene" followed by `- **Field:** value` lines; voice-over is a fenced block tagged `vo`; a music brief is a fenced block tagged `music`; the call to action is a "Call to action" heading. Lint and validation read exactly these.
 - **Not verified here:** the Windows build of the new crates (no Windows toolchain on this machine; the platform code is behind `cfg`), and the `video-studio-macos` CI job (hosted runners may not have the macOS 26 SDK the app targets, so the job is allowed to fail).
+
+### App recording is done by Claude Code through the helper, not by cutline (2026-11-14)
+
+Specs often need footage that doesn't exist yet: a walkthrough of a desktop app or a web app. Production runs now make it themselves with `video-studio capture` (open, window, screenshot, click, type, key, menu, record). cutline's `record` only replays terminal tapes and stays out of this.
+
+- **Why the helper and not raw tools:** letting Claude run `osascript`, `open` and `screencapture` would be a general shell by another name. The helper exposes only the actions a recording needs, refuses apps that would hand over the machine unless the project lists them, and keeps files under `captures/`.
+- **Fixed-length recordings:** `screencapture -v` loses the file when interrupted (SIGINT and SIGTERM both tested), and only writes it when its `-V` timer ends. So a recording's length is chosen up front and the edit trims it.
+- **Built-in tools only:** Quartz events for input, System Events for windows and menus, `screencapture` and `sips` for pictures. Nothing to install.
+- **Default on:** the project switch `app_capture.enabled` defaults to true so a spec that asks for a recording just works; macOS still asks the user for Screen Recording and Accessibility.

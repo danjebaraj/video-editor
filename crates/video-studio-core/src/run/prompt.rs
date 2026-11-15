@@ -105,6 +105,17 @@ pub fn project_summary(project: &Project, outputs: &[ResolvedOutput], manifest: 
             ));
         }
     }
+    let cap = &project.app_capture;
+    s.push_str(&if !cap.enabled {
+        "App recording: off. Production runs can't drive or record apps; every shot must come from the attached media.\n".to_string()
+    } else if cap.apps.is_empty() {
+        "App recording: on. During production, Claude Code can open desktop apps and web apps on this computer, operate them and record the screen.\n".to_string()
+    } else {
+        format!(
+            "App recording: on, for these apps only: {}. During production, Claude Code can open them, operate them and record the screen.\n",
+            cap.apps.join(", ")
+        )
+    });
     s.push_str("Media (refer to items by ID, as `media:<id>`):\n");
     s.push_str(&manifest_summary(manifest));
     s
@@ -185,6 +196,43 @@ fn audio_section(input: &PromptInput) -> String {
     )
 }
 
+/// How a production run makes footage of an app that nobody recorded beforehand.
+fn capture_section(input: &PromptInput) -> String {
+    let cap = &input.project.app_capture;
+    if !cap.enabled {
+        return "App recording is turned off for this project: you cannot drive or record apps. If the spec asks for footage of an app that isn't in the media manifest, do not fake it: say exactly which shots are missing (in summary.md under Known issues, or under missing_media in a dry run) and that the user can turn on Project › App recording or attach recordings.\n".into();
+    }
+    let apps = if cap.apps.is_empty() {
+        "Any app may be driven except terminals, system settings, password managers and Finder.".to_string()
+    } else {
+        format!("Only these apps may be driven: {}.", cap.apps.join(", "))
+    };
+    if input.kind == RunKind::DryRun {
+        return format!(
+            "You (Claude Code) can drive desktop apps and web apps and record the screen during the production run; cutline does not do this, it only edits the recordings afterwards. Nothing is driven or recorded in a dry run. Where the spec asks for footage of an app that isn't attached, plan it: which app or web address, which steps, and which file under captures/ each recording will be. Reference those paths in project.json5 and list them in the readiness report's notes. `video-studio capture check` shows whether the computer allows recording and control; report a missing permission as a risk. {apps}\n"
+        );
+    }
+    format!(
+        "When the spec asks for footage of an app that isn't in the media manifest — a `- **Record:**` line, or a scene that describes steps in a desktop app or a web app — you make that footage yourself. You (Claude Code) open the app, operate it and record the screen with the app's helper. cutline does not do this; it only edits the recordings afterwards. Do this before writing project.json5.\n\
+         - `video-studio capture check` — whether screen recording and control of apps are allowed. Run it first.\n\
+         - `video-studio capture open \"<app name>\"` or `video-studio capture open <https://address> [--with \"<browser>\"]` — opens it and makes it the app being driven. Web apps are driven in the browser.\n\
+         - `video-studio capture window --size 1280x800 --at 80,60` — set the window's size and position before recording; 16:9 or 16:10 sizes edit best.\n\
+         - `video-studio capture screenshot --out <name>.png` — the app's front window. Open it with Read to see the app. One pixel is one point, so its pixel coordinates are what click, move, drag and scroll take.\n\
+         - `video-studio capture click <x> <y> [--double] [--right]`, `move <x> <y>`, `drag <x> <y> <to_x> <to_y>`, `scroll <x> <y> <lines>` (negative scrolls down).\n\
+         - `video-studio capture type \"<text>\"`, `video-studio capture key <combo>` (return, tab, escape, down, cmd+n, cmd+shift+z; `--times <n>`), `video-studio capture menu \"File\" \"New Project…\"` (exact names, including …).\n\
+         - `video-studio capture wait <seconds>` — let a page load or an animation finish (30 at most per call).\n\
+         - `video-studio capture record start --out <name>.mov --seconds <n> [--clicks]` — records the app's front window for exactly `n` seconds (600 at most) and returns at once. Perform the steps, then `video-studio capture record wait` until it reports the file. A recording can't be stopped early, only dropped with `record cancel`, so choose `n` to cover every step plus a few seconds and trim the clip in the edit.\n\
+         - Add `--app \"<name>\"` to act on another app, and `--screen` to use the whole display instead of the window.\n\
+         How to work:\n\
+         1. Rehearse without recording: open the app, size the window, take a screenshot, do a step, take another screenshot to see what happened. Never click from memory or from an old screenshot. Learn where things are and how long each step takes.\n\
+         2. Put the app back in its starting state, then record one scene (or one continuous action) per file: start the recording, perform the steps with short waits between them so a viewer can follow, and wait for the file.\n\
+         3. Check each recording: `cutline probe captures/<name>.mov`, and look at frames with `cutline review` once it is in the project. Record again if a step went wrong.\n\
+         4. Use the recordings in project.json5 by their paths under captures/, trimmed to the action. Recordings have no sound.\n\
+         {apps} Use realistic sample content, never real personal data, and leave the app as you found it where you can (close the documents you created). The user may be at the computer: the pointer and keyboard are shared while you drive, so keep each session short.\n\
+         If a capture command says a permission is missing, you cannot fix it: ask the user with AskUserQuestion to grant it (the command's message says where) and to answer when done, then try again. If it still can't be done, finish what you can and list the missing shots in summary.md under Known issues.\n"
+    )
+}
+
 /// The text appended to Claude Code's system prompt for a production or dry run.
 pub fn system_prompt(input: &PromptInput) -> String {
     let p = input.project;
@@ -209,11 +257,11 @@ pub fn system_prompt(input: &PromptInput) -> String {
         s.push_str(
             "This is a DRY RUN: a cheap rehearsal that finds problems before an expensive production run.\n\
              1. Read spec.md, media-manifest.json, brand.json and outputs.json.\n\
-             2. Write project.json5 for the whole edit, exactly as you would for production. Where generated audio is needed, reference the paths it would have under audio/ and note that in the report.\n\
+             2. Write project.json5 for the whole edit, exactly as you would for production. Where generated audio is needed, reference the paths it would have under audio/ and note that in the report. Do the same for app recordings (see Recording apps): reference the paths they would have under captures/.\n\
              3. Run `cutline validate --json project.json5` and fix what it reports. Then `cutline expand project.json5`, and `cutline cues project.json5` when the project uses cues.\n\
              4. Run `cutline review project.json5` when the edit can be reviewed without the missing audio (contact sheets, cut pairs and QA, no final render). Look at what it produced.\n\
              5. Write readiness.json (schema below) and finish with one short paragraph.\n\
-             You cannot render finals (`cutline render`) or generate audio in a dry run; those commands are refused.\n\n",
+             You cannot render finals (`cutline render`), generate audio, or drive and record apps in a dry run; those commands are refused.\n\n",
         );
         s.push_str(
             "readiness.json:\n```json\n{\n  \"ready\": true,\n  \"ambiguities\": [{\"text\": \"what is unclear\", \"spec_line\": 12, \"detail\": \"what you would need to know\"}],\n  \"assumptions\": [{\"text\": \"what you assumed in order to continue\", \"spec_line\": 20}],\n  \"missing_media\": [{\"text\": \"what is needed and not attached\", \"spec_line\": 31}],\n  \"risks\": [{\"text\": \"a choice that may disappoint, or a check that failed\", \"detail\": \"why\"}],\n  \"estimated_durations\": {\"<output folder name>\": 45.0},\n  \"notes\": \"anything else the user should know before paying for a full run\"\n}\n```\n\
@@ -222,7 +270,7 @@ pub fn system_prompt(input: &PromptInput) -> String {
     } else {
         s.push_str(&format!(
             "1. Read spec.md, media-manifest.json, brand.json and outputs.json.\n\
-             2. Generate the audio the spec needs (see Audio).\n\
+             2. Record the app footage the spec asks for and that isn't attached (see Recording apps), and generate the audio the spec needs (see Audio).\n\
              3. Write project.json5: one cutline project that produces every output through `exports`.\n\
              4. `cutline validate --json project.json5` until it is clean. Use `cutline expand` and `cutline cues` to check timing.\n\
              5. `cutline review project.json5`, then look at the review pack (contact sheet, cut pairs, captions, reframe sheet, QA summary) and fix what is wrong. Repeat until you would sign it off.\n\
@@ -279,11 +327,14 @@ pub fn system_prompt(input: &PromptInput) -> String {
     s.push_str("## Audio\n");
     s.push_str(&audio_section(input));
     s.push('\n');
+    s.push_str("## Recording apps\n");
+    s.push_str(&capture_section(input));
+    s.push('\n');
     s.push_str(
         "## Rules of this environment\n\
-         - Shell: only `cutline …` and `video-studio eleven …` run. One plain command per call: no pipes, redirections, `cd`, variables or other programs (`ls`, `cat`, `ffmpeg`, `python` are refused). Use the Read, Glob and Grep tools to look at files; they also show images, so open the review pack's PNGs with Read.\n\
+         - Shell: only `cutline …`, `video-studio eleven …` and `video-studio capture …` run. One plain command per call: no pipes, redirections, `cd`, variables or other programs (`ls`, `cat`, `ffmpeg`, `python`, `open`, `osascript`, `screencapture` are refused). Use the Read, Glob and Grep tools to look at files; they also show images, so open the review pack's PNGs with Read.\n\
          - Files: you may write only inside the run folder, and may read the run folder, the media listed in the manifest, the brand assets and cutline's own folder. Reference media in project.json5 by the absolute paths in media-manifest.json; never copy media.\n\
-         - Keep scratch files under work/. logs/ belongs to the app.\n",
+         - Keep scratch files under work/. Screenshots and recordings you make go to captures/. logs/ belongs to the app.\n",
     );
     s.push_str(if rc.web_access {
         "- Web search and fetch are available for this run.\n"
@@ -339,7 +390,8 @@ pub fn assistant_system_prompt(
         "You are helping the user write the spec for a video in Syncfusion Video Studio. The spec is the Markdown file spec.md in your working folder {folder}. When it is complete, another Claude session turns it into a finished video with cutline (a declarative video editor) and ElevenLabs (voice and music), so the spec must say clearly what the video shows and says.\n\
          - Edit only spec.md. The user reviews every change you make as a diff and accepts or rejects each hunk, so keep edits focused and leave the rest of the file exactly as it is.{extra}\n\
          - You can't run shell commands or edit other files; such attempts are denied automatically.{}\n\
-         - Media is referenced as `media:<id>`: write `![label](media:<id>)` to place an item. Use only IDs from the list below; never invent one. If the video needs footage that isn't attached, say so in the spec in words.\n\
+         - Media is referenced as `media:<id>`: write `![label](media:<id>)` to place an item. Use only IDs from the list below; never invent one. If the video needs footage that isn't attached and can't be recorded from an app (see the next point), say so in the spec in words.\n\
+         - Footage of an app does not have to exist yet. When \"App recording\" is on in the project summary below, the production run records it: Claude Code itself opens the desktop app or the web app (in a browser) on this computer, clicks, types and uses menus, and records the screen. cutline is not involved in that; it only edits the recordings. So never tell the user such footage can't be captured or must be recorded by hand. Write the scene so the run can perform it: a `- **Record:**` line naming the app (as shown in Applications) or the web address, followed by numbered steps that say exactly what to click, type or choose and what should be on screen at the end, plus any sample content to use. Keep each recorded scene to one continuous action. Recordings have no sound. If App recording is off, or limited to apps that don't include the one needed, tell the user they can change it under Project › App recording, or attach a recording instead. The first time a run drives apps, the computer asks the user to allow Screen Recording and Accessibility for Syncfusion Video Studio.\n\
          - Structured blocks, all plain Markdown: a scene is a heading that starts with \"Scene\" followed by `- **Duration:**`, `- **Media:**` and `- **On-screen text:**` lines; text to be voiced goes in a fenced block tagged `vo`; a music brief goes in a fenced block tagged `music` with `mood:`, `tempo:` and `source:` lines; the call to action goes under a \"Call to action\" heading.\n\
          - Voice-over is spoken at about 150 words per minute. Keep the script within the target length.\n\
          - When you need the user to choose or to tell you something only they know (audience, length, tone, call to action, must-include shots), use the AskUserQuestion tool rather than guessing.\n\
@@ -453,6 +505,10 @@ mod tests {
             "Before publishing",
             "GUIDE TEXT",
             "cutline render project.json5",
+            "## Recording apps",
+            "You (Claude Code) open the app, operate it and record the screen",
+            "video-studio capture record start --out <name>.mov --seconds <n>",
+            "Any app may be driven except terminals",
         ] {
             assert!(s.contains(needle), "missing {needle:?} in:\n{s}");
         }
@@ -503,6 +559,36 @@ mod tests {
                 && s.contains("no audio is generated")
         );
         assert!(s.contains("\"exports\""), "the same outputs as production");
+        assert!(s.contains("Nothing is driven or recorded in a dry run") && !s.contains("capture record start"));
+        // a project that turns app recording off, or limits it, says so in both kinds of run
+        let mut off = p.clone();
+        off.app_capture.enabled = false;
+        let mut only = p.clone();
+        only.app_capture.apps = vec!["Safari".into()];
+        for kind in [RunKind::DryRun, RunKind::Production] {
+            let prompt = |project: &Project| {
+                system_prompt(&PromptInput {
+                    project,
+                    run_config: &rc,
+                    kind,
+                    folder: "/r".into(),
+                    outputs: &outs,
+                    exports: &ex,
+                    manifest: &manifest,
+                    cutline_guide: "",
+                    eleven_available: true,
+                    default_voice: None,
+                    platforms: &platforms,
+                })
+            };
+            let s = prompt(&off);
+            assert!(
+                s.contains("App recording is turned off")
+                    && s.contains("App recording: off")
+                    && !s.contains("capture open")
+            );
+            assert!(prompt(&only).contains("Only these apps may be driven: Safari."));
+        }
         assert!(user_prompt(RunKind::DryRun, None, None).contains("readiness.json"));
         assert!(user_prompt(RunKind::Production, None, None).contains("summary.md"));
         let rev = user_prompt(
@@ -534,6 +620,9 @@ mod tests {
                 && s.contains("Brand preset: Acme")
         );
         assert!(!s.contains("Web search"));
+        assert!(
+            s.contains("App recording: on.") && s.contains("- **Record:**") && s.contains("cutline is not involved")
+        );
         assert!(assistant_system_prompt("/s".into(), "", &[], &[], true).contains("Web search"));
     }
 }

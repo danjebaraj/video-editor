@@ -295,7 +295,9 @@ pub fn scenes(spec: &str) -> Vec<Scene> {
                     let filled = !is_placeholder_value(value);
                     match key.as_str() {
                         "duration" | "length" => scene.duration_s = parse_duration(value),
-                        "media" | "shot" | "footage" | "b-roll" | "broll" => scene.has_media |= filled,
+                        "media" | "shot" | "footage" | "b-roll" | "broll" | "record" | "recording" | "capture" => {
+                            scene.has_media |= filled
+                        }
                         "vo" | "voice-over" | "voice over" | "voiceover" | "narration" => scene.has_narration |= filled,
                         "on-screen text" | "on screen text" | "text" | "caption" | "title" => scene.has_text |= filled,
                         _ => {}
@@ -540,8 +542,9 @@ pub fn template_for(id: &str, project_name: &str) -> String {
 }
 
 /// The structured blocks offered as slash commands: `(command, title, snippet)`.
-pub const SLASH_BLOCKS: [(&str, &str, &str); 5] = [
+pub const SLASH_BLOCKS: [(&str, &str, &str); 6] = [
     ("scene", "Scene", "## Scene: {{name}}\n- **Duration:** {{5 s}}\n- **Media:** {{media or shot description}}\n- **On-screen text:** {{text}}\n\n```vo\n{{voice-over for this scene}}\n```\n"),
+    ("record", "Recorded app scene", "## Scene: {{name}}\n- **Duration:** {{20 s}}\n- **Record:** {{app name, or the web address to open}}\n  1. {{first step to perform on screen}}\n  2. {{next step}}\n- **On-screen text:** {{text}}\n\n```vo\n{{voice-over for this scene}}\n```\n"),
     ("vo", "Voice-over", "```vo\n{{text to be voiced}}\n```\n"),
     ("shot", "Shot", "- **Shot:** {{![label](media:id)}} in {{0:00}}, out {{0:05}} — {{notes}}\n"),
     ("music", "Music brief", "```music\nmood: {{calm, confident}}\ntempo: {{slow | medium | fast}}\nlength: {{match the video}}\nsource: {{generated | media:id}}\n```\n"),

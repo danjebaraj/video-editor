@@ -43,9 +43,12 @@ pub struct Policy {
     /// The configured cutline binary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cutline: Option<Utf8PathBuf>,
-    /// The app's helper (`video-studio`); only its `eleven` subcommand is allowed.
+    /// The app's helper (`video-studio`); only its `eleven` and `capture` subcommands are allowed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub helper: Option<Utf8PathBuf>,
+    /// Whether the run may drive and record apps with `video-studio capture …`.
+    #[serde(default)]
+    pub capture: bool,
     /// PATH folders used to resolve bare command names, in order.
     #[serde(default)]
     pub path_dirs: Vec<Utf8PathBuf>,
@@ -184,7 +187,7 @@ impl Policy {
         }
         let segments = match split_commands(command) {
             Ok(s) => s,
-            Err(why) => return Decision::Deny(format!("{why} Run cutline (or `video-studio eleven`) as a plain command, one per call, with no pipes, redirections or substitutions.")),
+            Err(why) => return Decision::Deny(format!("{why} Run cutline (or `video-studio eleven` / `video-studio capture`) as a plain command, one per call, with no pipes, redirections or substitutions.")),
         };
         if segments.is_empty() {
             return Decision::Deny("The shell command is empty.".into());
@@ -215,7 +218,7 @@ impl Policy {
 
     fn check_command(&self, argv: &[String]) -> Result<(), String> {
         let arg0 = &argv[0];
-        let only = "Only cutline and `video-studio eleven` can be run here.";
+        let only = "Only cutline, `video-studio eleven` and `video-studio capture` can be run here.";
         let Some(exe) = self.resolve_executable(arg0) else {
             return Err(format!("`{arg0}` isn't an allowed command. {only}"));
         };
@@ -281,8 +284,11 @@ impl Policy {
     }
 
     fn check_helper(&self, args: &[String]) -> Result<(), String> {
+        if args.first().map(String::as_str) == Some("capture") {
+            return self.check_capture(&args[1..]);
+        }
         if args.first().map(String::as_str) != Some("eleven") {
-            return Err("Only the `eleven` subcommand of video-studio can be run here.".into());
+            return Err("Only the `eleven` and `capture` subcommands of video-studio can be run here.".into());
         }
         let sub = args.get(1).map(String::as_str).unwrap_or("");
         if !["tts", "music", "sfx", "scribe", "voices", "quote", "--help", "-h", "help"].contains(&sub) {
@@ -295,6 +301,39 @@ impl Policy {
                 "Audio isn't generated in a dry run. Use `video-studio eleven quote …` to estimate credits instead."
                     .into(),
             );
+        }
+        Ok(())
+    }
+}
+
+impl Policy {
+    /// `video-studio capture …`: driving and recording apps. The helper itself decides which
+    /// apps may be touched and where files go; here only the mode and the project's switch count.
+    fn check_capture(&self, args: &[String]) -> Result<(), String> {
+        let sub = args.first().map(String::as_str).unwrap_or("");
+        const SUBS: [&str; 13] = [
+            "check",
+            "open",
+            "window",
+            "screenshot",
+            "click",
+            "move",
+            "drag",
+            "scroll",
+            "type",
+            "key",
+            "menu",
+            "wait",
+            "record",
+        ];
+        if !SUBS.contains(&sub) && !["--help", "-h", "help"].contains(&sub) {
+            return Err(format!("`video-studio capture {sub}` isn't a command ({}).", SUBS.join(", ")));
+        }
+        if !self.capture {
+            return Err("App recording is turned off for this project, so apps can't be driven or recorded in this run. Use only the attached media, and say in summary.md which footage is missing. The user can turn it on under Project › App recording.".into());
+        }
+        if self.mode == Mode::DryRun && !["check", "--help", "-h", "help"].contains(&sub) {
+            return Err("Apps aren't driven or recorded in a dry run. Plan the recordings (which app, which steps, which file under captures/) and note them in the readiness report; `video-studio capture check` shows whether recording is allowed.".into());
         }
         Ok(())
     }
@@ -539,6 +578,7 @@ mod tests {
             write_files: if mode == Mode::Assistant { Some(vec![run.join("spec.md")]) } else { None },
             cutline: Some(cutline),
             helper: Some(helper),
+            capture: true,
             path_dirs: vec![run.join(".bin"), tools],
             web_access: false,
             log: None,
@@ -639,6 +679,35 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn capture_commands_follow_the_project_switch_and_the_mode() {
+        let mut f = fx(Mode::Production);
+        for ok in [
+            "video-studio capture check",
+            "video-studio capture open \"Syncfusion Video Studio\"",
+            "video-studio capture screenshot --out look.png",
+            "video-studio capture click 320 200 --double",
+            "video-studio capture scroll 400 300 -5",
+            "video-studio capture type 'Q4 launch'",
+            "video-studio capture menu \"File\" \"New Project…\"",
+            "video-studio capture record start --out scene1.mov --seconds 30 && video-studio capture wait 2",
+            "video-studio capture record wait",
+        ] {
+            assert_eq!(bash(&f.policy, ok), Decision::Allow, "{ok}");
+        }
+        assert!(denied(bash(&f.policy, "video-studio capture shell ls")).contains("isn't a command"));
+        // other ways to reach the same tools stay closed
+        for cmd in ["osascript -e 'tell app \"Finder\" to quit'", "screencapture -v x.mov", "open -a Terminal"] {
+            assert!(denied(bash(&f.policy, cmd)).contains("Only cutline"), "{cmd}");
+        }
+        f.policy.capture = false;
+        assert!(denied(bash(&f.policy, "video-studio capture open Safari")).contains("turned off"));
+        let dry = fx(Mode::DryRun);
+        assert_eq!(bash(&dry.policy, "video-studio capture check"), Decision::Allow);
+        assert!(denied(bash(&dry.policy, "video-studio capture record start --out a.mov")).contains("dry run"));
+        assert!(denied(bash(&dry.policy, "video-studio capture click 1 2")).contains("dry run"));
+    }
+
     #[test]
     fn dry_run_cannot_render_or_generate_audio() {
         let f = fx(Mode::DryRun);

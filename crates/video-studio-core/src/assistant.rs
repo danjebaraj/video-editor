@@ -170,6 +170,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         write_files: Some(vec![spec_path.clone()]),
         cutline: None,
         helper: None,
+        capture: false,
         path_dirs: Vec::new(),
         web_access: request.web_access,
         log: None,

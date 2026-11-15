@@ -304,6 +304,9 @@ enum SelfTest {
         ed.textView.undoManager?.undo()
         check("the accepted change is one undo step", ed.text == before)
         ed.textView.undoManager?.redo()
+        let recSummary: SummaryResult? = try? Core.run("project.summary", ["project": Core.arg(doc.project), "path": doc.fileURL.path, "run_config": doc.selectedRunConfig?.id])
+        check("the assistant is told that runs can drive and record apps", recSummary?.summary.contains("App recording: on") == true, recSummary?.summary ?? "")
+        check("macOS permissions for app recording can be read", (try? Core.run("capture.permissions", as: CapturePermissions.self))?.supported == true)
         check("the session is recorded in the project", doc.project.assistant_sessions.count == 1 && doc.project.assistant_sessions.first?.claude_session?.hasPrefix("fake-session") == true)
 
         // MARK: Relink on a moved project

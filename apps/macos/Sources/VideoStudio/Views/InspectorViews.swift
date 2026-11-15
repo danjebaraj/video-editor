@@ -103,6 +103,81 @@ struct InspectorSection<Content: View>: View {
 
 // MARK: Project (intent and models, spec §7 and §4.2)
 
+/// Project › App recording: whether production runs may drive and record apps, which apps, and
+/// whether macOS allows it.
+struct AppRecordingSection: View {
+    @ObservedObject var document: ProjectDocument
+    @State private var permissions: CapturePermissions?
+    @State private var appsDraft = ""
+
+    private var capture: AppCapture { document.project.app_capture }
+
+    private func refresh(request: Bool = false) {
+        permissions = try? Core.run("capture.permissions", ["request": request])
+    }
+
+    var body: some View {
+        InspectorSection(title: "App recording") {
+            Toggle("Let Claude drive and record apps", isOn: Binding(get: { capture.enabled }, set: { v in document.update { $0.app_capture.enabled = v } }))
+                .help("During a production run, Claude Code opens the desktop app or web app the spec names, operates it and records the screen. cutline only edits the recordings.")
+            Text("When a spec asks for footage of an app that isn't attached, the production run records it: Claude Code opens the app or web page, clicks and types, and records the window. Nothing is driven in a dry run.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if capture.enabled {
+                Field("Apps") {
+                    TextField("Apps", text: $appsDraft, prompt: Text("Any app"))
+                        .labelsHidden()
+                        .onSubmit(commitApps)
+                        .help("Names as shown in Applications, separated by commas, for example: Safari, Syncfusion Video Studio. Leave empty to allow any app except terminals, System Settings, password managers and Finder.")
+                        .accessibilityLabel("Apps a run may drive")
+                }
+                .onChange(of: appsDraft) { commitApps() }
+                if let p = permissions, p.supported {
+                    permissionRow("Screen recording", ok: p.screen_recording, pane: "Privacy_ScreenCapture")
+                    permissionRow("Accessibility (click and type)", ok: p.accessibility, pane: "Privacy_Accessibility")
+                    if !p.screen_recording || !p.accessibility {
+                        HStack {
+                            Button("Ask macOS…") { refresh(request: true) }
+                                .help("Shows the macOS permission prompts for Syncfusion Video Studio")
+                            Button("Re-check") { refresh() }
+                        }
+                        .controlSize(.small)
+                        Text("macOS asks once per app. After turning a permission on in System Settings, quit and reopen Syncfusion Video Studio.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                } else if permissions != nil {
+                    Label("Driving apps isn't available on this system yet.", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .onAppear {
+            appsDraft = capture.apps.joined(separator: ", ")
+            refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+
+    private func commitApps() {
+        let apps = appsDraft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if apps != capture.apps { document.update { $0.app_capture.apps = apps } }
+    }
+
+    private func permissionRow(_ title: String, ok: Bool, pane: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill").foregroundStyle(ok ? Color.green : Color.orange)
+            Text(title).font(.callout)
+            Spacer(minLength: 0)
+            if !ok {
+                Button("Open Settings…") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") { NSWorkspace.shared.open(url) }
+                }
+                .buttonStyle(.link).controlSize(.small)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(ok ? "allowed" : "not allowed")")
+    }
+}
+
 struct ProjectInspector: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject private var app = AppState.shared
@@ -161,6 +236,7 @@ struct ProjectInspector: View {
                     EffortPicker(effort: Binding(get: { document.project.models.effort }, set: { v in document.update { $0.models.effort = v } }))
                     Text("The production model is set on each run config, in Outputs.").font(.caption).foregroundStyle(.secondary)
                 }
+                AppRecordingSection(document: document)
                 InspectorSection(title: "Media search folders") {
                     if document.project.media_roots.isEmpty {
                         Text("Folders searched for media that has moved.").font(.caption).foregroundStyle(.secondary)

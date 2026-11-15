@@ -69,11 +69,13 @@ struct Project: Codable, Equatable {
     var assistant_sessions: [AssistantSessionRef] = []
     /// Extra folders (absolute paths) the spec assistant may read.
     var assistant_folders: [String] = []
+    /// Whether production runs may drive and record apps, and which ones.
+    var app_capture = AppCapture()
     /// Top-level keys this version doesn't know, kept so a newer app's additions survive.
     var extra: [String: JSONValue] = [:]
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case format, version, id, name, created, modified, intent, spec, media, media_roots, brand, models, output_configs, run_configs, runs, assistant_sessions, assistant_folders
+        case format, version, id, name, created, modified, intent, spec, media, media_roots, brand, models, output_configs, run_configs, runs, assistant_sessions, assistant_folders, app_capture
     }
 
     init() {}
@@ -97,6 +99,7 @@ struct Project: Codable, Equatable {
         runs = try c.decodeIfPresent([RunRecord].self, forKey: .runs) ?? []
         assistant_sessions = try c.decodeIfPresent([AssistantSessionRef].self, forKey: .assistant_sessions) ?? []
         assistant_folders = try c.decodeIfPresent([String].self, forKey: .assistant_folders) ?? []
+        app_capture = try c.decodeIfPresent(AppCapture.self, forKey: .app_capture) ?? AppCapture()
         let known = Set(CodingKeys.allCases.map(\.rawValue))
         let all = try decoder.container(keyedBy: AnyKey.self)
         for key in all.allKeys where !known.contains(key.stringValue) {
@@ -123,6 +126,7 @@ struct Project: Codable, Equatable {
         try c.encode(runs, forKey: .runs)
         try c.encode(assistant_sessions, forKey: .assistant_sessions)
         if !assistant_folders.isEmpty { try c.encode(assistant_folders, forKey: .assistant_folders) }
+        if app_capture != AppCapture() { try c.encode(app_capture, forKey: .app_capture) }
         var all = encoder.container(keyedBy: AnyKey.self)
         for (k, v) in extra { try all.encode(v, forKey: AnyKey(k)) }
     }
@@ -153,6 +157,27 @@ struct Intent: Codable, Equatable {
     var target_length_s: Double?
     var cta: String?
     var locales: [String] = []
+}
+
+/// App recording: Claude Code drives a desktop or web app during a production run and records it.
+struct AppCapture: Codable, Equatable {
+    var enabled = true
+    /// When not empty, the only apps a run may drive.
+    var apps: [String] = []
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        apps = try c.decodeIfPresent([String].self, forKey: .apps) ?? []
+    }
+}
+
+/// What macOS lets the app do for app recording.
+struct CapturePermissions: Codable, Equatable {
+    var screen_recording = false
+    var accessibility = false
+    var supported = false
 }
 
 struct ProjectModels: Codable, Equatable {

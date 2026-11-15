@@ -58,6 +58,7 @@ video-studio new       <project.cutproj> [--name …] [--intent …] [--media <f
 video-studio schema
 video-studio secret    set|status|test|delete        # the ElevenLabs key; `set` reads it from stdin
 video-studio eleven    tts|music|sfx|scribe|voices|quote …   # used by Claude inside a run
+video-studio capture   check|open|window|screenshot|click|move|drag|scroll|type|key|menu|wait|record …   # used by Claude inside a run
 ```
 
 - `run` validates, does the dry run when the run config asks for one, then the production run. Ctrl-C stops gracefully; a second Ctrl-C kills immediately.
@@ -84,9 +85,20 @@ Enforced by the permission broker, not only by the prompt:
 
 - Read: the run folder, the folders of media in the manifest, brand assets, cutline's home.
 - Write: the run folder only (not `logs/`, `run.json` or the manifest).
-- Shell: `cutline …` and `video-studio eleven …` only, one plain command at a time.
+- Shell: `cutline …`, `video-studio eleven …` and `video-studio capture …` only, one plain command at a time.
 - Web: only when the run config allows it.
-- In a dry run, no `cutline render` and no audio generation.
+- In a dry run, no `cutline render`, no audio generation and no driving or recording of apps.
+
+## Recording apps during a run
+
+When a spec asks for footage of an app that isn't attached (a `- **Record:**` line naming a desktop app or a web address, with the steps to perform), the production run makes it. Claude Code opens the app, looks at screenshots, clicks, types and uses menus, and records the window, all through `video-studio capture`. cutline is not involved; it only edits the recordings, which land in the run folder's `captures/`. The spec assistant knows this and writes such scenes instead of saying the footage can't be captured.
+
+- Project › App recording turns this on or off (on by default) and can limit it to named apps. With no list, any app can be driven except terminals, System Settings, password managers and Finder.
+- Every action is checked by the helper: it acts only on the app it was pointed at, opens only app names and http(s) addresses, and writes only under `captures/`. `osascript`, `screencapture` and `open` themselves stay blocked.
+- Recordings have a fixed length (`record start --seconds <n>`, then `record wait`), because the system recorder can't be stopped early without losing the file. The edit trims them.
+- macOS must allow **Screen & System Audio Recording** and **Accessibility** for Syncfusion Video Studio (or for the terminal, when using the CLI). The Project inspector shows both and links to the settings. The app is signed ad hoc, so a rebuilt app may need the permissions granted again.
+- The pointer and keyboard are shared with whoever is at the Mac while a run drives an app.
+- macOS only for now. The platform part is one trait (`capture::Backend`), with a fake for tests (`VIDEO_STUDIO_CAPTURE_FAKE`).
 
 ## Tests
 
