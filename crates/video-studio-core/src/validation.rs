@@ -749,6 +749,29 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
             FixLink::line(line),
         );
     }
+
+    check_outputs_asked_for(c, input, outputs);
+
+    // A watermark asked for in words, with a brand that has none to draw.
+    let has_watermark = p.brand.as_ref().is_some_and(|b| b.snapshot.for_cutline().watermark);
+    if !has_watermark {
+        let asked = p.spec.lines().enumerate().find(|(_, l)| {
+            let l = l.to_lowercase();
+            contains_word(&l, "watermark")
+                && !["no watermark", "without a watermark", "without watermark"].iter().any(|k| l.contains(k))
+        });
+        if let Some((n, _)) = asked {
+            c.add(
+                "watermark_missing",
+                None,
+                Severity::Info,
+                "brand",
+                "The spec mentions a watermark, but the brand preset has none".into(),
+                Some("The video will have no watermark. Add a logo and a watermark image to the brand preset, or take the watermark out of the spec.".into()),
+                FixLink::line(n + 1),
+            );
+        }
+    }
 }
 
 fn check_brand(c: &mut Ctx, input: &ValidateInput) {
@@ -859,6 +882,89 @@ fn check_brand(c: &mut Ctx, input: &ValidateInput) {
             FixLink::target("brand", "update"),
         );
     }
+}
+
+/// An output the spec asks for by name or shape that this run doesn't make. Only lines that are
+/// about delivery count (before the first scene, and saying or sitting under "outputs", "export",
+/// "deliver" and the like): a scene may show or talk about a platform without asking for it.
+fn check_outputs_asked_for(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput]) {
+    const DELIVERY: [&str; 9] =
+        ["output", "outputs", "export", "exports", "deliver", "delivery", "deliverables", "aspect", "formats"];
+    const SHAPES: [(&str, f64); 4] = [("9:16", 9.0 / 16.0), ("4:5", 0.8), ("1:1", 1.0), ("16:9", 16.0 / 9.0)];
+    if outputs.is_empty() {
+        return;
+    }
+    let spec = &input.project.spec;
+    let first_scene = spec::scenes(spec).first().map(|s| s.line).unwrap_or(usize::MAX);
+    let about_delivery = |l: &str| DELIVERY.iter().any(|k| contains_word(l, k));
+    let has_shape =
+        |ratio: f64| outputs.iter().any(|o| o.height > 0 && (o.width as f64 / o.height as f64 - ratio).abs() < 0.02);
+    let mut missing: Vec<String> = Vec::new();
+    let mut at_line = None;
+    let mut under_delivery = false;
+    for (n, raw) in spec.lines().enumerate() {
+        if n + 1 >= first_scene {
+            break;
+        }
+        let line = raw.to_lowercase();
+        if line.trim_start().starts_with('#') {
+            under_delivery = about_delivery(&line);
+            continue;
+        }
+        if !(under_delivery || about_delivery(&line)) {
+            continue;
+        }
+        let mut found: Vec<String> = Vec::new();
+        for preset in input.platforms.presets.iter().filter(|p| p.id != "custom") {
+            let name = preset.name.to_lowercase();
+            // "Shorts" and "Reels" are said on their own
+            let short = name.split_whitespace().nth(1).filter(|w| ["shorts", "reels"].contains(w));
+            let asked = contains_word(&line, &name) || short.is_some_and(|w| contains_word(&line, w));
+            if asked && !outputs.iter().any(|o| o.preset == preset.id) {
+                found.push(preset.name.clone());
+            }
+        }
+        if found.is_empty() {
+            // a shape with no platform named on the line
+            let names_output =
+                (0..outputs.len()).any(|i| output_names(&outputs[i]).iter().any(|x| contains_word(&line, x)));
+            if !names_output {
+                found.extend(
+                    SHAPES
+                        .iter()
+                        .filter(|(t, r)| contains_word(&line, t) && !has_shape(*r))
+                        .map(|(t, _)| format!("{t} output")),
+                );
+            }
+        }
+        for f in found {
+            if !missing.contains(&f) {
+                missing.push(f);
+                at_line.get_or_insert(n + 1);
+            }
+        }
+    }
+    let Some(line) = at_line else { return };
+    let has: Vec<&str> = outputs.iter().map(|o| o.name.as_str()).collect();
+    let title = if missing.len() == 1 {
+        let m = &missing[0];
+        let article = if m.starts_with(|ch: char| ch.is_ascii_digit()) { "a " } else { "" };
+        format!("The spec asks for {article}{m}, but this run doesn't make one")
+    } else {
+        format!("The spec asks for outputs this run doesn't make: {}", missing.join(", "))
+    };
+    c.add(
+        "output_not_in_run",
+        None,
+        Severity::Warning,
+        "outputs",
+        title,
+        Some(format!(
+            "This run makes {}. Add the output under Outputs and to this run configuration, or take it out of the spec.",
+            has.join(", ")
+        )),
+        FixLink::line(line),
+    );
 }
 
 /// What a spec might call an output: its name, its platform, and the first word of its name
@@ -1430,6 +1536,33 @@ mod tests {
         assert!(!noted(&mut f, "LinkedIn gets burned-in captions."), "about another output");
         assert!(!noted(&mut f, "LinkedIn gets burned-in captions, YouTube gets a caption file."));
         assert!(!noted(&mut f, "- Captions: burned-in captions for LinkedIn\n- YouTube 1080p: SRT"));
+
+        // an output the spec asks for that the run doesn't make (the run has YouTube 1080p and LinkedIn)
+        let asked = |f: &mut Fx, head: &str| {
+            f.project.spec = format!("# Launch\n\n{head}\n\n{}", GOOD_SPEC.trim_start_matches("# Launch\n\n"));
+            f.run().issues.into_iter().find(|i| i.rule == "output_not_in_run")
+        };
+        let i = asked(&mut f, "Outputs: YouTube 1080p (16:9), LinkedIn (4:5) and YouTube Shorts (9:16).")
+            .expect("Shorts is missing");
+        assert_eq!(i.severity, Severity::Warning);
+        assert_eq!(i.title, "The spec asks for YouTube Shorts, but this run doesn't make one");
+        assert!(i.detail.as_deref().unwrap().starts_with("This run makes YouTube 1080p, LinkedIn."), "{:?}", i.detail);
+        assert_eq!(i.fix.as_ref().and_then(|f| f.line), Some(3));
+        let i = asked(&mut f, "## Deliverables\n- Shorts\n- TikTok\n- LinkedIn").unwrap();
+        assert_eq!(i.title, "The spec asks for outputs this run doesn't make: YouTube Shorts, TikTok");
+        let i = asked(&mut f, "Export a 9:16 version too.").unwrap();
+        assert_eq!(i.title, "The spec asks for a 9:16 output, but this run doesn't make one");
+        assert!(asked(&mut f, "Outputs: YouTube 1080p and LinkedIn (4:5).").is_none());
+        assert!(asked(&mut f, "Audience: people who scroll TikTok and Shorts.").is_none(), "not about delivery");
+        f.project.spec = format!("{GOOD_SPEC}\nOutputs shown on screen: YouTube Shorts.\n");
+        assert!(!f.run().issues.iter().any(|i| i.rule == "output_not_in_run"), "inside the scenes");
+
+        // a watermark in words, with a brand that has none
+        f.project.spec = format!("{GOOD_SPEC}\nKeep captions clear of the bottom-right watermark.\n");
+        let i = f.run().issues.into_iter().find(|i| i.rule == "watermark_missing").expect("watermark note");
+        assert_eq!((i.severity, i.fix.as_ref().and_then(|f| f.line)), (Severity::Info, Some(18)));
+        f.project.spec = format!("{GOOD_SPEC}\nNo watermark.\n");
+        assert!(!f.run().issues.iter().any(|i| i.rule == "watermark_missing"));
     }
 
     #[test]

@@ -207,7 +207,7 @@ A dry run records and generates nothing, so its edit points at recordings and au
 - A voice-over stand-in made with `--text-file` is as long as its words take to speak and comes with a stand-in transcript (`audio/<name>.json`, word timings spread over that length). The asset gets `script` and `transcript` as it will in production, so captions and cue timing are checked too.
 - `cutline review` shows the first export only. For each other export with a different shape, the dry run reviews a scratch copy (`check-<output>.json5`) with only that export.
 
-Validation (before any run) also checks what a run would otherwise find the expensive way: no voice chosen for the voice-over, a spec that asks for app recordings while App recording is off or the computer doesn't allow it, voice-over that doesn't fit its scene, and burned-in captions asked for on an output that delivers them another way.
+Validation (before any run) also checks what a run would otherwise find the expensive way: no voice chosen for the voice-over, a spec that asks for app recordings while App recording is off or the computer doesn't allow it, voice-over that doesn't fit its scene, burned-in captions asked for on an output that delivers them another way, an output the spec asks for that the run doesn't make, and a watermark asked for when the brand preset has none.
 
 ## The brand in a run folder
 
