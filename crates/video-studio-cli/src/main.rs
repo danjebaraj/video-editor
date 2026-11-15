@@ -286,9 +286,14 @@ enum StandinCommand {
         /// The file the audio will have, such as audio/vo-scene-1.mp3
         #[arg(long)]
         out: String,
-        /// Planned length of the audio
+        /// Planned length of the audio. Optional for voice-over with --text-file: the default
+        /// is the time the words take to speak
         #[arg(long)]
-        seconds: f64,
+        seconds: Option<f64>,
+        /// For voice-over: the file holding the text to be voiced, inside the run folder. A
+        /// stand-in transcript is written next to the audio so captions and cues can be checked
+        #[arg(long)]
+        text_file: Option<Utf8PathBuf>,
     },
 }
 
@@ -302,7 +307,23 @@ fn cmd_standin(command: StandinCommand) -> i32 {
                 _ => Err(video_studio_core::Error::other(format!("--size isn't valid: `{size}`. Use WIDTHxHEIGHT."))),
             }
         }
-        StandinCommand::Audio { out, seconds } => standin::create(&ctx, Kind::Audio, &out, seconds),
+        StandinCommand::Audio { out, seconds, text_file: Some(file) } => {
+            let plain = file.components().all(|c| matches!(c, camino::Utf8Component::Normal(_)));
+            if !plain {
+                return Err(video_studio_core::Error::Denied(
+                    "--text-file must be a file inside the run folder, such as audio/vo-scene-1.txt.".into(),
+                ));
+            }
+            let text = std::fs::read_to_string(ctx.run_folder.join(&file))
+                .map_err(|e| video_studio_core::Error::other(format!("Couldn't read {file}: {e}")))?;
+            standin::create_voice(&ctx, &out, &text, seconds)
+        }
+        StandinCommand::Audio { out, seconds: Some(seconds), text_file: None } => {
+            standin::create(&ctx, Kind::Audio, &out, seconds)
+        }
+        StandinCommand::Audio { .. } => Err(video_studio_core::Error::other(
+            "Give --seconds, or --text-file for a voice-over (its length then comes from the words).",
+        )),
     });
     match result {
         Ok(text) => {

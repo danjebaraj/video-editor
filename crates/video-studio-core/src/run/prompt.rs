@@ -194,10 +194,13 @@ fn audio_section(input: &PromptInput) -> String {
         let voice = match input.default_voice {
             Some(v) => format!("The voice for this project is `{v}`; plan with it unless the spec names another."),
             None => {
-                "No voice is chosen for this project. Report that once under ambiguities; don't pick one.".to_string()
+                "No voice is chosen for this project. Report that once under ambiguities, and say where it is set: in the brand preset (App Library › Brands) or as the default voice in Settings › ElevenLabs. Don't pick one.".to_string()
             }
         };
-        return format!("Audio: this is a dry run, so no audio is generated. Where the edit needs voice-over, music or sound effects, plan each file under audio/, estimate credits with `video-studio eleven quote …`, and hold its place with `video-studio standin audio --out audio/<name>.mp3 --seconds <n>` (a quiet sound of that length). For voice-over, use the seconds its words take at about 150 words per minute. {voice}\n");
+        return format!("Audio: this is a dry run, so no audio is generated. Where the edit needs voice-over, music or sound effects, plan each file under audio/ and estimate credits with `video-studio eleven quote …`. Hold each file's place with a stand-in:\n\
+         - Voice-over: write the text to audio/<name>.txt (the `vo` block word for word), then `video-studio standin audio --out audio/<name>.mp3 --text-file audio/<name>.txt`. It writes a quiet sound as long as the words take to speak and a stand-in transcript, audio/<name>.json. Give the asset `role: \"voice\"`, `script: \"audio/<name>.txt\"` and `transcript: \"audio/<name>.json\"`, exactly as production will, and time the edit with cues where you would in production. Captions and cue timing can then be checked; real narration will differ by a second or so per passage, which is expected and not a risk.\n\
+         - Music and sound effects: `video-studio standin audio --out audio/<name>.mp3 --seconds <n>`.\n\
+         {voice}\n");
     }
     if !input.eleven_available {
         return "Audio: no ElevenLabs key is configured, so nothing can be generated. Use only audio files from the media manifest; if the spec needs narration or music that isn't attached, say so in summary.md under Known issues.\n".into();
@@ -283,9 +286,9 @@ pub fn system_prompt(input: &PromptInput) -> String {
              1. Read spec.md, media-manifest.json, outputs.json and, when there is a brand, brand-preset.json.\n\
              2. Write project.json5 for the whole edit, exactly as you would for production. For every file the production run will make itself — app recordings under captures/ (see Recording apps) and generated audio under audio/ (see Audio) — write a stand-in of the planned length with `video-studio standin …` and reference that path, so cutline can check the rest of the edit.\n\
              3. Run `cutline validate --json project.json5` and fix what it reports. Then `cutline expand project.json5`, and `cutline cues project.json5` when the project uses cues.\n\
-             4. Run `cutline review project.json5` and look at what it produced (contact sheets, cut pairs, captions, the reframe sheet for each output, QA; no final render). With the stand-ins in place this covers timing, text layout, captions against the watermark and each output's framing. It cannot cover what the real footage and audio look and sound like; don't report that as a risk, it is what a dry run is.\n\
+             4. Run `cutline review project.json5 --out work/review` and look at what it produced (contact sheets, cut pairs, caption frames, QA; no final render). The pack shows the first export only. For each other export with a different shape (a 4:5 or 9:16 cut next to a 16:9 one), write check-<output folder name>.json5 next to project.json5: the same project with only that export left in `exports`, and review it with `--out work/review-<output folder name>`. Those copies are scratch files for this check; project.json5 stays the edit. With the stand-ins in place this covers timing, text layout, captions against the watermark and other text, and each output's framing. It cannot cover what the real footage and audio look and sound like; don't report that as a risk, it is what a dry run is.\n\
              5. Write readiness.json (schema below) and finish with one short paragraph.\n\
-             You cannot render finals (`cutline render`), generate audio, or drive and record apps in a dry run; those commands are refused. Keep to the run folder itself: don't make a second copy of the project elsewhere to check it.\n\n",
+             You cannot render finals (`cutline render`), generate audio, or drive and record apps in a dry run; those commands are refused. Keep to the run folder itself: apart from the check-*.json5 files, don't make copies of the project to check it.\n\n",
         );
         s.push_str(
             "readiness.json:\n```json\n{\n  \"ready\": true,\n  \"ambiguities\": [{\"text\": \"what is unclear\", \"spec_line\": 12, \"detail\": \"what you would need to know\"}],\n  \"assumptions\": [{\"text\": \"what you assumed in order to continue\", \"spec_line\": 20}],\n  \"missing_media\": [{\"text\": \"what is needed and not attached\", \"spec_line\": 31}],\n  \"risks\": [{\"text\": \"a choice that may disappoint, or a check that failed\", \"detail\": \"why\"}],\n  \"planned\": [{\"text\": \"a file the production run will record or generate, with its length\", \"spec_line\": 43}],\n  \"estimated_durations\": {\"<output folder name>\": 45.0},\n  \"notes\": \"anything else the user should know before paying for a full run\"\n}\n```\n\
@@ -592,6 +595,8 @@ mod tests {
         );
         assert!(s.contains("\"planned\"") && s.contains("never under `missing_media`"));
         assert!(s.contains("No voice is chosen for this project"));
+        assert!(s.contains("--text-file audio/<name>.txt") && s.contains("transcript: \"audio/<name>.json\""));
+        assert!(s.contains("check-<output folder name>.json5") && s.contains("Settings › ElevenLabs"));
         // a project that turns app recording off, or limits it, says so in both kinds of run
         let mut off = p.clone();
         off.app_capture.enabled = false;
