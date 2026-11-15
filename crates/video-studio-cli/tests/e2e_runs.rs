@@ -314,9 +314,16 @@ fn dry_run_cannot_render_finals_or_call_the_helper() {
         {"tool": "Bash", "input": {"command": "video-studio eleven tts --voice v1 --text 'Hello there' --out vo.mp3"}},
         {"tool": "Bash", "input": {"command": "video-studio eleven music --prompt calm --length 10 --out m.mp3"}},
         {"tool": "Bash", "input": {"command": "video-studio eleven quote tts --text 'Hello there'"}},
-        {"tool": "Write", "input": {"file_path": "readiness.json", "content": json!({"ready": false, "ambiguities": [{"text": "Which logo opens the video?", "spec_line": 3}], "assumptions": ["Voice-over in English"], "missing_media": [], "risks": [{"text": "Scene 2 has no footage", "spec_line": 12}], "estimated_durations": {"youtube-shorts": 44.0}}).to_string()}},
+        {"tool": "Bash", "input": {"command": "video-studio standin video --out captures/scene-2.mov --seconds 22"}},
+        {"tool": "Bash", "input": {"command": "video-studio standin audio --out audio/vo-1.mp3 --seconds 9.5"}},
+        {"tool": "Bash", "input": {"command": "video-studio standin video --out ../escape.mov --seconds 5"}},
+        {"tool": "Write", "input": {"file_path": "readiness.json", "content": json!({"ready": false, "ambiguities": [{"text": "Which logo opens the video?", "spec_line": 3}], "assumptions": ["Voice-over in English"], "missing_media": [], "risks": [{"text": "Scene 2 has no footage", "spec_line": 12}], "planned": [{"text": "Recording captures/scene-2.mov, 22 s", "spec_line": 12}, "Voice-over audio/vo-1.mp3, 9.5 s"], "estimated_durations": {"youtube-shorts": 44.0}}).to_string()}},
     ]));
-    let o = w.run(&["validate", w.project.as_str(), "--config", "Social pack", "--dry-run", "--json"]);
+    let o = w
+        .command(&["validate", w.project.as_str(), "--config", "Social pack", "--dry-run", "--json"])
+        .env("VIDEO_STUDIO_STANDIN_FAKE", "1")
+        .output()
+        .unwrap();
     assert_eq!(o.status.code(), Some(1), "findings are warnings\nstdout:\n{}\nstderr:\n{}", stdout(&o), stderr(&o));
     let calls = w.tool_calls();
     let by = |needle: &str| calls.iter().filter(|c| c.3.contains(needle)).map(|c| c.1.as_str()).collect::<Vec<_>>();
@@ -337,6 +344,10 @@ fn dry_run_cannot_render_finals_or_call_the_helper() {
     assert!(
         !folder.join("outputs/youtube-shorts/youtube-shorts.mp4").exists() && !folder.join("audio/vo.mp3").exists()
     );
+    // Stand-ins hold the place of what the production run will record and generate.
+    assert_eq!(by("standin"), vec!["allow", "allow", "allow"]);
+    assert!(folder.join("captures/scene-2.mov").is_file() && folder.join("audio/vo-1.mp3").is_file());
+    assert!(!folder.parent().unwrap().join("escape.mov").exists(), "the helper keeps stand-ins in their folders");
     assert_eq!(p.runs[0].model.as_deref(), Some("haiku"), "the dry run uses the cheaper model");
     // Findings join the validation report as warnings linked to spec lines.
     let report: Value = serde_json::from_str(
@@ -344,7 +355,8 @@ fn dry_run_cannot_render_finals_or_call_the_helper() {
     )
     .unwrap();
     let dry: Vec<&Value> = report["issues"].as_array().unwrap().iter().filter(|i| i["category"] == "dry_run").collect();
-    assert_eq!(dry.len(), 3);
+    assert_eq!(dry.len(), 3, "what the run makes itself is not a finding");
+    assert_eq!(report["dry_run"]["planned"].as_array().map(Vec::len), Some(2));
     assert!(dry.iter().all(|i| i["severity"] == "warning"));
     assert_eq!(dry.iter().find(|i| i["rule"] == "dry_run_ambiguity").unwrap()["fix"]["line"], 3);
     assert_eq!(report["dry_run"]["estimated_durations"]["youtube-shorts"], 44.0);
@@ -705,6 +717,7 @@ fn a_run_drives_and_records_an_app_through_the_helper() {
             json!({"tool": "Bash", "input": {"command": "video-studio capture screenshot --out ../../escape.png"}}),
             json!({"tool": "Bash", "input": {"command": "osascript -e 'tell application \"Notes\" to quit'"}}),
             json!({"tool": "Bash", "input": {"command": "screencapture -v sneaky.mov"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio standin video --out captures/fake.mov --seconds 5"}}),
         ];
         steps.extend(extra.as_array().unwrap().iter().cloned());
         Value::Array(steps)
@@ -738,6 +751,8 @@ fn a_run_drives_and_records_an_app_through_the_helper() {
     assert_eq!(decision("capture open Terminal"), "allow");
     assert_eq!(decision("osascript"), "deny");
     assert_eq!(decision("screencapture -v"), "deny");
+    assert_eq!(decision("video-studio standin"), "deny", "a production run can't fake its footage");
+    assert!(!folder.join("captures/fake.mov").exists());
 
     // With app recording turned off in the project, the same commands are refused outright.
     w.edit_project(|p| p.app_capture.enabled = false);

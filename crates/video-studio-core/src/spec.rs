@@ -244,6 +244,12 @@ pub struct Scene {
     pub has_media: bool,
     pub has_narration: bool,
     pub has_text: bool,
+    /// Words of voice-over inside the scene.
+    #[serde(default)]
+    pub vo_words: usize,
+    /// True when the scene asks the run to record an app (a `Record:` line).
+    #[serde(default)]
+    pub records_app: bool,
 }
 
 /// Scene blocks: each "Scene …" heading with the lines up to the next heading of its level or higher.
@@ -273,6 +279,8 @@ pub fn scenes(spec: &str) -> Vec<Scene> {
                             has_media: false,
                             has_narration: false,
                             has_text: false,
+                            vo_words: 0,
+                            records_app: false,
                         },
                         level,
                     ));
@@ -285,7 +293,12 @@ pub fn scenes(spec: &str) -> Vec<Scene> {
             continue;
         }
         match l.fence {
-            Some("vo") => scene.has_narration |= !is_placeholder_value(l.text),
+            Some("vo") => {
+                if !is_placeholder_value(l.text) {
+                    scene.has_narration = true;
+                    scene.vo_words += word_count(l.text);
+                }
+            }
             Some(_) => {}
             None => {
                 if !media_refs(l.text).is_empty() {
@@ -295,10 +308,17 @@ pub fn scenes(spec: &str) -> Vec<Scene> {
                     let filled = !is_placeholder_value(value);
                     match key.as_str() {
                         "duration" | "length" => scene.duration_s = parse_duration(value),
-                        "media" | "shot" | "footage" | "b-roll" | "broll" | "record" | "recording" | "capture" => {
-                            scene.has_media |= filled
+                        "record" | "recording" | "capture" => {
+                            scene.has_media |= filled;
+                            scene.records_app |= filled;
                         }
-                        "vo" | "voice-over" | "voice over" | "voiceover" | "narration" => scene.has_narration |= filled,
+                        "media" | "shot" | "footage" | "b-roll" | "broll" => scene.has_media |= filled,
+                        "vo" | "voice-over" | "voice over" | "voiceover" | "narration" => {
+                            scene.has_narration |= filled;
+                            if filled {
+                                scene.vo_words += word_count(value);
+                            }
+                        }
                         "on-screen text" | "on screen text" | "text" | "caption" | "title" => scene.has_text |= filled,
                         _ => {}
                     }
@@ -422,7 +442,8 @@ pub fn placeholders(spec: &str) -> Vec<(usize, String)> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LintIssue {
-    /// `unresolved_media`, `scene_empty`, `vo_too_long`, `placeholder`, `scene_length`.
+    /// `unresolved_media`, `scene_empty`, `vo_too_long`, `scene_vo_too_long`, `scene_vo_tight`,
+    /// `placeholder`, `scene_length`.
     pub rule: String,
     /// `warning` or `info`.
     pub severity: String,
@@ -461,6 +482,30 @@ pub fn lint(spec: &str, ctx: &LintContext) -> Vec<LintIssue> {
                 line: s.line,
             });
         }
+    }
+    // Pacing scene by scene: a script that fits the whole video can still overrun one scene.
+    for s in &all_scenes {
+        let Some(d) = s.duration_s.filter(|d| *d > 0.0) else { continue };
+        if s.vo_words == 0 {
+            continue;
+        }
+        let need = speaking_seconds(s.vo_words, ctx.words_per_minute);
+        let (rule, severity, verdict) = if need > d {
+            ("scene_vo_too_long", "warning", "which doesn't fit. Trim the script or lengthen the scene")
+        } else if need > d * 0.9 {
+            ("scene_vo_tight", "info", "which leaves almost no room for pauses")
+        } else {
+            continue;
+        };
+        out.push(LintIssue {
+            rule: rule.into(),
+            severity: severity.into(),
+            message: format!(
+                "\"{}\" has {} words of voice-over, about {need:.0} s at {} words per minute, in a {d:.0} s scene, {verdict}",
+                s.title, s.vo_words, ctx.words_per_minute
+            ),
+            line: s.line,
+        });
     }
     let vos = voice_overs(spec);
     let words: usize = vos.iter().map(|v| word_count(&v.text)).sum();
@@ -632,6 +677,23 @@ mod tests {
         let inline = voice_overs("- **VO:** Hello there world\n- VO: {{later}}\n");
         assert_eq!(inline.len(), 1);
         assert!((speaking_seconds(300, 150) - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lint_checks_pacing_scene_by_scene() {
+        let ids = HashSet::new();
+        let words = |n: usize| vec!["word"; n].join(" ");
+        let spec = format!(
+            "## Scene 1\n- **Duration:** 9 s\n- **Record:** Safari\n```vo\n{}\n```\n## Scene 2\n- **Duration:** 10 s\n- **Media:** a chart\n```vo\n{}\n```\n## Scene 3\n- **Duration:** 20 s\n- **Media:** a chart\n- **Voice-over:** {}\n",
+            words(25), words(23), words(40)
+        );
+        let sc = scenes(&spec);
+        assert_eq!(sc.iter().map(|s| s.vo_words).collect::<Vec<_>>(), [25, 23, 40]);
+        assert_eq!(sc.iter().map(|s| s.records_app).collect::<Vec<_>>(), [true, false, false]);
+        let issues = lint(&spec, &LintContext { media_ids: &ids, target_length_s: None, words_per_minute: 150 });
+        let rules: Vec<(&str, usize)> = issues.iter().map(|i| (i.rule.as_str(), i.line)).collect();
+        assert_eq!(rules, [("scene_vo_too_long", 1), ("scene_vo_tight", 7)], "{issues:?}");
+        assert!(issues[0].message.contains("25 words") && issues[0].message.contains("9 s scene"));
     }
 
     #[test]

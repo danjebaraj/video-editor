@@ -59,6 +59,7 @@ video-studio schema
 video-studio secret    set|status|test|delete        # the ElevenLabs key; `set` reads it from stdin
 video-studio eleven    tts|music|sfx|scribe|voices|quote …   # used by Claude inside a run
 video-studio capture   check|open|window|screenshot|click|move|drag|scroll|type|key|menu|wait|record …   # used by Claude inside a run
+video-studio standin   video|audio --out <file> --seconds <n>   # dry runs only: holds the place of a file the run will make
 ```
 
 - `run` validates, does the dry run when the run config asks for one, then the production run. Ctrl-C stops gracefully; a second Ctrl-C kills immediately.
@@ -70,7 +71,7 @@ video-studio capture   check|open|window|screenshot|click|move|drag|scroll|type|
 
 ```
 <output folder>/<yyyy-mm-dd-hhmm>-<run config>/
-  run.json  spec.md  media-manifest.json  brand.json  outputs.json   # written by the app
+  run.json  spec.md  media-manifest.json  brand-preset.json  brand/default.json  outputs.json   # written by the app
   project.json5  summary.md  audio/  work/  review/                  # written by Claude
   outputs/<output>/<name>.mp4 (+ .srt .vtt .qa.json .poster.jpg)
   logs/run.json  events.ndjson  claude.jsonl  eleven.ndjson  validation.json
@@ -85,7 +86,7 @@ Enforced by the permission broker, not only by the prompt:
 
 - Read: the run folder, the folders of media in the manifest, brand assets, cutline's home.
 - Write: the run folder only (not `logs/`, `run.json` or the manifest).
-- Shell: `cutline …`, `video-studio eleven …` and `video-studio capture …` only, one plain command at a time.
+- Shell: `cutline …`, `video-studio eleven …`, `video-studio capture …` and (dry runs only) `video-studio standin …`, one plain command at a time.
 - Web: only when the run config allows it.
 - In a dry run, no `cutline render`, no audio generation and no driving or recording of apps.
 
@@ -115,3 +116,17 @@ Environment variables for tests and unusual setups: `VIDEO_STUDIO_HOME` (library
 ## Porting to Windows
 
 Everything outside `apps/macos` is platform-neutral: paths are `camino` UTF-8 paths, files are written with LF, and OS-specific code sits behind the traits in `platform.rs` (`Secrets`, `FileRefs`, `ProcessGroup`, `Notifications`, `RevealInFileManager`, `OpenWith`). A Windows shell built on `windows-rs` links `video-studio-ffi` (or the core directly), supplies `FileRefs`, and replaces the `taskkill` fallback in `ProcessGroup` with a Job Object.
+
+## What a dry run checks, and what it leaves to production
+
+A dry run records and generates nothing, so its edit points at recordings and audio that don't exist yet. To keep cutline from stopping at the missing files, Claude writes a stand-in for each one with `video-studio standin` (a flat-colored clip or a quiet sound of the planned length) and then runs `cutline validate`, `expand` and `review` on the whole edit. That covers timing, text layout, captions against the watermark and each output's framing.
+
+- Files the run makes itself are listed under `planned` in `readiness.json` and shown as "Made during the production run". They are not missing media and don't count against the report.
+- `missing_media` is only for media the user has to supply.
+- Zooms onto parts of an app can only be measured from the real recording, so the dry run leaves them out.
+
+Validation (before any run) also checks what a run would otherwise find the expensive way: no voice chosen for the voice-over, a spec that asks for app recordings while App recording is off or the computer doesn't allow it, voice-over that doesn't fit its scene, and burned-in captions asked for on an output that delivers them another way.
+
+## The brand in a run folder
+
+The app writes the brand twice: `brand-preset.json` is the preset as the user entered it (rules, voice, music mood, styles in their own words), for Claude to read. `brand/default.json` is the same brand in cutline's brand format, which cutline loads without being told. cutline draws text only with its bundled fonts (Anton, Bebas Neue, Inter, Poppins); another brand font becomes Inter and Claude is told to say so.

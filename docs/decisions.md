@@ -363,3 +363,12 @@ Specs often need footage that doesn't exist yet: a walkthrough of a desktop app 
 - **Fixed-length recordings:** `screencapture -v` loses the file when interrupted (SIGINT and SIGTERM both tested), and only writes it when its `-V` timer ends. So a recording's length is chosen up front and the edit trims it.
 - **Built-in tools only:** Quartz events for input, System Events for windows and menus, `screencapture` and `sips` for pictures. Nothing to install.
 - **Default on:** the project switch `app_capture.enabled` defaults to true so a spec that asks for a recording just works; macOS still asks the user for Screen Recording and Accessibility.
+
+### Dry runs use stand-in media, and the brand is translated for cutline (2026-11-14)
+
+Two dry runs of a spec with recorded scenes showed where the app, not the spec, was the problem.
+
+- **The brand file was in the wrong format.** The run folder's `brand.json` was the app's own preset, and Claude pointed cutline at it: fonts were objects where cutline wants names, the logo sat under `logos.primary`, and the watermark corner inside `watermark`, which cutline rejects. The app now writes `brand/default.json` in cutline's format (`BrandPreset::for_cutline`, tested by loading the result as `cutline_core::brand::Brand`) and keeps its own copy as `brand-preset.json`, a name that doesn't invite `brand: "brand.json"`.
+- **Stand-ins instead of a blind dry run.** With recordings and audio missing, `cutline validate` reported only missing files and the edit went unreviewed; Claude built a scratch copy with stills by hand to get further. `video-studio standin video|audio` now does that in the run folder. It is refused outside dry runs, so a production run can't pass off a placeholder as footage.
+- **`planned` is separate from `missing_media`.** Twelve of 28 findings in one report were files the production run makes itself. They are now listed without counting as findings.
+- **Checks moved ahead of the run:** missing voice, app recording permissions, per-scene voice-over pacing (over the scene length is a warning, over 90% of it a note), and burned-in captions against an output's caption setting (a note, since it matches on wording).
