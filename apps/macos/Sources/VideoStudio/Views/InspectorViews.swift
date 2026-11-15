@@ -113,9 +113,24 @@ enum CapturePermission: String {
     var title: String { self == .screenRecording ? "Screen Recording" : "Accessibility" }
     private var pane: String { self == .screenRecording ? "Privacy_ScreenCapture" : "Privacy_Accessibility" }
 
+    private var service: String { self == .screenRecording ? "ScreenCapture" : "Accessibility" }
+
     /// Registers the app with macOS for this permission, so it is already in the list, then
     /// opens that list in System Settings. All that is left for the user is the switch.
+    ///
+    /// This is only offered while macOS says the permission is missing. If the list already
+    /// shows the app switched on, that entry belongs to another build: macOS ties a grant to
+    /// the app's code signature, and an ad-hoc signed build gets a new one every time it is
+    /// built. Such an entry can't be reused, so it is cleared first and this build is added.
     func allow() {
+        if let id = Bundle.main.bundleIdentifier {
+            let reset = Process()
+            reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            reset.arguments = ["reset", service, id]
+            reset.standardOutput = FileHandle.nullDevice
+            reset.standardError = FileHandle.nullDevice
+            if (try? reset.run()) != nil { reset.waitUntilExit() }
+        }
         switch self {
         case .screenRecording:
             CGRequestScreenCaptureAccess()
@@ -158,7 +173,7 @@ struct AppRecordingSection: View {
                     permissionRow("Accessibility (click and type)", ok: p.accessibility, permission: .accessibility)
                     if !p.screen_recording || !p.accessibility {
                         Button("Re-check") { refresh() }.controlSize(.small)
-                        Text("Allow opens System Settings with Syncfusion Video Studio already in the list: turn its switch on. For screen recording, macOS then offers to quit and reopen the app.")
+                        Text("Allow opens System Settings with Syncfusion Video Studio in the list, switched off: turn its switch on. If it was already on, that was for an earlier build of the app, and Allow replaces it. For screen recording, macOS then offers to quit and reopen the app.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 } else if permissions != nil {
