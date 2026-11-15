@@ -351,7 +351,8 @@ enum RunActions {
         panel.allowedContentTypes = [.zip]
         panel.nameFieldStringValue = folder.lastPathComponent + "-logs.zip"
         panel.title = "Export Logs"
-        let redact = NSButton(checkboxWithTitle: "Redact media paths and file names", target: nil, action: nil)
+        panel.message = "A zip of this run's logs, the instructions Claude was given, the spec and the edit. No media is included."
+        let redact = NSButton(checkboxWithTitle: "Replace media paths, media file names and my home folder with placeholders", target: nil, action: nil)
         let box = NSStackView(views: [redact])
         box.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
         panel.accessoryView = box

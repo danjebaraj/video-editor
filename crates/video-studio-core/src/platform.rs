@@ -107,6 +107,20 @@ pub fn system_file_refs() -> Box<dyn FileRefs> {
     }
 }
 
+/// The operating system's version as it names itself ("15.2", "10.0.26100"), for the run log.
+pub fn os_version() -> Option<String> {
+    let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("sw_vers", &["-productVersion"])
+    } else if cfg!(windows) {
+        ("cmd", &["/C", "ver"])
+    } else {
+        ("uname", &["-r"])
+    };
+    let out = std::process::Command::new(program).args(args).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !text.is_empty()).then_some(text)
+}
+
 /// No durable references: resolution falls back to relative path, absolute path and search roots.
 pub struct NoFileRefs;
 

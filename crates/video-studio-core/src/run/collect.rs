@@ -206,6 +206,10 @@ pub fn log_source(name: &str) -> &'static str {
         "validation"
     } else if name == "summary.md" {
         "summary"
+    } else if name.starts_with("prompt") {
+        "prompt"
+    } else if name == "helper.ndjson" {
+        "helper"
     } else {
         "app"
     }
@@ -238,6 +242,9 @@ pub fn list_logs(folder: &Utf8Path) -> Vec<LogFile> {
             "eleven.ndjson",
             "validation.json",
             "permissions.ndjson",
+            "helper.ndjson",
+            "prompt.md",
+            "prompt-system.md",
         ]
         .iter()
         .position(|x| *x == n)

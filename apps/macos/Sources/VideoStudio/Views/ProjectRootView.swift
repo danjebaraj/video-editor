@@ -265,7 +265,8 @@ struct BannerView: View {
                 Button("Keep Snapshot") { document.banner = nil }
             case .error(let message):
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                Text(message).lineLimit(2)
+                Text(message).lineLimit(2).textSelection(.enabled)
+                CopyButton("Copy the message") { message }
                 Spacer()
                 Button("Dismiss") { document.banner = nil }
             }

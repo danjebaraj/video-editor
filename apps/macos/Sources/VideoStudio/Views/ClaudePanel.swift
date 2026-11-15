@@ -345,9 +345,12 @@ struct MessageView: View {
         switch message.role {
         case .user:
             VStack(alignment: .trailing, spacing: 3) {
-                Text(message.text).textSelection(.enabled)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+                HStack(alignment: .top, spacing: 4) {
+                    CopyButton("Copy your message") { message.text }
+                    Text(message.text).textSelection(.enabled)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+                }
                 if !message.attachments.isEmpty {
                     Text(message.attachments.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -355,7 +358,8 @@ struct MessageView: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             .accessibilityLabel("You: \(message.text)")
         case .assistant:
-            Text(markdown(message.text)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            MarkdownText(text: message.text)
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel("Claude: \(message.text)")
         case .tool:
             VStack(alignment: .leading, spacing: 3) {
@@ -370,7 +374,9 @@ struct MessageView: View {
                 .buttonStyle(.plain)
                 if showDetail, let d = message.detail {
                     Text(d).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                        .padding(6).frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .copyable("Copy the details") { d }
+                        .padding(6)
                         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5))
                 }
             }
@@ -378,7 +384,9 @@ struct MessageView: View {
             Text(message.text).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: message.role == .usage ? .trailing : .leading)
         case .error:
             Label(message.text, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.red).textSelection(.enabled)
-                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .copyable("Copy the error") { message.text }
+                .padding(8)
                 .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         case .question:
             QuestionCard(questions: message.questions ?? [], state: message.questionState ?? .cancelled, answers: message.answers ?? [:],

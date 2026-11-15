@@ -259,9 +259,9 @@ fn main() {
             cmd_logs(&run_folder, zip.as_deref(), redact, issue_report)
         }
         Command::New { project, name, intent, media } => cmd_new(&project, name.as_deref(), &intent, &media),
-        Command::Eleven { command } => eleven_cmd::run(command, secrets().as_ref()),
-        Command::Capture { target, command } => capture_cmd::run(command, &target),
-        Command::Standin { command } => cmd_standin(command),
+        Command::Eleven { command } => logged_helper(|| eleven_cmd::run(command, secrets().as_ref())),
+        Command::Capture { target, command } => logged_helper(|| capture_cmd::run(command, &target)),
+        Command::Standin { command } => logged_helper(|| cmd_standin(command)),
         Command::Secret { action, json } => cmd_secret(&action, json),
         Command::Schema => {
             println!("{}", serde_json::to_string_pretty(&project::json_schema()).unwrap_or_default());
@@ -302,6 +302,17 @@ enum StandinCommand {
         #[arg(long)]
         text_file: Option<Utf8PathBuf>,
     },
+}
+
+/// Runs a command Claude calls inside a run and notes it in the run's `logs/helper.ndjson`.
+fn logged_helper(run: impl FnOnce() -> i32) -> i32 {
+    let started = std::time::Instant::now();
+    let code = run();
+    if let Ok(ctx) = HelperContext::from_env() {
+        let argv: Vec<String> = std::env::args().skip(1).collect();
+        ctx.log_helper(&argv, code, started.elapsed().as_secs_f64());
+    }
+    code
 }
 
 fn cmd_standin(command: StandinCommand) -> i32 {

@@ -390,6 +390,11 @@ struct RunsList: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(r.folder, forType: .string)
                         }
+                        Divider()
+                        Button("Export Logs…") { RunActions.exportLogs(folder: URL(fileURLWithPath: r.folder)) }
+                            .disabled(!FileManager.default.fileExists(atPath: r.folder + "/logs"))
+                        Button("Copy Issue Report") { RunActions.copyIssueReport(folder: URL(fileURLWithPath: r.folder)) }
+                            .disabled(!FileManager.default.fileExists(atPath: r.folder + "/logs"))
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("\(r.kind == "dry_run" ? "Dry run" : "Run") \(r.run_config_name ?? ""), \(RunStatus.label(r.status)), \(Fmt.when(r.started))")

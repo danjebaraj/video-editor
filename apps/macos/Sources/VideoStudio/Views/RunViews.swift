@@ -62,6 +62,11 @@ struct ValidationView: View {
         }
     }
 
+    /// The report as plain text, one issue per paragraph.
+    static func text(of report: ValidationReport) -> String {
+        report.issues.map(IssueRow.text).joined(separator: "\n\n")
+    }
+
     private func summaryChip(_ n: String, _ label: String, _ color: Color) -> some View {
         HStack(spacing: 4) {
             Text(n).font(.callout.weight(.semibold).monospacedDigit()).foregroundStyle(color)
@@ -88,6 +93,7 @@ struct ValidationView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .topTrailing) { CopyButton("Copy all validation results") { Self.text(of: r) }.padding(6) }
     }
 }
 
@@ -101,6 +107,14 @@ struct IssueRow: View {
         case "warning": return "exclamationmark.triangle.fill"
         default: return "info.circle"
         }
+    }
+
+    /// "Warning: title", its detail, and the spec line when it has one.
+    static func text(of issue: ValidationIssue) -> String {
+        var s = "\(issue.severity.capitalized): \(issue.title)"
+        if let d = issue.detail, !d.isEmpty { s += "\n\(d)" }
+        if let line = issue.fix?.line { s += "\n(spec line \(line))" }
+        return s
     }
 
     private var fixLabel: String {
@@ -147,6 +161,7 @@ struct IssueRow: View {
                 }
             }
             Spacer(minLength: 0)
+            CopyButton("Copy this result") { Self.text(of: issue) }
         }
         .padding(8)
         .background(StatusColor.severity(issue.severity).opacity(issue.severity == "info" ? 0.05 : 0.08), in: RoundedRectangle(cornerRadius: 6))
@@ -246,7 +261,10 @@ struct DryRunFindingsSheet: View {
                     section("Risks", r?.risks ?? [])
                     section("Assumptions the dry run made", r?.assumptions ?? [])
                     section("Made during the production run (nothing to do)", r?.planned ?? [])
-                    if let n = r?.notes, !n.isEmpty { Text(n).font(.callout).foregroundStyle(.secondary) }
+                    if let n = r?.notes, !n.isEmpty {
+                        Text(n).font(.callout).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            .copyable("Copy the notes") { n }
+                    }
                 }
             }
             .frame(maxHeight: 300)
@@ -255,6 +273,7 @@ struct DryRunFindingsSheet: View {
                     if let r { document.assistant.askToFix(r) }
                     document.runs.dryRunFindings = nil
                 }
+                if let r { CopyButton("Copy every finding as Markdown", title: "Copy All") { Self.markdown(of: r) }.buttonStyle(.bordered) }
                 Spacer()
                 Button("Stop Here") { document.runs.dryRunFindings = nil }.keyboardShortcut(.cancelAction)
                 Button("Run Anyway") { document.runs.continueAfterDryRun() }
@@ -264,6 +283,28 @@ struct DryRunFindingsSheet: View {
         .frame(width: 540)
     }
 
+    /// The findings as Markdown, section by section, ready to paste into a note or an issue.
+    static func markdown(of r: ReadinessReport) -> String {
+        var out: [String] = []
+        let sections: [(String, [ReadinessFinding])] = [
+            ("Unclear in the spec", r.ambiguities), ("Missing media", r.missing_media), ("Risks", r.risks),
+            ("Assumptions the dry run made", r.assumptions), ("Made during the production run", r.planned ?? []),
+        ]
+        for (title, items) in sections where !items.isEmpty {
+            let lines = items.map { "- " + text(of: $0).replacingOccurrences(of: "\n", with: "\n  ") }
+            out.append("## \(title)\n\n" + lines.joined(separator: "\n"))
+        }
+        if let notes = r.notes, !notes.isEmpty { out.append("## Notes\n\n\(notes)") }
+        return out.joined(separator: "\n\n") + "\n"
+    }
+
+    static func text(of f: ReadinessFinding) -> String {
+        var s = f.text
+        if let line = f.spec_line { s += " (spec line \(line))" }
+        if let d = f.detail, !d.isEmpty { s += "\n\(d)" }
+        return s
+    }
+
     @ViewBuilder private func section(_ title: String, _ items: [ReadinessFinding]) -> some View {
         if !items.isEmpty {
             Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -271,10 +312,11 @@ struct DryRunFindingsSheet: View {
                 HStack(alignment: .top, spacing: 6) {
                     Text("•")
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(f.text).fixedSize(horizontal: false, vertical: true)
-                        if let d = f.detail { Text(d).font(.caption).foregroundStyle(.secondary) }
+                        Text(f.text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                        if let d = f.detail { Text(d).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
                     }
                     Spacer(minLength: 0)
+                    CopyButton("Copy this finding") { Self.text(of: f) }
                     if let line = f.spec_line {
                         Button("Line \(line)") {
                             document.runs.dryRunFindings = nil
@@ -426,12 +468,14 @@ struct TranscriptView: View {
             ForEach(items.suffix(200)) { item in
                 switch item.role {
                 case "assistant":
-                    Text(item.text).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    MarkdownText(text: item.text).font(.callout)
                 case "tool":
                     Label { Text(Self.inline(item.text)) } icon: { Image(systemName: item.text.hasSuffix("failed") ? "xmark.circle" : "wrench.and.screwdriver") }.font(.caption)
                         .foregroundStyle(item.text.hasSuffix("failed") ? Color.red : Color.secondary).lineLimit(2).help(item.detail ?? "")
                 case "error":
                     Label(item.text, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .copyable("Copy the error") { item.text }
                 default:
                     Text(item.text).font(.caption).foregroundStyle(.secondary)
                 }
@@ -469,7 +513,8 @@ struct RunResultView: View {
                 Text([record.run_config_name ?? "", Fmt.when(record.started), record.model.map { AppState.shared.models.displayName($0) } ?? "", record.cost_usd.map { Fmt.money($0) } ?? "",
                       (record.eleven_credits ?? 0) > 0 ? "\(record.eleven_credits!) credits" : ""].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary)
-                if let m = results?.run?["message"]?.stringValue { Text(m).font(.callout).foregroundStyle(record.status == "failed" ? Color.red : Color.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
+                if let m = results?.run?["message"]?.stringValue { Text(m).font(.callout).foregroundStyle(record.status == "failed" ? Color.red : Color.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).copyable("Copy the message") { m } }
                 Picker("", selection: $tab) { ForEach(RunResultTab.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().accessibilityLabel("Run detail")
             }
@@ -577,7 +622,11 @@ struct RunResultView: View {
                     }
                     Button("Show Findings in Validation") { document.addDryRunFindings(r) }
                 }
-                Text(results?.summary ?? "No summary was written.").font(.system(size: 12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                if let summary = results?.summary, !summary.isEmpty {
+                    MarkdownText(text: summary).font(.system(size: 12))
+                } else {
+                    Text("No summary was written.").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
             }
             .padding(12)
         }
@@ -669,6 +718,11 @@ struct LogsView: View {
     @State private var search = ""
     @State private var source = "all"
     @State private var severity = "all"
+    @State private var preview = true
+
+    /// A Markdown log (the summary, the prompts) can be read as a preview when no filter is on.
+    private var isMarkdown: Bool { selected?.hasSuffix(".md") == true }
+    private var showsPreview: Bool { isMarkdown && preview && search.isEmpty && severity == "all" }
 
     private var filtered: [LogFile] { logs.filter { source == "all" || $0.source == source } }
 
@@ -687,7 +741,7 @@ struct LogsView: View {
             HStack(spacing: 6) {
                 Picker("Source", selection: $source) {
                     Text("All sources").tag("all")
-                    ForEach(["app", "claude", "cutline", "eleven", "validation", "qa", "summary"], id: \.self) { Text($0.capitalized).tag($0) }
+                    ForEach(["app", "claude", "cutline", "eleven", "helper", "prompt", "validation", "qa", "summary"], id: \.self) { Text($0.capitalized).tag($0) }
                 }
                 .labelsHidden().fixedSize()
                 Picker("Severity", selection: $severity) {
@@ -702,6 +756,8 @@ struct LogsView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search this log", text: $search).textFieldStyle(.roundedBorder)
+                if isMarkdown { PreviewToggle(preview: $preview).disabled(!search.isEmpty || severity != "all") }
+                CopyButton("Copy what is shown of this log") { showsPreview ? text : visibleLines.joined(separator: "\n") }
             }
             .controlSize(.small).padding(.horizontal, 10).padding(.vertical, 6)
             List(filtered, selection: $selected) { f in
@@ -714,9 +770,15 @@ struct LogsView: View {
             }
             .frame(height: 130)
             Divider()
-            ScrollView([.vertical, .horizontal]) {
-                Text(visibleLines.joined(separator: "\n")).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .topLeading).padding(8)
+            Group {
+                if showsPreview {
+                    ScrollView { MarkdownBlocks(text: text).font(.system(size: 12)).padding(10) }
+                } else {
+                    ScrollView([.vertical, .horizontal]) {
+                        Text(visibleLines.joined(separator: "\n")).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .topLeading).padding(8)
+                    }
+                }
             }
             .background(Color(nsColor: .textBackgroundColor))
             Divider()
@@ -725,7 +787,7 @@ struct LogsView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([selected.map { URL(fileURLWithPath: $0) } ?? folder.appendingPathComponent("logs")])
                 }
                 Button("Export Logs…") { RunActions.exportLogs(folder: folder) }
-                    .help("A zip of the log folder and project.json5, with optional redaction of media paths")
+                    .help("A zip of everything needed to study this run: logs, the instructions Claude was given, the spec and the edit. Media paths can be redacted.")
                 Button("Copy Issue Report") { RunActions.copyIssueReport(folder: folder) }
                     .help("A Markdown summary of cutline errors, warnings and failed QA checks with log excerpts")
                 Spacer(minLength: 0)

@@ -82,8 +82,15 @@ video-studio standin   video --out <file> --seconds <n> | audio --out <file> (--
   project.json5  summary.md  audio/  work/  review/                  # written by Claude
   outputs/<output>/<name>.mp4 (+ .srt .vtt .qa.json .poster.jpg)
   logs/run.json  events.ndjson  claude.jsonl  eleven.ndjson  validation.json
-       permissions.ndjson  summary.md  cutline/<n>-<command>.log  qa/
+       permissions.ndjson  helper.ndjson  prompt-system.md  prompt.md
+       summary.md  cutline/<n>-<command>.log  qa/
 ```
+
+Each run keeps what is needed to study it afterwards: `prompt-system.md` and `prompt.md` are the instructions Claude was given, `claude.jsonl` is everything Claude Code said and did, `permissions.ndjson` is every tool call the app allowed or denied, `helper.ndjson` lists each `video-studio` command Claude ran with its exit code and time, and `run.json` records the versions of the app, cutline, Claude Code and the operating system.
+
+**Export Logs…** (the Run inspector's Logs tab, the Run menu, or a right-click in the Runs list; `video-studio logs <folder> --zip <file>` in a terminal) writes one zip to send to whoever maintains the app. It opens with `README.md`, an index of the run and of every file, and `issue-report.md`, and adds the spec, the edit, the brand files, Claude's summary and the text files of the review packs. No media is included. With redaction on, media paths, media file names and the home folder are replaced with placeholders.
+
+In the app, text the app shows (validation results, dry-run findings, Claude's messages, errors, logs) has a copy button beside it, and Markdown (Claude's messages, the run summary, Markdown logs) opens as a preview with a button to show the source.
 
 Logs are never removed automatically. `video-studio logs <folder> --issue-report` prints a Markdown summary of cutline errors, warnings, failed QA checks and blocked tool calls, ready for a cutline issue.
 

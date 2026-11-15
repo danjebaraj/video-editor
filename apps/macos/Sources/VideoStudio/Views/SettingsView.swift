@@ -258,6 +258,7 @@ struct CutlineSettings: View {
                     .frame(height: 170)
                     .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+                    .overlay(alignment: .topTrailing) { CopyButton("Copy the output") { output }.padding(4) }
                 }
             }
         }
