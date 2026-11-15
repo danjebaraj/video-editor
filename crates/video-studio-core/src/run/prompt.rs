@@ -320,13 +320,21 @@ pub fn assistant_system_prompt(
     folder: &Utf8Path,
     project_summary: &str,
     read_paths: &[String],
+    reference_paths: &[String],
     web_access: bool,
 ) -> String {
-    let extra = if read_paths.is_empty() {
+    let mut extra = if read_paths.is_empty() {
         String::new()
     } else {
         format!("\n- You may also read (never edit) the media folders: {}.", read_paths.join(", "))
     };
+    if !reference_paths.is_empty() {
+        extra.push_str(&format!(
+            "\n- The user shared these folders as reference material (briefs, docs, source files). Read them (never edit) with Read, Glob and Grep when they help: {}.",
+            reference_paths.join(", ")
+        ));
+    }
+    extra.push_str("\n- Any other folder is outside this session. If the user points you at one, tell them to add it with the Folders button under the message box, then try again.");
     format!(
         "You are helping the user write the spec for a video in Syncfusion Video Studio. The spec is the Markdown file spec.md in your working folder {folder}. When it is complete, another Claude session turns it into a finished video with cutline (a declarative video editor) and ElevenLabs (voice and music), so the spec must say clearly what the video shows and says.\n\
          - Edit only spec.md. The user reviews every change you make as a diff and accepts or rejects each hunk, so keep edits focused and leave the rest of the file exactly as it is.{extra}\n\
@@ -509,15 +517,23 @@ mod tests {
     fn assistant_prompt() {
         let (p, _, outs, _, manifest, _) = fixture();
         let summary = project_summary(&p, &outs, &manifest);
-        let s = assistant_system_prompt("/scratch/s1".into(), &summary, &["/footage".to_string()], false);
+        let s = assistant_system_prompt(
+            "/scratch/s1".into(),
+            &summary,
+            &["/footage".to_string()],
+            &["/briefs".to_string()],
+            false,
+        );
         assert!(
             s.contains("Edit only spec.md")
                 && s.contains("/footage")
+                && s.contains("reference material")
+                && s.contains("/briefs")
                 && s.contains("`m-hero`")
                 && s.contains("{{…}}")
                 && s.contains("Brand preset: Acme")
         );
         assert!(!s.contains("Web search"));
-        assert!(assistant_system_prompt("/s".into(), "", &[], true).contains("Web search"));
+        assert!(assistant_system_prompt("/s".into(), "", &[], &[], true).contains("Web search"));
     }
 }

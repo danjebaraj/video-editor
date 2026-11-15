@@ -361,6 +361,9 @@ fn assistant_edits_arrive_as_hunks_and_accepted_hunks_reach_the_spec() {
     let w = World::new();
     let session = w.root.join("assistant/s1");
     let spec_path = session.join("spec.md");
+    let docs = w.root.join("docs-shared");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("brief.md"), "The brief.").unwrap();
     w.set_script(json!([
         {"say": "I'll tighten the hook and add a shot."},
         {"tool": "Read", "input": {"file_path": spec_path.to_string()}},
@@ -372,6 +375,8 @@ fn assistant_edits_arrive_as_hunks_and_accepted_hunks_reach_the_spec() {
         {"tool": "Bash", "input": {"command": "rm -rf ~"}},
         {"tool": "Read", "input": {"file_path": w.root.join("footage/hero.mov").to_string()}},
         {"tool": "Read", "input": {"file_path": w.secrets.to_string()}},
+        {"tool": "Read", "input": {"file_path": docs.join("brief.md").to_string()}},
+        {"tool": "Write", "input": {"file_path": docs.join("scribble.md").to_string(), "content": "x"}},
         {"result": {"text": "Done.", "cost": 0.02}}
     ]));
     let mut extra_env = BTreeMap::new();
@@ -386,6 +391,7 @@ fn assistant_edits_arrive_as_hunks_and_accepted_hunks_reach_the_spec() {
         web_access: false,
         resume: Some("earlier-session".into()),
         read_paths: vec![w.root.join("footage")],
+        reference_paths: vec![docs.clone()],
         project_summary: "Project: Launch teaser".into(),
         helper: Some(VIDEO_STUDIO.into()),
         extra_env,
@@ -445,6 +451,10 @@ fn assistant_edits_arrive_as_hunks_and_accepted_hunks_reach_the_spec() {
     assert_eq!(verdict("rm -rf"), "deny");
     assert_eq!(verdict("hero.mov"), "allow", "media folders are readable");
     assert_eq!(verdict("secrets.json"), "deny");
+    assert_eq!(verdict("brief.md"), "allow", "folders the user shared are readable");
+    assert_eq!(verdict("scribble.md"), "deny", "shared folders are read-only");
+    assert!(!docs.join("scribble.md").exists());
+    assert!(args.windows(2).any(|p| p[0] == "--add-dir" && p[1].ends_with("docs-shared")), "{args:?}");
     let ask = trace.iter().find(|t| t["tool"] == "AskUserQuestion").unwrap();
     assert_eq!(ask["input"]["answers"]["How long should the hook be?"], "10 s", "the answer reaches Claude");
     assert!(!session.join("notes.md").exists());
@@ -489,6 +499,7 @@ fn assistant_can_be_stopped() {
         web_access: false,
         resume: None,
         read_paths: vec![],
+        reference_paths: vec![],
         project_summary: String::new(),
         helper: None,
         extra_env,

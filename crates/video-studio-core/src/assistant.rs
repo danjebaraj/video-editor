@@ -38,6 +38,9 @@ pub struct AssistantRequest {
     /// Media folders (or files) Claude may read.
     #[serde(default)]
     pub read_paths: Vec<Utf8PathBuf>,
+    /// Extra folders the user shared with the assistant (briefs, docs, source material). Read-only.
+    #[serde(default)]
+    pub reference_paths: Vec<Utf8PathBuf>,
     /// Intent, brand, outputs and the media list (see `run::prompt::project_summary`).
     #[serde(default)]
     pub project_summary: String,
@@ -154,8 +157,11 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     let spec_path = spec_file(&dir);
     paths::write_atomic(&spec_path, request.spec.as_bytes())?;
     let read_paths: Vec<Utf8PathBuf> = request.read_paths.iter().filter(|p| p.exists()).cloned().collect();
+    let reference_paths: Vec<Utf8PathBuf> =
+        request.reference_paths.iter().filter(|p| p.is_absolute() && p.exists()).cloned().collect();
     // Claude Code keeps large tool results in its own folder for this working directory.
     let mut policy_reads = read_paths.clone();
+    policy_reads.extend(reference_paths.iter().cloned());
     policy_reads.extend(crate::claude::locate::claude_project_dir(&dir));
     let policy = Policy {
         mode: Mode::Assistant,
@@ -198,11 +204,13 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
             &dir,
             &request.project_summary,
             &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+            &reference_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
             request.web_access,
         ),
         settings,
         add_dirs: read_paths
             .iter()
+            .chain(reference_paths.iter())
             .map(|p| containing_dir(p))
             .collect::<std::collections::HashSet<_>>()
             .into_iter()

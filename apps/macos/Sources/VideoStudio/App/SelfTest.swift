@@ -267,6 +267,9 @@ enum SelfTest {
         // MARK: Claude edit review
         note("Claude assistant")
         let specPath = app.libraryURL.appendingPathComponent("assistant/\(doc.project.id)/\(doc.assistant.current?.id ?? "")/spec.md").path
+        let sharedDir = scratch.appendingPathComponent("shared-docs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        try? "The brief.".write(to: sharedDir.appendingPathComponent("brief.md"), atomically: true, encoding: .utf8)
         doc.assistant.extraEnv = ["FAKE_CLAUDE_SCRIPT": writeScript("assistant.json", [
             ["say": "I'll shorten the hook and sharpen the call to action."],
             ["tool": "AskUserQuestion", "input": ["questions": [["question": "How long should the hook be?", "header": "Hook", "multiSelect": false, "options": [["label": "3 s", "description": "Punchy"], ["label": "5 s"]]]]]],
@@ -274,8 +277,10 @@ enum SelfTest {
             ["tool": "Edit", "input": ["file_path": specPath, "old_string": "Start a free trial.", "new_string": "Start a free trial at example.com."]],
             ["tool": "Write", "input": ["file_path": projectURL.path, "content": "{}"]],
             ["tool": "Bash", "input": ["command": "rm -rf ~"]],
+            ["tool": "Read", "input": ["file_path": sharedDir.appendingPathComponent("brief.md").path]],
             ["result": ["text": "Done.", "cost": 0.03]],
         ]), "FAKE_CLAUDE_TRACE": scratch.appendingPathComponent("assistant-trace.ndjson").path]
+        doc.update { $0.assistant_folders = [sharedDir.path] }
         let before = ed.text
         check("a message starts an assistant turn", doc.assistant.send("Tighten the hook."))
         await wait("question card") { doc.assistant.current?.messages.contains { $0.role == .question && $0.questionState == .pending } == true }
@@ -288,6 +293,7 @@ enum SelfTest {
         let trace = (try? String(contentsOf: scratch.appendingPathComponent("assistant-trace.ndjson"), encoding: .utf8)) ?? ""
         check("the answer reaches Claude", trace.contains("\"How long should the hook be?\":\"3 s\""))
         check("writes outside spec.md and shell commands are denied", trace.components(separatedBy: "\n").filter { $0.contains("\"decision\":\"deny\"") }.count == 2, trace)
+        check("a folder shared with Claude is readable and saved in the project", trace.components(separatedBy: "\n").contains { $0.contains("brief.md") && $0.contains("\"decision\":\"allow\"") } && trace.contains("shared-docs") && (try? String(contentsOf: projectURL, encoding: .utf8))?.contains("assistant_folders") == true, trace)
         check("the project file is untouched by Claude", (try? String(contentsOf: projectURL, encoding: .utf8))?.contains("\"format\"") == true)
         check("Claude's edit waits for review as hunks", doc.review.pending?.hunks.count == 2, "\(String(describing: doc.review.pending?.hunks.count))")
         check("the editor keeps the old text during review", ed.text == before && !ed.textView.isEditable)
