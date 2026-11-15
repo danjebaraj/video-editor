@@ -128,6 +128,11 @@ struct IssueRow: View {
                         Button("Allow \(permission.title)…") { permission.allow() }
                             .controlSize(.small)
                             .help("Opens System Settings with Syncfusion Video Studio in the \(permission.title) list. Turn its switch on there.")
+                    } else if issue.fix?.kind == "brand", issue.fix?.target == "update", document.brandUpdateAvailable {
+                        // One click: the project takes the library's current copy of the preset.
+                        Button("Update to Latest") { document.updateBrandToLatest() }
+                            .controlSize(.small)
+                            .help("Replaces this project's copy of the brand preset with the one in the library")
                     } else if issue.fix != nil {
                         Button(fixLabel + " →") { document.reveal(issue.fix) }.buttonStyle(.link).font(.caption)
                             .accessibilityLabel("Go to \(fixLabel)")

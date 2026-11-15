@@ -346,6 +346,13 @@ final class ProjectDocument: ObservableObject, Identifiable {
         if case .brandUpdate = banner { banner = nil }
     }
 
+    /// True when the library holds a newer copy of the project's brand preset (the same test as
+    /// the core's `brand.is_newer`, on the list the app already has).
+    var brandUpdateAvailable: Bool {
+        guard let b = project.brand, let latest = AppState.shared.brands.first(where: { $0.id == b.preset_id }) else { return false }
+        return latest != b.snapshot && latest.modified > b.snapshot.modified
+    }
+
     func updateBrandToLatest() {
         guard let id = project.brand?.preset_id, let latest = AppState.shared.brands.first(where: { $0.id == id }) else { banner = nil; return }
         setBrand(latest)
