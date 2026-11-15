@@ -484,31 +484,44 @@ pub fn lint(spec: &str, ctx: &LintContext) -> Vec<LintIssue> {
         }
     }
     // Pacing scene by scene: a script that fits the whole video can still overrun one scene.
+    // Scenes that fit with little room to spare share one note: the speaking rate is an estimate,
+    // so a second or a word either way per scene would be false precision.
+    let mut tight: Vec<(&Scene, f64, f64)> = Vec::new();
     for s in &all_scenes {
         let Some(d) = s.duration_s.filter(|d| *d > 0.0) else { continue };
         if s.vo_words == 0 {
             continue;
         }
         let need = speaking_seconds(s.vo_words, ctx.words_per_minute);
-        let (rule, severity, verdict) = if need > d {
-            ("scene_vo_too_long", "warning", "doesn't fit in")
+        if need > d {
+            // A comfortable scene keeps a tenth of its length for pauses.
+            let room = (need / 0.9).ceil();
+            let fits = (d * 0.9 * ctx.words_per_minute as f64 / 60.0).floor();
+            out.push(LintIssue {
+                rule: "scene_vo_too_long".into(),
+                severity: "warning".into(),
+                message: format!(
+                    "\"{}\": {} words of voice-over take about {need:.0} s, which doesn't fit in the {d:.0} s scene. Allow {room:.0} s or trim to {fits:.0} words",
+                    s.title, s.vo_words
+                ),
+                line: s.line,
+            });
         } else if need > d * 0.9 {
-            ("scene_vo_tight", "info", "leaves almost no pauses in")
+            tight.push((s, need, d));
+        }
+    }
+    if let Some((first, need, d)) = tight.first() {
+        let message = if tight.len() == 1 {
+            format!(
+                "\"{}\" leaves little room for pauses: its voice-over takes about {need:.0} s of the {d:.0} s scene",
+                first.title
+            )
         } else {
-            continue;
+            let list: Vec<String> =
+                tight.iter().map(|(s, need, d)| format!("\"{}\" (about {need:.0} of {d:.0} s)", s.title)).collect();
+            format!("{} scenes leave little room for pauses in the voice-over: {}", tight.len(), list.join(", "))
         };
-        // A comfortable scene keeps a tenth of its length for pauses.
-        let room = (need / 0.9).ceil();
-        let fits = (d * 0.9 * ctx.words_per_minute as f64 / 60.0).floor();
-        out.push(LintIssue {
-            rule: rule.into(),
-            severity: severity.into(),
-            message: format!(
-                "\"{}\": {} words of voice-over take about {need:.0} s, which {verdict} the {d:.0} s scene. Allow {room:.0} s or trim to {fits:.0} words",
-                s.title, s.vo_words
-            ),
-            line: s.line,
-        });
+        out.push(LintIssue { rule: "scene_vo_tight".into(), severity: "info".into(), message, line: first.line });
     }
     let vos = voice_overs(spec);
     let words: usize = vos.iter().map(|v| word_count(&v.text)).sum();
@@ -698,7 +711,22 @@ mod tests {
         assert_eq!(rules, [("scene_vo_too_long", 1), ("scene_vo_tight", 7)], "{issues:?}");
         assert!(issues[0].message.contains("25 words") && issues[0].message.contains("9 s scene"));
         assert!(issues[0].message.ends_with("Allow 12 s or trim to 20 words"), "{}", issues[0].message);
-        assert!(issues[1].message.ends_with("Allow 11 s or trim to 22 words"), "{}", issues[1].message);
+        assert_eq!(
+            issues[1].message,
+            "\"Scene 2\" leaves little room for pauses: its voice-over takes about 9 s of the 10 s scene"
+        );
+        // several tight scenes share one note, at the first of them
+        let spec = format!(
+            "## Scene 1\n- **Duration:** 10 s\n```vo\n{}\n```\n## Scene 2\n- **Duration:** 30 s\n```vo\n{}\n```\n## Scene 3\n- **Duration:** 17 s\n```vo\n{}\n```\n",
+            words(23), words(40), words(40)
+        );
+        let issues = lint(&spec, &LintContext { media_ids: &ids, target_length_s: None, words_per_minute: 150 });
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert_eq!((issues[0].rule.as_str(), issues[0].line), ("scene_vo_tight", 1));
+        assert_eq!(
+            issues[0].message,
+            "2 scenes leave little room for pauses in the voice-over: \"Scene 1\" (about 9 of 10 s), \"Scene 3\" (about 16 of 17 s)"
+        );
     }
 
     #[test]

@@ -697,37 +697,57 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
         }
     }
 
-    // Burned-in captions asked for in words, on an output that delivers them another way.
-    let lower = p.spec.to_lowercase();
-    if let Some(at) =
-        ["burned-in caption", "burned in caption", "burnt-in caption", "burn in caption", "burn-in caption"]
+    // Burned-in captions asked for in words, on an output that delivers them another way. A line
+    // that names the outputs it means is taken at its word: it only counts against an output it
+    // names, and not when it also says that output gets a caption file.
+    const BURNED: [&str; 5] =
+        ["burned-in caption", "burned in caption", "burnt-in caption", "burn in caption", "burn-in caption"];
+    const SIDECAR: [&str; 8] =
+        ["separate file", "caption file", "captions file", "subtitle file", "sidecar", "srt", "vtt", "no captions"];
+    let names: Vec<Vec<String>> = outputs.iter().map(output_names).collect();
+    let named = |line: &str, i: usize| names[i].iter().any(|n| contains_word(line, n));
+    let mut missed: Vec<usize> = Vec::new();
+    let mut at_line = None;
+    for (n, raw) in p.spec.lines().enumerate() {
+        let line = raw.to_lowercase();
+        if !BURNED.iter().any(|k| line.contains(k)) {
+            continue;
+        }
+        let names_any = (0..outputs.len()).any(|i| named(&line, i));
+        let explains = SIDECAR.iter().any(|k| contains_word(&line, k));
+        for (i, o) in outputs.iter().enumerate() {
+            let counts = if names_any { named(&line, i) && !explains } else { true };
+            if o.captions != "burn" && counts {
+                if !missed.contains(&i) {
+                    missed.push(i);
+                }
+                at_line.get_or_insert(n + 1);
+            }
+        }
+    }
+    if let Some(line) = at_line {
+        missed.sort_unstable();
+        let others: Vec<String> = missed
             .iter()
-            .find_map(|k| lower.find(k))
-    {
-        let others: Vec<String> = outputs
-            .iter()
-            .filter(|o| o.captions != "burn")
+            .map(|&i| &outputs[i])
             .map(|o| match o.captions.as_str() {
                 "sidecar" => format!("{} delivers captions as a separate file", o.name),
                 "none" => format!("{} has no captions", o.name),
                 other => format!("{} has captions set to \"{other}\"", o.name),
             })
             .collect();
-        if !others.is_empty() {
-            let line = p.spec[..at].matches('\n').count() + 1;
-            c.add(
-                "captions_not_burned",
-                None,
-                Severity::Info,
-                "outputs",
-                "The spec mentions burned-in captions, but not every output burns them in".into(),
-                Some(format!(
-                    "{}. Change the output's captions setting under Outputs, or say in the spec which outputs get burned-in captions.",
-                    others.join("; ")
-                )),
-                FixLink::line(line),
-            );
-        }
+        c.add(
+            "captions_not_burned",
+            None,
+            Severity::Info,
+            "outputs",
+            "The spec mentions burned-in captions, but not every output burns them in".into(),
+            Some(format!(
+                "{}. Change the output's captions setting under Outputs, or say in the spec which outputs get burned-in captions.",
+                others.join("; ")
+            )),
+            FixLink::line(line),
+        );
     }
 }
 
@@ -839,6 +859,29 @@ fn check_brand(c: &mut Ctx, input: &ValidateInput) {
             FixLink::target("brand", "update"),
         );
     }
+}
+
+/// What a spec might call an output: its name, its platform, and the first word of its name
+/// ("YouTube" for "YouTube 1080p"), lowercased.
+fn output_names(o: &ResolvedOutput) -> Vec<String> {
+    let mut names = vec![o.name.to_lowercase(), o.platform.replace(['_', '-'], " ").to_lowercase()];
+    if let Some(first) = o.name.split_whitespace().next() {
+        if first.chars().count() >= 4 && first.chars().all(char::is_alphabetic) {
+            names.push(first.to_lowercase());
+        }
+    }
+    names.retain(|n| !n.trim().is_empty());
+    names.dedup();
+    names
+}
+
+/// True when `needle` is in `text` and not inside a longer word.
+fn contains_word(text: &str, needle: &str) -> bool {
+    text.match_indices(needle).any(|(i, m)| {
+        let before = text[..i].chars().next_back().is_some_and(char::is_alphanumeric);
+        let after = text[i + m.len()..].chars().next().is_some_and(char::is_alphanumeric);
+        !before && !after
+    })
 }
 
 fn check_outputs(
@@ -1368,6 +1411,25 @@ mod tests {
         assert_eq!(i.severity, Severity::Info);
         assert!(i.detail.as_deref().unwrap().contains("delivers captions as a separate file"), "{:?}", i.detail);
         assert_eq!(i.fix.as_ref().and_then(|f| f.line), Some(22));
+
+        // a spec that names the outputs it means is taken at its word
+        let with = |last: &str| format!("{GOOD_SPEC}\n{last}\n");
+        f.project.output_configs.push(OutputConfig {
+            id: "out_li".into(),
+            preset: "linkedin".into(),
+            name: None,
+            overrides: OutputOverrides::default(),
+        });
+        f.project.run_configs[0].outputs.push("out_li".into());
+        let noted = |f: &mut Fx, last: &str| {
+            f.project.spec = with(last);
+            f.run().issues.iter().any(|i| i.rule == "captions_not_burned")
+        };
+        assert!(noted(&mut f, "Every output gets burned-in captions."));
+        assert!(noted(&mut f, "YouTube gets burned-in captions."), "names the output that doesn't burn them in");
+        assert!(!noted(&mut f, "LinkedIn gets burned-in captions."), "about another output");
+        assert!(!noted(&mut f, "LinkedIn gets burned-in captions, YouTube gets a caption file."));
+        assert!(!noted(&mut f, "- Captions: burned-in captions for LinkedIn\n- YouTube 1080p: SRT"));
     }
 
     #[test]
