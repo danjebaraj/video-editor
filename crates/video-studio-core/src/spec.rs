@@ -491,18 +491,21 @@ pub fn lint(spec: &str, ctx: &LintContext) -> Vec<LintIssue> {
         }
         let need = speaking_seconds(s.vo_words, ctx.words_per_minute);
         let (rule, severity, verdict) = if need > d {
-            ("scene_vo_too_long", "warning", "which doesn't fit. Trim the script or lengthen the scene")
+            ("scene_vo_too_long", "warning", "doesn't fit in")
         } else if need > d * 0.9 {
-            ("scene_vo_tight", "info", "which leaves almost no room for pauses")
+            ("scene_vo_tight", "info", "leaves almost no pauses in")
         } else {
             continue;
         };
+        // A comfortable scene keeps a tenth of its length for pauses.
+        let room = (need / 0.9).ceil();
+        let fits = (d * 0.9 * ctx.words_per_minute as f64 / 60.0).floor();
         out.push(LintIssue {
             rule: rule.into(),
             severity: severity.into(),
             message: format!(
-                "\"{}\" has {} words of voice-over, about {need:.0} s at {} words per minute, in a {d:.0} s scene, {verdict}",
-                s.title, s.vo_words, ctx.words_per_minute
+                "\"{}\": {} words of voice-over take about {need:.0} s, which {verdict} the {d:.0} s scene. Allow {room:.0} s or trim to {fits:.0} words",
+                s.title, s.vo_words
             ),
             line: s.line,
         });
@@ -694,6 +697,8 @@ mod tests {
         let rules: Vec<(&str, usize)> = issues.iter().map(|i| (i.rule.as_str(), i.line)).collect();
         assert_eq!(rules, [("scene_vo_too_long", 1), ("scene_vo_tight", 7)], "{issues:?}");
         assert!(issues[0].message.contains("25 words") && issues[0].message.contains("9 s scene"));
+        assert!(issues[0].message.ends_with("Allow 12 s or trim to 20 words"), "{}", issues[0].message);
+        assert!(issues[1].message.ends_with("Allow 11 s or trim to 22 words"), "{}", issues[1].message);
     }
 
     #[test]
