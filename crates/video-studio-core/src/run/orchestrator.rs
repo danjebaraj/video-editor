@@ -870,6 +870,7 @@ impl Driver {
             let _ = paths::write_json_atomic(&run_json, &v);
         }
         self.save_record(&record);
+        crate::capture::stop_stray(&crate::capture::state_file(&self.p.context_dir));
         let _ = std::fs::remove_dir_all(&self.p.context_dir);
 
         let code = exit_code::for_status(status);

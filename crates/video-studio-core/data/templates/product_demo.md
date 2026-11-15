@@ -13,7 +13,9 @@
 
 ## Scene 2: Walkthrough
 - **Duration:** 40 s
-- **Media:** {{screen recording}}
+- **Record:** {{app name or web address: Claude drives and records it during production. Or attach a recording and use a Media line instead.}}
+  1. {{first step to perform on screen}}
+  2. {{next step}}
 - **On-screen text:** {{step names as they happen}}
 
 ```vo

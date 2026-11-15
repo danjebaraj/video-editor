@@ -300,7 +300,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
                 "the run to revise is no longer at {prev_folder}; use Locate in the run history first"
             )));
         }
-        for name in ["project.json5", "audio", "work", "summary.md"] {
+        for name in ["project.json5", "audio", "captures", "work", "summary.md"] {
             let dest = if name == "summary.md" { folder.join("previous-summary.md") } else { folder.join(name) };
             copy_tree(&prev_folder.join(name), &dest);
         }
@@ -362,6 +362,10 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         default_model: brand.and_then(|b| b.voice.model.clone()),
         base_url: env.eleven_base_url.clone(),
         test_api_key: env.eleven_test_key.clone(),
+        capture: project
+            .app_capture
+            .enabled
+            .then(|| crate::capture::CaptureSettings { apps: project.app_capture.apps.clone() }),
     };
     let context_file = context_dir.join("context.json");
     paths::write_json_atomic(&context_file, &helper_context)?;
@@ -372,6 +376,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         write_files: None,
         cutline: Some(Utf8PathBuf::from(&env.cutline.path)),
         helper: Some(env.helper.clone()),
+        capture: project.app_capture.enabled,
         path_dirs: vec![bin.clone()],
         web_access: rc.web_access,
         log: Some(logs.join("permissions.ndjson")),

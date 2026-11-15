@@ -683,3 +683,71 @@ fn a_second_ctrl_c_kills_immediately() {
     assert_eq!(child.wait().unwrap().code(), Some(4));
     assert!(at.elapsed() < Duration::from_millis(3500), "no waiting for the grace period: {:?}", at.elapsed());
 }
+
+/// Production runs drive and record apps through `video-studio capture`; nothing else can.
+#[test]
+fn a_run_drives_and_records_an_app_through_the_helper() {
+    let mut w = World::new();
+    let eleven = fake_eleven();
+    w.eleven_url = Some(eleven.url.clone());
+    let log = w.root.join("capture-fake.ndjson");
+    let script = |extra: Value| {
+        let mut steps = vec![
+            json!({"tool": "Bash", "input": {"command": "video-studio capture check"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture open \"Notes\""}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture window --size 1280x800 --at 80,60"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture screenshot --out look.png"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture record start --out scene1.mov --seconds 30 --clicks"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture menu \"File\" \"New Note\" && video-studio capture type 'Q4 launch plan' && video-studio capture key cmd+s"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture click 640 400"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture record wait"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture open Terminal"}}),
+            json!({"tool": "Bash", "input": {"command": "video-studio capture screenshot --out ../../escape.png"}}),
+            json!({"tool": "Bash", "input": {"command": "osascript -e 'tell application \"Notes\" to quit'"}}),
+            json!({"tool": "Bash", "input": {"command": "screencapture -v sneaky.mov"}}),
+        ];
+        steps.extend(extra.as_array().unwrap().iter().cloned());
+        Value::Array(steps)
+    };
+    w.set_script(script(happy_script()));
+    let run = |w: &World| {
+        w.command(&["run", w.project.as_str(), "--config", "Social pack", "--json", "--yes", "--no-dry-run"])
+            .env("VIDEO_STUDIO_CAPTURE_FAKE", log.as_str())
+            .output()
+            .unwrap()
+    };
+    let o = run(&w);
+    assert_eq!(o.status.code(), Some(0), "stdout:\n{}\nstderr:\n{}", stdout(&o), stderr(&o));
+    let folder = w.run_folder();
+    assert!(folder.join("captures/look.png").is_file() && folder.join("captures/scene1.mov").is_file());
+    assert!(!w.root.join("escape.png").exists() && !folder.join("sneaky.mov").exists());
+    let did: Vec<String> = ndjson(&log).iter().map(|a| a["do"].as_str().unwrap().to_string()).collect();
+    for expected in ["activate", "set_window", "screenshot", "record_start", "menu", "type", "key", "click"] {
+        assert!(did.contains(&expected.to_string()), "no {expected} in {did:?}");
+    }
+    assert_eq!(
+        ndjson(&log).iter().filter(|a| a["do"] == "activate").map(|a| a["app"].as_str().unwrap()).collect::<Vec<_>>(),
+        vec!["Notes"],
+        "Terminal was never brought to the front"
+    );
+    // The broker lets the capture commands through and still refuses the raw tools; the helper
+    // refuses the guarded app and the path outside captures/ (the command runs and fails).
+    let calls = w.tool_calls();
+    let decision = |needle: &str| calls.iter().find(|c| c.3.contains(needle)).map(|c| c.1.clone()).unwrap();
+    assert_eq!(decision("capture record start"), "allow");
+    assert_eq!(decision("capture open Terminal"), "allow");
+    assert_eq!(decision("osascript"), "deny");
+    assert_eq!(decision("screencapture -v"), "deny");
+
+    // With app recording turned off in the project, the same commands are refused outright.
+    w.edit_project(|p| p.app_capture.enabled = false);
+    std::fs::remove_file(&log).unwrap();
+    std::fs::remove_file(&w.trace).ok();
+    let o = run(&w);
+    assert_eq!(o.status.code(), Some(0), "stdout:\n{}\nstderr:\n{}", stdout(&o), stderr(&o));
+    assert!(!log.exists(), "nothing was driven");
+    let calls = w.tool_calls();
+    assert!(calls.iter().filter(|c| c.3.contains("video-studio capture")).all(|c| c.1 == "deny"), "{calls:?}");
+    let perms = ndjson(&w.run_folder().join("logs/permissions.ndjson"));
+    assert!(perms.iter().any(|p| p["reason"].as_str().unwrap_or("").contains("App recording is turned off")));
+}

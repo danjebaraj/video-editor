@@ -74,6 +74,9 @@ pub struct HelperContext {
     /// Test key used instead of the secret store, only ever set by tests with a fake server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_api_key: Option<String>,
+    /// Set when the run may drive and record apps (`video-studio capture …`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<crate::capture::CaptureSettings>,
 }
 
 impl HelperContext {
@@ -444,6 +447,7 @@ mod tests {
             default_model: None,
             base_url: Some("http://127.0.0.1:9".into()),
             test_api_key: None,
+            capture: None,
         }
     }
 

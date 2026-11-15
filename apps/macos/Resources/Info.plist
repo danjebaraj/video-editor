@@ -92,5 +92,7 @@
 			</dict>
 		</dict>
 	</array>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>During a production run, Syncfusion Video Studio operates the apps your spec asks it to record.</string>
 </dict>
 </plist>

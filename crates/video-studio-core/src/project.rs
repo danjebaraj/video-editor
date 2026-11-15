@@ -53,8 +53,35 @@ pub struct Project {
     /// Extra folders (absolute paths) the spec assistant may read: briefs, docs, source material.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assistant_folders: Vec<String>,
+    /// Whether production runs may drive and record apps, and which ones.
+    #[serde(default, skip_serializing_if = "AppCapture::is_default")]
+    pub app_capture: AppCapture,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// App recording: during a production run Claude Code can open a desktop app or a web app,
+/// operate it and record the screen, to make footage the spec asks for.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct AppCapture {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// When not empty, the only apps a run may drive (names as shown in Applications). Empty
+    /// means any app except terminals, system settings, password managers and Finder.
+    #[serde(default)]
+    pub apps: Vec<String>,
+}
+
+impl Default for AppCapture {
+    fn default() -> Self {
+        AppCapture { enabled: true, apps: Vec::new() }
+    }
+}
+
+impl AppCapture {
+    pub fn is_default(&self) -> bool {
+        *self == AppCapture::default()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
@@ -368,6 +395,7 @@ impl Project {
             runs: Vec::new(),
             assistant_sessions: Vec::new(),
             assistant_folders: Vec::new(),
+            app_capture: AppCapture::default(),
             extra: BTreeMap::new(),
         }
     }

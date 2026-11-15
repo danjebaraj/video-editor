@@ -7,6 +7,7 @@
 //! - invoked under the name `cutline` (a link in the run folder's `.bin`), it runs the real
 //!   cutline and keeps the per-invocation logs.
 
+mod capture_cmd;
 mod eleven_cmd;
 mod progress;
 
@@ -137,6 +138,13 @@ enum Command {
         #[command(subcommand)]
         command: eleven_cmd::ElevenCommand,
     },
+    /// Drive and record a desktop or web app during a run (open, screenshot, click, type, record)
+    Capture {
+        #[command(flatten)]
+        target: capture_cmd::Target,
+        #[command(subcommand)]
+        command: capture_cmd::CaptureCommand,
+    },
     /// Store, check or remove the ElevenLabs API key in the system keychain
     Secret {
         /// set (key on stdin), status, test or delete
@@ -240,6 +248,7 @@ fn main() {
         }
         Command::New { project, name, intent, media } => cmd_new(&project, name.as_deref(), &intent, &media),
         Command::Eleven { command } => eleven_cmd::run(command, secrets().as_ref()),
+        Command::Capture { target, command } => capture_cmd::run(command, &target),
         Command::Secret { action, json } => cmd_secret(&action, json),
         Command::Schema => {
             println!("{}", serde_json::to_string_pretty(&project::json_schema()).unwrap_or_default());

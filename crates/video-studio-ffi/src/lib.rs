@@ -228,6 +228,9 @@ pub fn call(method: String, args: String) -> R<String> {
             out(p)
         }
         "environment.detect" => out(detect_environment(&Settings::load(&lib))),
+        // Whether the system lets this app record the screen and control other apps; `request`
+        // shows the system's prompts.
+        "capture.permissions" => out(core::capture::permissions(opt::<bool>(&args, "request")?.unwrap_or(false))),
 
         // Projects
         "project.new" => {

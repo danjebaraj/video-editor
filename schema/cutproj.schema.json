@@ -1,5 +1,23 @@
 {
   "$defs": {
+    "AppCapture": {
+      "description": "App recording: during a production run Claude Code can open a desktop app or a web app,\noperate it and record the screen, to make footage the spec asks for.",
+      "properties": {
+        "apps": {
+          "default": [],
+          "description": "When not empty, the only apps a run may drive (names as shown in Applications). Empty\nmeans any app except terminals, system settings, password managers and Finder.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "AssetRef": {
       "description": "A referenced brand file (logo, font, bumper). Never copied, except into a `.cutbrand` export.",
       "properties": {
@@ -956,6 +974,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "app_capture": {
+      "$ref": "#/$defs/AppCapture",
+      "description": "Whether production runs may drive and record apps, and which ones."
+    },
     "assistant_folders": {
       "description": "Extra folders (absolute paths) the spec assistant may read: briefs, docs, source material.",
       "items": {
