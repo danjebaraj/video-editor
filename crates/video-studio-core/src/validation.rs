@@ -639,24 +639,25 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
                 FixLink::line(first.line),
             );
         } else if let Some(perm) = input.env.capture_permissions().filter(|perm| perm.supported) {
-            let missing: Vec<&str> =
-                [(perm.screen_recording, "Screen & System Audio Recording"), (perm.accessibility, "Accessibility")]
-                    .into_iter()
-                    .filter_map(|(ok, name)| (!ok).then_some(name))
-                    .collect();
-            if !missing.is_empty() {
+            // One warning per permission, so each can be fixed with its own button.
+            for (ok, key, name, what) in [
+                (perm.screen_recording, "screen_recording", "Screen & System Audio Recording", "record the screen"),
+                (perm.accessibility, "accessibility", "Accessibility", "click, type and use menus in other apps"),
+            ] {
+                if ok {
+                    continue;
+                }
                 c.add(
                     "capture_permission",
-                    None,
+                    Some(key),
                     Severity::Warning,
                     "environment",
-                    "This computer doesn't yet allow app recording".into(),
+                    format!("{name} isn't allowed for Syncfusion Video Studio yet"),
                     Some(format!(
-                        "{scenes} for a recording, and {} {} not allowed for Syncfusion Video Studio. Allow it in System Settings › Privacy & Security, then quit and reopen the app. The Project inspector's App recording section shows the status.",
-                        missing.join(" and "),
-                        if missing.len() == 1 { "is" } else { "are" }
+                        "{scenes} for a recording, and the run needs this to {what}. Allow opens System Settings with Syncfusion Video Studio in the list: turn its switch on there.{}",
+                        if key == "screen_recording" { " macOS then offers to quit and reopen the app." } else { "" }
                     )),
-                    FixLink::to("project"),
+                    FixLink::target("permission", key),
                 );
             }
         }
@@ -669,7 +670,15 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
             .iter()
             .find_map(|k| lower.find(k))
     {
-        let others: Vec<&str> = outputs.iter().filter(|o| o.captions != "burn").map(|o| o.name.as_str()).collect();
+        let others: Vec<String> = outputs
+            .iter()
+            .filter(|o| o.captions != "burn")
+            .map(|o| match o.captions.as_str() {
+                "sidecar" => format!("{} delivers captions as a separate file", o.name),
+                "none" => format!("{} has no captions", o.name),
+                other => format!("{} has captions set to \"{other}\"", o.name),
+            })
+            .collect();
         if !others.is_empty() {
             let line = p.spec[..at].matches('\n').count() + 1;
             c.add(
@@ -679,9 +688,8 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
                 "outputs",
                 "The spec mentions burned-in captions, but not every output burns them in".into(),
                 Some(format!(
-                    "{} {} captions another way. Change the output's captions setting, or say in the spec which outputs get burned-in captions.",
-                    others.join(", "),
-                    if others.len() == 1 { "delivers" } else { "deliver" }
+                    "{}. Change the output's captions setting under Outputs, or say in the spec which outputs get burned-in captions.",
+                    others.join("; ")
                 )),
                 FixLink::line(line),
             );
@@ -1277,10 +1285,20 @@ mod tests {
         f.env.capture =
             Some(crate::capture::Permissions { screen_recording: true, accessibility: false, supported: true });
         let r = f.run();
-        let i = r.issues.iter().find(|i| i.rule == "capture_permission").expect("permission warning");
-        assert_eq!(i.severity, Severity::Warning);
-        let detail = i.detail.clone().unwrap();
-        assert!(detail.contains("1 scene asks") && detail.contains("Accessibility is not allowed"), "{detail}");
+        let found: Vec<&Issue> = r.issues.iter().filter(|i| i.rule == "capture_permission").collect();
+        assert_eq!(found.len(), 1, "only the missing permission is reported");
+        let i = found[0];
+        assert_eq!((i.severity, i.id.as_str()), (Severity::Warning, "capture_permission:accessibility"));
+        assert!(i.title.starts_with("Accessibility isn't allowed"));
+        assert!(i.detail.as_deref().unwrap().contains("1 scene asks"));
+        // the app turns this link into a one-click Allow button
+        assert_eq!(
+            i.fix,
+            Some(FixLink { kind: "permission".into(), target: Some("accessibility".into()), line: None })
+        );
+        f.env.capture =
+            Some(crate::capture::Permissions { screen_recording: false, accessibility: false, supported: true });
+        assert_eq!(f.run().issues.iter().filter(|i| i.rule == "capture_permission").count(), 2);
         f.env.capture =
             Some(crate::capture::Permissions { screen_recording: false, accessibility: false, supported: false });
         assert!(
@@ -1294,7 +1312,7 @@ mod tests {
         let r = f.run();
         let i = r.issues.iter().find(|i| i.rule == "captions_not_burned").expect("caption note");
         assert_eq!(i.severity, Severity::Info);
-        assert!(i.detail.as_deref().unwrap().contains("delivers captions another way"), "{:?}", i.detail);
+        assert!(i.detail.as_deref().unwrap().contains("delivers captions as a separate file"), "{:?}", i.detail);
         assert_eq!(i.fix.as_ref().and_then(|f| f.line), Some(22));
     }
 
