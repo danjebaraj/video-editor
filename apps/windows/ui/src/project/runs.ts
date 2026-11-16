@@ -13,6 +13,7 @@ import { STATUS_LABEL } from '../types';
 export const STAGES: [string, string][] = [
   ['prepare', 'Prepare'],
   ['audio', 'Audio'],
+  ['capture', 'Recording'],
   ['authoring', 'Authoring'],
   ['validate', 'Validate'],
   ['review', 'Review'],
@@ -33,6 +34,8 @@ export interface TranscriptItem {
   text: string;
   tool?: string;
   detail?: string;
+  /** A tool call that came back as an error; the run goes on. */
+  failed?: boolean;
 }
 
 export interface RunPlan {
@@ -122,7 +125,7 @@ export class RunController {
       return;
     }
     this.continuation = null;
-    await this.launch('dry_run', this.doc.p.models.dry_run, report);
+    await this.launch('dry_run', this.doc.dryRunModel, report);
   }
 
   async confirm(plan: RunPlan) {
@@ -130,7 +133,7 @@ export class RunController {
     for (const i of plan.report.issues) if (i.severity === 'warning') this.doc.acknowledged.add(i.id);
     if (plan.dryRunFirst) {
       this.continuation = plan;
-      await this.launch('dry_run', this.doc.p.models.dry_run, plan.report);
+      await this.launch('dry_run', this.doc.dryRunModel, plan.report);
     } else {
       this.continuation = null;
       await this.launch('production', plan.model, plan.report, plan.revise);
@@ -159,7 +162,7 @@ export class RunController {
         folder: started.folder,
         model: kind === 'dry_run' ? model : model || rc.production_model,
         started: Date.now(),
-        stages: STAGES.filter(([id]) => kind === 'production' || !['audio', 'render', 'qa'].includes(id)).map(([id, label]) => ({ id, label, state: 'pending', seconds: 0 })),
+        stages: STAGES.filter(([id]) => kind === 'production' || !['audio', 'capture', 'render', 'qa'].includes(id)).map(([id, label]) => ({ id, label, state: 'pending', seconds: 0 })),
         fraction: null,
         detail: '',
         status: kind === 'dry_run' ? 'Dry run' : 'Running',
@@ -227,7 +230,7 @@ export class RunController {
         break;
       case 'message':
         live.streaming = '';
-        live.transcript.push({ role: e.role, text: e.text, tool: e.tool, detail: e.detail });
+        live.transcript.push({ role: e.role, text: e.text, tool: e.tool, detail: e.detail, failed: !!e.failed });
         if (live.transcript.length > 600) live.transcript.splice(0, live.transcript.length - 600);
         break;
       case 'question':

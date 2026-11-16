@@ -113,9 +113,12 @@ fn multi_export_chapters_thumbnail() {
     assert_eq!(dims(&res[1].output), (540, 960));
     assert!(res[1].output.to_string_lossy().contains("vertical"));
     // only one export
-    let one =
-        cutline_qa::deliver::render_all(&l, &RenderOptions { draft: true, ..Default::default() }, &["vertical".to_string()])
-            .unwrap();
+    let one = cutline_qa::deliver::render_all(
+        &l,
+        &RenderOptions { draft: true, ..Default::default() },
+        &["vertical".to_string()],
+    )
+    .unwrap();
     assert_eq!(one.len(), 1);
     // chapters
     let (name, e) = pipeline::exports(&l.project).remove(0);

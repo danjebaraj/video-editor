@@ -1,9 +1,9 @@
 // Inspector › Validation (spec §11): the report with blockers, warnings and notes, fix links,
 // acknowledgements, estimates, and the dry run.
 
-import { h, clear, button, icon, Icons, usd, bytes, duration, spinner, emptyState, checkbox } from '../../dom';
+import { h, clear, button, iconButton, icon, Icons, usd, bytes, duration, spinner, emptyState, checkbox } from '../../dom';
 import { effect } from '../../store';
-import { brands } from '../../app-state';
+import { brands, claudeAvailable, environment } from '../../app-state';
 import { copyButton } from '../../text-tools';
 import type { ProjectWindow } from '../window';
 import type { Issue } from '../../types';
@@ -40,7 +40,7 @@ const FIX_LABEL: Record<string, string> = {
 export function validationTab(w: ProjectWindow): HTMLElement {
   const root = h('div', { class: 'validation-tab' });
   const d = w.doc;
-  effect([d.report, d.validating, w.runs.live, d.project, brands], () => {
+  effect([d.report, d.validating, w.runs.live, d.project, brands, w.assistant.running, environment], () => {
     const r = d.report.value;
     const head = h(
       'div',
@@ -70,8 +70,13 @@ export function validationTab(w: ProjectWindow): HTMLElement {
       root,
       head,
       r.issues.length === 0 ? h('div', { class: 'ready', role: 'status' }, icon(Icons.checkCircle, 'ok'), ' Ready to run') : null,
-      r.dry_run && (r.dry_run.ambiguities.length || r.dry_run.missing_media.length || r.dry_run.risks.length)
-        ? button('Ask Claude to fix the spec', () => w.assistant.askToFix(r.dry_run), { appearance: 'primary', glyph: Icons.chat })
+      r.issues.length
+        ? button('Ask Claude to Fix', () => w.assistant.askToFixFindings(), {
+            appearance: 'primary',
+            glyph: Icons.chat,
+            disabled: !claudeAvailable() || w.assistant.running.value,
+            title: 'Opens Claude with a request to fix these findings. The findings are sent along; you can edit the request before sending.',
+          })
         : null,
       h('ul', { class: 'issues', 'aria-label': 'Validation issues' }, groups.flat().map((i) => issueRow(i))),
       estimates,
@@ -100,6 +105,7 @@ export function validationTab(w: ProjectWindow): HTMLElement {
           i.severity === 'warning' ? checkbox('Acknowledge', d.acknowledged.has(i.id), (v) => (v ? d.acknowledged.add(i.id) : d.acknowledged.delete(i.id))) : null,
         ),
       ),
+      iconButton(Icons.chat, 'Ask Claude to fix this', () => w.assistant.askToFixFindings(i), { disabled: !claudeAvailable() || w.assistant.running.value }),
       copyButton('Copy this result', () => issueText(i)),
     );
   }

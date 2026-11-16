@@ -1,13 +1,14 @@
-// Inspector › Project (spec §7, §4.2, §23.7): name, intent, models, App recording and the
+// Inspector › Project (spec §7, §4.2, §23.7): name, intent, finish, models, App recording and the
 // project's media search folders.
 
 import { h, clear, field, textInput, numberInput, select, checkbox, button, iconButton, Icons } from '../../dom';
 import { core } from '../../bridge';
 import { effect } from '../../store';
-import { platforms } from '../../app-state';
+import { platforms, settings } from '../../app-state';
 import { openFolders } from '../../dialogs';
 import { modelPicker, effortPicker } from '../../widgets';
 import { INTENTS } from '../../types';
+import { finishEditor, finishSummary, filledFinish, sameFinish } from '../../finish';
 import type { ProjectWindow } from '../window';
 
 interface CapturePermissions {
@@ -23,7 +24,7 @@ export function projectTab(w: ProjectWindow): HTMLElement {
   const refreshPerms = () => core<CapturePermissions>('capture.permissions', { request: false }).then((p) => ((perms = p), d.project.emit())).catch(() => {});
   refreshPerms();
 
-  effect([d.project, d.path], () => {
+  effect([d.project, d.path, settings], () => {
     const p = d.p;
     const defaults = platforms.value?.intents[p.intent.kind];
     const capture = p.app_capture ?? { enabled: true, apps: [] };
@@ -48,10 +49,11 @@ export function projectTab(w: ProjectWindow): HTMLElement {
         field('Languages', textInput((p.intent.locales ?? []).join(', '), (v) => d.update((x) => (x.intent.locales = v.split(',').map((s) => s.trim()).filter(Boolean)))), 'Comma-separated, for example en, de'),
         defaults ? h('div', { class: 'hint' }, `Defaults for this intent: ${defaults.pacing} pacing, ${defaults.captions} captions, ${defaults.music_level} music.`) : null,
       ),
+      finishSection(),
       h('section', null,
         h('h3', null, 'Models'),
-        field('Spec assistant', modelPicker(p.models.assistant, (v) => d.update((x) => (x.models.assistant = v), { outputs: false }), { label: 'Spec assistant model' })),
-        field('Dry run', modelPicker(p.models.dry_run, (v) => d.update((x) => (x.models.dry_run = v), { outputs: false }), { label: 'Dry run model' })),
+        field('Spec assistant', modelPicker(p.models.assistant, (v) => d.update((x) => (x.models.assistant = v), { outputs: false }), { label: 'Spec assistant model', settingsDefault: settings.value?.default_assistant_model ?? '' }), 'Used for chat, spec edits and questions'),
+        field('Dry run', modelPicker(p.models.dry_run, (v) => d.update((x) => (x.models.dry_run = v), { outputs: false }), { label: 'Dry run model', settingsDefault: settings.value?.default_dry_run_model ?? '' }), 'Rehearses the run before the production model is used. Settings default follows Settings › Claude.'),
         (() => {
           const e = effortPicker(p.models.effort ?? null, (v) => d.update((x) => (x.models.effort = v), { outputs: false }), 'Assistant effort');
           return e ? field('Effort', e) : null;
@@ -87,5 +89,23 @@ export function projectTab(w: ProjectWindow): HTMLElement {
       ),
     );
   });
+  /** Project › Finish: follow Settings, or keep this project's own choices. */
+  function finishSection(): HTMLElement {
+    const app = filledFinish(settings.value?.finish);
+    const own = d.p.finish ? filledFinish(d.p.finish) : null;
+    return h('section', null,
+      h('h3', null, 'Finish'),
+      field('Finish', select([['settings', 'Settings default'], ['own', 'This project’s own']], own ? 'own' : 'settings', (v) =>
+        // a project's own finish starts as a copy of the app's, so nothing changes until edited
+        d.update((x) => (x.finish = v === 'own' ? { ...app } : null), { outputs: false }),
+      { 'aria-label': 'Finish', title: 'Transitions, cuts on the beat and music fades. Settings default follows Settings › Finish, including later changes to it.' })),
+      own
+        ? [
+            finishEditor(own, (f) => d.update((x) => (x.finish = f), { outputs: false }), { compact: true }),
+            button('Apply the Settings Default', () => d.update((x) => (x.finish = { ...app }), { outputs: false }), { disabled: sameFinish(own, app), title: 'Replace this project’s finish with a copy of the one in Settings › Finish' }),
+          ]
+        : h('p', { class: 'hint' }, `${finishSummary(app)} Change it in Settings › Finish.`),
+    );
+  }
   return root;
 }

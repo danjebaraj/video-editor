@@ -1,14 +1,18 @@
 // Widgets shared by several views: the model picker, the effort picker and Claude's question card.
 
 import { h, button, select } from './dom';
-import { models, environment } from './app-state';
+import { models, environment, modelName } from './app-state';
 import { prompt } from './dialogs';
 import type { ClaudeQuestion } from './types';
 
 /** Family › Latest (the CLI alias) or a version (its full ID), plus a custom ID (spec §4.2). */
-export function modelPicker(value: string | undefined | null, onChange: (v: string) => void, opts: { label: string; allowDefault?: boolean } = { label: 'Model' }): HTMLElement {
+export function modelPicker(value: string | undefined | null, onChange: (v: string) => void, opts: { label: string; allowDefault?: boolean; settingsDefault?: string } = { label: 'Model' }): HTMLElement {
   const options: [string, string][] = [];
-  if (opts.allowDefault) options.push(['', 'Default']);
+  if (opts.settingsDefault !== undefined) {
+    // an empty model follows this one, including later changes to it
+    options.push(['', `Settings default (${modelName(opts.settingsDefault)})`]);
+    value = (value ?? '').trim();
+  } else if (opts.allowDefault) options.push(['', 'Default']);
   let known = false;
   for (const f of models.value?.families ?? []) {
     options.push([f.alias, `${f.name} — latest`]);

@@ -32,6 +32,13 @@ export type IntentKind = (("marketing" | "product_demo" | "tutorial" | "explaine
  * via the `definition` "Quality".
  */
 export type Quality = ("draft" | "final")
+/**
+ * How one shot hands over to the next.
+ * 
+ * This interface was referenced by `Project`'s JSON-Schema
+ * via the `definition` "Transitions".
+ */
+export type Transitions = ("smooth" | "cuts" | "lively")
 
 export interface Project {
 app_capture?: AppCapture
@@ -42,6 +49,11 @@ assistant_folders?: string[]
 assistant_sessions?: AssistantSessionRef[]
 brand?: (BrandRef | null)
 created: string
+/**
+ * This project's own finish (transitions, beat cuts, music fades). Absent: the project
+ * follows the finish in Settings, including later changes to it.
+ */
+finish?: (Finish | null)
 format: string
 /**
  * Stable ID; Duplicate assigns a new one.
@@ -203,6 +215,48 @@ opacity: number
  */
 position: string
 }
+/**
+ * This interface was referenced by `Project`'s JSON-Schema
+ * via the `definition` "Finish".
+ */
+export interface Finish {
+/**
+ * Land cuts on the music's beat and ask for music with a beat that can be followed.
+ */
+cut_on_beat?: boolean
+/**
+ * Ease on-screen text in and out instead of popping it on.
+ */
+ease_text?: boolean
+/**
+ * Ease into close-ups of the part of the screen being talked about.
+ */
+guide_the_eye?: boolean
+/**
+ * Seconds of picture and music before the first spoken word.
+ */
+lead_in_s?: number
+/**
+ * Seconds the music takes to come in.
+ */
+music_fade_in_s?: number
+/**
+ * Seconds the music takes to go out when it has no ending of its own to land.
+ */
+music_fade_out_s?: number
+/**
+ * Seconds the last picture holds after the last spoken word.
+ */
+tail_s?: number
+/**
+ * Length of a transition between scenes, in seconds.
+ */
+transition_s?: number
+/**
+ * How one shot hands over to the next.
+ */
+transitions?: ("smooth" | "cuts" | "lively")
+}
 export interface Intent {
 audience?: (string | null)
 cta?: (string | null)
@@ -281,11 +335,12 @@ width?: (number | null)
 }
 export interface Models {
 /**
- * Spec assistant model: a CLI alias (`sonnet`) or a full model ID.
+ * Spec assistant model: a CLI alias (`sonnet`) or a full model ID. Empty follows the
+ * default in Settings.
  */
 assistant: string
 /**
- * Dry run model; cheaper than production by default.
+ * Dry run model. Empty follows the default in Settings.
  */
 dry_run: string
 effort?: (string | null)
@@ -467,11 +522,12 @@ relative?: (string | null)
  */
 export interface Models1 {
 /**
- * Spec assistant model: a CLI alias (`sonnet`) or a full model ID.
+ * Spec assistant model: a CLI alias (`sonnet`) or a full model ID. Empty follows the
+ * default in Settings.
  */
 assistant: string
 /**
- * Dry run model; cheaper than production by default.
+ * Dry run model. Empty follows the default in Settings.
  */
 dry_run: string
 effort?: (string | null)

@@ -6,7 +6,8 @@
 
 import { core, request, on, errorText } from './bridge';
 import { scriptedAnswers } from './dialogs';
-import { environment, keyStatus, detect, brands, reloadLibrary } from './app-state';
+import { environment, keyStatus, detect, brands, reloadLibrary, settings } from './app-state';
+import { DEFAULT_FINISH, filledFinish, sameFinish } from './finish';
 import { clipboardText, copyText, markdownBlocks, parseMarkdown } from './text-tools';
 import { reportText } from './project/inspector/validation';
 import type { ProjectWindow } from './project/window';
@@ -238,6 +239,15 @@ async function run(w: ProjectWindow, fx: Fixture) {
     check(issue && issue.severity === 'blocker', 'an unresolved reference is a blocker');
     w.revealFix(issue!.fix!);
     check(w.editor.cursorLine() === issue!.fix!.line, `the fix link goes to line ${issue!.fix!.line}`);
+    const findings = await w.assistant.validationContext();
+    check(
+      w.assistant.includeValidation.value && w.assistant.validationFindingCount === report!.issues.length && findings.includes('[blocker]') && findings.includes(`(spec.md line ${issue!.fix!.line})`),
+      `validation findings are ready to go to Claude with the next message (${findings.slice(0, 300)})`,
+    );
+    await w.assistant.askToFixFindings(issue!);
+    check(w.assistant.draft.value.includes(issue!.title), `Ask Claude to Fix writes the request for one finding (${w.assistant.draft.value})`);
+    await shot('claude-validation-context');
+    w.assistant.draft.value = '';
     w.editor.setText(w.editor.text.replace(' ![later](media:m-not-yet)', ''), true);
     const again = await d.validate();
     check(again && again.blockers === 0, `no blockers (${again?.issues.filter((i) => i.severity === 'blocker').map((i) => i.title)})`);
@@ -268,6 +278,9 @@ async function run(w: ProjectWindow, fx: Fixture) {
     check(rec.cost_usd === 0.42, `the cost (${rec.cost_usd})`);
     const t = await trace();
     check(t.some((x) => x.tool === 'Bash' && x.input?.command === 'ls' && x.decision === 'deny'), '`ls` is denied');
+    // a run's instructions can be longer than a Windows command line allows: they go in a file
+    const started = t.filter((x) => x.start && x.system_prompt_file);
+    check(started.some((x) => x.system_prompt_chars > 8000), `the run's instructions reach Claude Code through a file (${JSON.stringify(started.map((x) => x.system_prompt_chars))})`);
     const names = results.logs.map((l: any) => l.name);
     for (const f of ['run.json', 'events.ndjson', 'claude.jsonl', 'validation.json', 'summary.md', 'permissions.ndjson', 'cutline/001-validate.log', 'cutline/002-render.log'])
       check(names.includes(f), `logs/${f} (${names.join(', ')})`);
@@ -276,6 +289,10 @@ async function run(w: ProjectWindow, fx: Fixture) {
     const n = await core<number>('logs.export', { folder: rec.folder, destination: `${fx.out}\\logs.zip`, redact: true });
     check(n > 8, `logs exported (${n} files)`);
     check(names.includes('prompt-system.md') && names.includes('prompt.md'), 'a run keeps the instructions Claude was given');
+    const systemFile = results.logs.find((l: any) => l.name === 'prompt-system.md')!.path;
+    const systemUrl = await request<string>('shell.allow_media', { files: [systemFile], add: true }).then(() => request<string>('shell.media_url', { path: systemFile }));
+    const system = await fetch(systemUrl).then((r) => (r.ok ? r.text() : ''));
+    check(system.includes('## Finish') && system.includes('snap_to_beats') && system.includes('smoothleft'), `a run is told how to finish the video (${system.slice(0, 80)})`);
 
     // Copy and Markdown preview
     const blocks = parseMarkdown('# Title\n\nA *short* paragraph\nin two lines.\n\n- one\n  - nested\n1. first\n\n```\ncode here\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n> quoted\n\n---\n');
@@ -294,6 +311,21 @@ async function run(w: ProjectWindow, fx: Fixture) {
     if (before !== null) await copyText(before);
     const rep = d.report.value;
     if (rep?.issues.length) check(reportText(rep.issues).includes(rep.issues[0].title), 'validation results copy as text');
+
+    // Finish: the Settings default, and a project's own
+    const fin = settings.value?.finish;
+    check(sameFinish(fin, DEFAULT_FINISH) && fin?.transitions === 'smooth' && fin.cut_on_beat, `the finish defaults are smooth and on the beat (${JSON.stringify(fin)})`);
+    check(!d.p.finish, 'a project follows the Settings finish until it is given its own');
+    d.update((p) => (p.finish = { ...filledFinish(fin), transitions: 'cuts' }), { outputs: false });
+    w.showTab('project');
+    await sleep(200);
+    [...document.querySelectorAll('.form-tab h3')].find((x) => x.textContent === 'Finish')?.scrollIntoView({ block: 'start' });
+    await shot('project-finish');
+    await d.save();
+    const projectUrl = await request<string>('shell.allow_media', { files: [d.path.value!], add: true }).then(() => request<string>('shell.media_url', { path: d.path.value! }));
+    const saved = await fetch(projectUrl, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : ''));
+    check(/"transitions":\s*"cuts"/.test(saved), 'a project’s own finish is saved with it');
+    d.update((p) => (p.finish = null), { outputs: false });
     w.showTab('run');
     return `${rec.status}, ${out.bytes} bytes`;
   });

@@ -398,6 +398,16 @@ export class ProjectDocument {
     }
   }
 
+  /** The dry run model in force: the project's own choice, or the default in Settings. */
+  get dryRunModel(): string {
+    return this.p.models.dry_run.trim() || settings.value?.default_dry_run_model.trim() || 'haiku';
+  }
+
+  /** The spec assistant model in force: the project's own choice, or the default in Settings. */
+  get assistantModel(): string {
+    return this.p.models.assistant.trim() || settings.value?.default_assistant_model.trim() || 'sonnet';
+  }
+
   wordsPerMinute(): number {
     return settings.value?.words_per_minute ?? 150;
   }

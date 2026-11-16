@@ -35,9 +35,39 @@ pub struct ClaudeOptions {
     pub log: Option<Utf8PathBuf>,
 }
 
+/// Windows caps a whole command line at 32,767 characters, and a run's instructions alone can be
+/// longer. Past this many characters they go to Claude Code in a file instead
+/// (`--append-system-prompt-file`, verified with Claude Code 2.1.319). Other systems allow far
+/// longer command lines and keep passing them inline.
+const INLINE_PROMPT_LIMIT: usize = 8_000;
+
+/// Writes a system prompt for `--append-system-prompt-file` to a file of its own under the
+/// temporary folder.
+fn write_prompt_file(text: &str) -> Result<Utf8PathBuf> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+        .map_err(|p| Error::Environment(format!("the temporary folder isn't valid UTF-8: {}", p.display())))?
+        .join("video-studio-prompts");
+    std::fs::create_dir_all(&dir)?;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let file = dir.join(format!("{}-{nanos}-{}.md", std::process::id(), SEQ.fetch_add(1, Ordering::SeqCst)));
+    std::fs::write(&file, text)?;
+    Ok(file)
+}
+
 impl ClaudeOptions {
+    /// True when the appended system prompt goes in a file rather than on the command line.
+    pub fn prompt_in_file(&self) -> bool {
+        cfg!(windows) && self.system_prompt_append.len() > INLINE_PROMPT_LIMIT
+    }
+
     /// The CLI arguments. Verified against Claude Code 2.1.311 (docs/decisions.md).
     pub fn arguments(&self) -> Vec<String> {
+        self.arguments_with(None)
+    }
+
+    /// The CLI arguments, with the appended system prompt read from `prompt_file` when given.
+    pub fn arguments_with(&self, prompt_file: Option<&Utf8Path>) -> Vec<String> {
         let mut a: Vec<String> = [
             "-p",
             "--output-format",
@@ -63,7 +93,9 @@ impl ClaudeOptions {
         if let Some(s) = &self.settings {
             a.extend(["--settings".to_string(), s.to_string()]);
         }
-        if !self.system_prompt_append.is_empty() {
+        if let Some(f) = prompt_file {
+            a.extend(["--append-system-prompt-file".to_string(), f.to_string()]);
+        } else if !self.system_prompt_append.is_empty() {
             a.extend(["--append-system-prompt".to_string(), self.system_prompt_append.clone()]);
         }
         let model = self.model.trim();
@@ -122,14 +154,27 @@ impl ClaudeProcess {
     /// Starts the CLI, sends the initialize request and the first user message, and returns the
     /// process with the channel its events arrive on. The last message is always `Exit`.
     pub fn start(options: &ClaudeOptions, prompt: &str) -> Result<(ClaudeProcess, Receiver<Incoming>)> {
-        let args = options.arguments();
+        // Removed when the process ends (below), or now if it doesn't start.
+        let prompt_file =
+            if options.prompt_in_file() { Some(write_prompt_file(&options.system_prompt_append)?) } else { None };
+        let args = options.arguments_with(prompt_file.as_deref());
+        let remove_prompt_file = move || {
+            if let Some(f) = &prompt_file {
+                let _ = std::fs::remove_file(f);
+            }
+        };
         let mut cmd = crate::platform::command(&options.executable);
         cmd.args(&args).current_dir(options.working_dir.as_str()).env_clear().envs(&options.env);
         // The CLI takes its working directory from $PWD; an app launched from Finder has PWD=/.
         cmd.env("PWD", options.working_dir.as_str()).env_remove("OLDPWD");
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = ProcessGroup::spawn(&mut cmd)
-            .map_err(|e| Error::Environment(format!("couldn't start Claude Code ({}): {e}", options.executable)))?;
+        let mut child = match ProcessGroup::spawn(&mut cmd) {
+            Ok(c) => c,
+            Err(e) => {
+                remove_prompt_file();
+                return Err(Error::Environment(format!("couldn't start Claude Code ({}): {e}", options.executable)));
+            }
+        };
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
@@ -205,6 +250,7 @@ impl ClaudeProcess {
             // On Windows this closes the tree's job: nothing Claude started outlives it.
             ProcessGroup::release(out_shared.child.lock().unwrap().id());
             out_shared.exited.store(true, Ordering::SeqCst);
+            remove_prompt_file();
             let stderr = err_text.lock().unwrap().clone();
             out_shared.log_line(
                 &json!({"type": "host_exit", "ts": crate::timeutil::now_rfc3339(), "code": code}).to_string(),
@@ -377,6 +423,16 @@ mod tests {
                 && !a.contains(&"--model".to_string())
                 && !a.contains(&"--effort".to_string())
         );
+        // a long system prompt goes in a file on Windows, where a command line is capped
+        assert!(!o.prompt_in_file() && has("--append-system-prompt", "ctx"));
+        let long = ClaudeOptions { system_prompt_append: "x".repeat(40_000), ..Default::default() };
+        assert_eq!(long.prompt_in_file(), cfg!(windows));
+        let a = long.arguments_with(Some(Utf8Path::new("/tmp/p.md")));
+        assert!(a.windows(2).any(|w| w[0] == "--append-system-prompt-file" && w[1] == "/tmp/p.md"));
+        assert!(!a.contains(&"--append-system-prompt".to_string()) && a.iter().all(|x| x.len() < 1000));
+        let f = write_prompt_file("long instructions").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "long instructions");
+        std::fs::remove_file(f).unwrap();
     }
 
     #[test]

@@ -25,6 +25,7 @@ export type BrandPreset = Filled<G.BrandPreset>;
 export type BrandRef = Filled<G.BrandRef>;
 export type AssetRef = Filled<G.AssetRef>;
 export type Intent = Filled<G.Intent>;
+export type Finish = Filled<G.Finish>;
 export type { MediaKind, MediaRole, IntentKind, RunStatus, RunKind } from './generated/project';
 
 export interface Settings {
@@ -47,6 +48,8 @@ export interface Settings {
   eleven_default_credit_cap: number;
   eleven_cache_limit_bytes: number;
   words_per_minute: number;
+  /** How videos are finished unless a project keeps its own. */
+  finish: Finish;
   cleanup_older_than_days: number;
   onboarding_done: boolean;
 }

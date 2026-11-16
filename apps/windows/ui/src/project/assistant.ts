@@ -6,7 +6,7 @@ import { Signal } from '../store';
 import { claudeAvailable } from '../app-state';
 import { toast } from '../dialogs';
 import type { ProjectDocument } from './document';
-import type { ClaudeQuestion, Hunk } from '../types';
+import type { ClaudeQuestion, Hunk, Issue } from '../types';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'note' | 'usage' | 'error' | 'question';
@@ -45,6 +45,11 @@ export class Assistant {
   review = new Signal<Review | null>(null);
   /** The composer's draft (Ask Claude to fix fills it). */
   draft = new Signal('');
+  /** Send what validation found with each message, so Claude can fix it without the findings
+   *  being copied over by hand. On by default. */
+  includeValidation = new Signal(true);
+  /** The next message already carries its own findings (the dry run's), so none are added. */
+  private skipValidationOnce = false;
   private token: number | null = null;
   private stopRequested = false;
   private sessionsDir = '';
@@ -132,12 +137,8 @@ export class Assistant {
     } catch {
       return;
     }
-    let full = prompt;
-    let attachment: string | undefined;
-    if (opts.selection) {
-      full += `\n\n---\nContext from the editor:\n- Selected text in spec.md (lines ${opts.selection.from}–${opts.selection.to}):\n\n\`\`\`markdown\n${opts.selection.text}\n\`\`\``;
-      attachment = `Selection ${opts.selection.from}–${opts.selection.to}`;
-    }
+    const { prompt: full, labels } = await this.compose(prompt, opts.selection);
+    const attachment = labels.length ? labels.join(' · ') : undefined;
     const s = this.session();
     this.push({ role: 'user', text: opts.display ?? prompt, attachment });
     if (s.autoNamed && s.messages.filter((m) => m.role === 'user').length === 1) {
@@ -151,7 +152,7 @@ export class Assistant {
         session_dir: `${this.sessionsDir}\\${s.id}`,
         spec: this.getSpec(),
         prompt: full,
-        model: this.doc.p.models.assistant,
+        model: this.doc.assistantModel,
         effort: this.doc.p.models.effort ?? null,
         web_access: !!this.doc.p.models.web_access,
         resume: s.claudeSession ?? null,
@@ -226,6 +227,8 @@ export class Assistant {
           if (t) {
             t.failed = true;
             if (e.detail) t.detail = e.detail;
+            // what was tried and why it didn't work, in place of the bare summary
+            if (e.text) t.text = e.text;
           }
         }
         break;
@@ -311,10 +314,65 @@ export class Assistant {
     if (text !== this.getSpec()) this.applySpec(text);
   }
 
-  /** Validation › Ask Claude to fix the spec: a new session with the findings drafted. */
+  /** The dry run's findings sheet › Ask Claude to fix the spec: a new session with the findings
+   *  drafted. The draft carries its own findings, so validation's aren't added to it. */
   async askToFix(readiness: unknown) {
     this.newSession();
     this.draft.value = await core<string>('validation.fix_prompt', { readiness });
+    this.skipValidationOnce = true;
     this.showTab('claude');
+  }
+
+  /** How many findings would go with the next message: the last validation's, or the live spec
+   *  notes when the project hasn't been validated yet. */
+  get validationFindingCount(): number {
+    const r = this.doc.report.value;
+    return r ? r.issues.length : this.doc.lint.value.length;
+  }
+
+  /** The findings as text for Claude. Empty when there are none. */
+  async validationContext(): Promise<string> {
+    const r = this.doc.report.value;
+    if (r) {
+      const c = await core<{ context: string }>('validation.assistant_context', { report: r }).catch(() => null);
+      return c?.context ?? '';
+    }
+    const lint = this.doc.lint.value;
+    if (!lint.length) return '';
+    const lines = lint.map((l) => `- [${l.severity}] ${l.message} (spec.md line ${l.line})`).join('\n');
+    return `Notes on the spec from the editor's live check (these can be fixed in spec.md):\n${lines}\n`;
+  }
+
+  /** The prompt with the app's context (the selection, validation's findings) and the labels the
+   *  transcript shows for it. */
+  private async compose(text: string, selection?: { text: string; from: number; to: number }): Promise<{ prompt: string; labels: string[] }> {
+    const context: string[] = [];
+    const labels: string[] = [];
+    if (selection) {
+      context.push(`Selected text in spec.md (lines ${selection.from}–${selection.to}):\n\n\`\`\`markdown\n${selection.text}\n\`\`\``);
+      labels.push(`Selection ${selection.from}–${selection.to}`);
+    }
+    if (this.includeValidation.value && !this.skipValidationOnce) {
+      const findings = await this.validationContext();
+      if (findings) {
+        context.push(`${findings}\nThis is background: act on it when my message asks for fixes or when a finding bears on what I asked; otherwise just keep it in mind.`);
+        const n = this.validationFindingCount;
+        labels.push(`Validation: ${n} finding${n === 1 ? '' : 's'}`);
+      }
+    }
+    this.skipValidationOnce = false;
+    return { prompt: context.length ? `${text}\n\n---\nContext from the app:\n\n${context.join('\n\n')}` : text, labels };
+  }
+
+  /** Validation › Ask Claude to Fix: the Claude tab with the request written, for every finding
+   *  or for one. The findings themselves go along as context when it is sent. */
+  async askToFixFindings(issue?: Issue) {
+    const r = this.doc.report.value;
+    if (this.running.value || !r) return;
+    const c = await core<{ request: string }>('validation.assistant_context', issue ? { report: r, only: issue.id } : { report: r }).catch(() => null);
+    this.includeValidation.value = true;
+    this.skipValidationOnce = false;
+    this.showTab('claude');
+    this.draft.value = c?.request ?? 'Fix the validation findings that can be fixed in the spec.';
   }
 }

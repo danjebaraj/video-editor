@@ -74,7 +74,7 @@ export function showRunConfirm(w: ProjectWindow, plan: RunPlan) {
       h('dt', null, 'Estimated cost'), h('dd', null, `${usd(est.claude_usd_low)} – ${usd(est.claude_usd_high)} (approximate)${est.eleven_credits ? ` · ${est.eleven_credits} ElevenLabs credits` : ''}`),
       h('dt', null, 'Output folder'), h('dd', { class: 'path small' }, plan.outputFolder),
     ),
-    plan.revise ? h('blockquote', null, plan.revise.feedback) : h('label', { class: 'check' }, dryToggle, h('span', null, `Do a dry run first with ${modelName(w.doc.p.models.dry_run)}`)),
+    plan.revise ? h('blockquote', null, plan.revise.feedback) : h('label', { class: 'check' }, dryToggle, h('span', null, `Do a dry run first with ${modelName(w.doc.dryRunModel)}`)),
     warnings.length ? h('div', { class: 'note warn' }, h('strong', null, `${warnings.length} warning(s) will be accepted for this run`), h('ul', { class: 'small' }, warnings.slice(0, 5).map((i) => h('li', null, i.title)))) : null,
   );
   s.footer.append(

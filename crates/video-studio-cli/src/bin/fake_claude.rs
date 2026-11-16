@@ -260,8 +260,20 @@ fn main() {
     let hook = arg_value(&args, "--settings")
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().map(str::to_string));
+    // As the real CLI does: a prompt file that isn't there is an error before anything starts.
+    let prompt_file = arg_value(&args, "--append-system-prompt-file");
+    let system_prompt = match &prompt_file {
+        Some(f) => match std::fs::read_to_string(f) {
+            Ok(t) => Some(t),
+            Err(_) => {
+                eprintln!("Error: Append system prompt file not found: {f}");
+                std::process::exit(1);
+            }
+        },
+        None => arg_value(&args, "--append-system-prompt"),
+    };
     trace(
-        json!({"start": true, "args": args, "cwd": std::env::current_dir().ok().map(|p| p.display().to_string()), "resumed": arg_value(&args, "--resume"), "context_env": std::env::var("VIDEO_STUDIO_RUN_CONTEXT").is_ok()}),
+        json!({"start": true, "args": args, "cwd": std::env::current_dir().ok().map(|p| p.display().to_string()), "resumed": arg_value(&args, "--resume"), "context_env": std::env::var("VIDEO_STUDIO_RUN_CONTEXT").is_ok(), "system_prompt_chars": system_prompt.map(|s| s.chars().count()), "system_prompt_file": prompt_file.is_some()}),
     );
 
     // stdin: the first user message starts the turn; control responses answer permission requests.

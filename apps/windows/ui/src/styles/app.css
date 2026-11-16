@@ -197,7 +197,9 @@ fluent-button.danger-button { --colorBrandBackground: var(--danger); margin: 0 0
 .msg.tool { font-size: 12px; color: var(--text-muted); }
 .msg.tool summary { cursor: pointer; }
 .msg.tool pre { font-family: var(--font-mono); font-size: 11px; background: var(--code-bg); padding: 6px; border-radius: 4px; overflow: auto; max-height: 240px; }
-.msg.failed { color: var(--danger); }
+.msg.failed { color: var(--warn); }
+/* a failed step: up to three lines, so the reason shows */
+.msg.tool.failed:not([open]) summary { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .msg.error { color: var(--danger); background: rgba(196, 43, 28, 0.08); padding: 8px; border-radius: var(--radius); }
 .msg.usage { text-align: right; }
 .starters { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
@@ -316,3 +318,11 @@ dialog.sheet > h2 { padding: 20px 24px 0; }
   dialog.sheet { backdrop-filter: none; }
 }
 html.high-contrast body { background: Canvas; }
+
+/* Finish (Settings › Finish, Project › Finish) */
+.finish-editor { display: flex; flex-direction: column; gap: 10px; max-width: 460px; }
+.finish-editor.compact { gap: 8px; }
+.finish-editor hr { border: 0; border-top: 1px solid var(--stroke); margin: 2px 0; width: 100%; }
+.finish-seconds { align-items: center; gap: 8px; }
+.finish-seconds .num { font-variant-numeric: tabular-nums; min-width: 3.5em; text-align: right; }
+.finish-seconds input.stepper { width: 5.5em; }

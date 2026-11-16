@@ -166,7 +166,18 @@ fn full_run_produces_outputs_events_and_complete_logs() {
             && args.contains(&"--permission-prompt-tool")
             && args.iter().any(|a| a.contains("Read,Write,Edit,Glob,Grep,Bash,AskUserQuestion,TodoWrite"))
     );
-    let prompt_arg = args[args.iter().position(|a| *a == "--append-system-prompt").unwrap() + 1];
+    // Inline, or (a long prompt on Windows) in a file the CLI reads and the host removes after:
+    // then the copy kept with the logs is what Claude was given.
+    let kept;
+    let prompt_arg = match args.iter().position(|a| *a == "--append-system-prompt") {
+        Some(i) => args[i + 1],
+        None => {
+            assert!(args.contains(&"--append-system-prompt-file") && start["system_prompt_file"] == true, "{args:?}");
+            kept = std::fs::read_to_string(run.join("logs/prompt-system.md")).unwrap();
+            assert_eq!(start["system_prompt_chars"].as_u64(), Some(kept.chars().count() as u64));
+            kept.as_str()
+        }
+    };
     assert!(
         prompt_arg.contains("media-manifest.json")
             && prompt_arg.contains("outputs/linkedin/linkedin.mp4")

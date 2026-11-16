@@ -73,12 +73,18 @@ export function runTab(w: ProjectWindow): HTMLElement {
     );
   }
 
-  function transcriptItem(t: { role: string; text: string }): HTMLElement {
-    const failed = t.role === 'tool' && /failed$/.test(t.text);
+  function transcriptItem(t: { role: string; text: string; detail?: string; failed?: boolean }): HTMLElement {
+    const failed = t.role === 'tool' && !!t.failed;
     const cls = `msg ${t.role}${failed ? ' failed' : ''}`;
     if (t.role === 'assistant') return h('div', { class: cls }, markdownText(t.text));
     if (t.role === 'error') return h('div', { class: cls }, copyable(h('span', null, t.text), 'Copy the error', () => t.text));
-    if (t.role === 'tool') return h('div', { class: `${cls} md-inline` }, icon(Icons.wrench), ' ', ...inline(t.text));
+    if (failed) {
+      // Not the run failing: a step that didn't work, which Claude reads and usually retries.
+      const all = `${t.text}\n\n${t.detail ?? ''}`.trim();
+      return h('div', { class: cls, title: `This step didn’t work. Claude sees the same message and usually tries again; the run continues.${t.detail ? `\n\n${t.detail}` : ''}` },
+        copyable(h('span', { class: 'md-inline' }, icon(Icons.warning), ' ', ...inline(t.text)), 'Copy the details', () => all));
+    }
+    if (t.role === 'tool') return h('div', { class: `${cls} md-inline`, title: t.detail ?? '' }, icon(Icons.wrench), ' ', ...inline(t.text));
     return h('div', { class: cls }, t.text);
   }
 

@@ -1,4 +1,4 @@
-// The Settings window (spec §18; Ctrl+,): General, Claude, cutline, ElevenLabs, Storage, Editor.
+// The Settings window (spec §18; Ctrl+,): General, Finish, Claude, cutline, ElevenLabs, Storage, Editor.
 // Settings are the library's settings.json, shared with the CLI.
 
 import { h, clear, button, iconButton, Icons, field, textInput, numberInput, select, checkbox, bytes, spinner, when } from '../dom';
@@ -8,11 +8,13 @@ import { settings, saveSettings, environment, keyStatus, detect, models, library
 import { openFolders, openFiles, confirm, toast, Filters } from '../dialogs';
 import { modelPicker, effortPicker } from '../widgets';
 import { copyable } from '../text-tools';
+import { finishEditor, filledFinish, sameFinish, DEFAULT_FINISH } from '../finish';
 import type { Settings } from '../types';
 
-type Pane = 'general' | 'claude' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
+type Pane = 'general' | 'finish' | 'claude' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
 const PANES: [Pane, string, string][] = [
   ['general', 'General', Icons.settings],
+  ['finish', 'Finish', Icons.video],
   ['claude', 'Claude', Icons.chat],
   ['cutline', 'cutline', Icons.video],
   ['elevenlabs', 'ElevenLabs', Icons.audio],
@@ -63,6 +65,12 @@ export async function mount(root: HTMLElement) {
             if (dirs.length) save((x) => (x.media_roots = [...new Set([...x.media_roots, ...dirs])]));
           }, { glyph: Icons.add }));
         break;
+      case 'finish':
+        clear(body, h('h2', null, 'How every video is finished'),
+          h('p', { class: 'muted' }, 'Each run applies these choices on top of the spec: how scenes join, whether cuts follow the music, and how the music comes in and goes out. A project follows them unless it is given its own under Project › Finish. A spec can still ask for something different in words.'),
+          finishEditor(filledFinish(s.finish), (f) => save((x) => (x.finish = f))),
+          h('div', { class: 'row' }, button('Restore Defaults', () => save((x) => (x.finish = { ...DEFAULT_FINISH })), { disabled: sameFinish(s.finish, DEFAULT_FINISH), title: 'Smooth transitions of 0.4 s, cuts on the beat, a short lead-in, and gentle music fades' })));
+        break;
       case 'claude': {
         const c = env?.claude;
         const status = !env ? 'Checking…' : !c ? 'Claude Code wasn’t found.' : !c.supported ? `${c.version_text} is too old: ${env.min_claude_version} or later is needed.` : !c.git_bash ? `${c.version_text}, but Git for Windows wasn’t found (Claude Code runs commands through Git Bash).` : env.signed_in === false ? `${c.version_text}, not signed in. Run claude in a terminal and sign in.` : `${c.version_text} — ${c.path}`;
@@ -70,7 +78,8 @@ export async function mount(root: HTMLElement) {
           h('div', { class: 'row' }, h('p', { class: 'grow', role: 'status' }, status), button('Re-check', () => detect(true), { glyph: Icons.refresh })),
           c?.git_bash ? h('p', { class: 'muted small' }, `Git Bash: ${c.git_bash}`) : null,
           field('Claude Code path', textInput(s.claude_path, (v) => save((x) => (x.claude_path = v)).then(() => detect(true)), { placeholder: 'Detect automatically' })),
-          h('h3', null, 'Default models for new projects'),
+          h('h3', null, 'Default models'),
+          h('p', { class: 'muted small' }, 'Projects use these unless they choose their own in Project › Models.'),
           field('Spec assistant', modelPicker(s.default_assistant_model, (v) => save((x) => (x.default_assistant_model = v)), { label: 'Default spec assistant model' })),
           field('Dry run', modelPicker(s.default_dry_run_model, (v) => save((x) => (x.default_dry_run_model = v)), { label: 'Default dry run model' })),
           field('Production', modelPicker(s.default_production_model, (v) => save((x) => (x.default_production_model = v)), { label: 'Default production model' })),

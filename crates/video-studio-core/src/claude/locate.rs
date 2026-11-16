@@ -315,8 +315,16 @@ pub fn claude_task_dirs(cwd: &Utf8Path) -> Vec<Utf8PathBuf> {
     }
     #[cfg(not(unix))]
     {
+        // On Windows the output goes to `%TEMP%\claude\<hash>\<session>\tasks\<id>.output`
+        // (seen with Claude Code on Windows 11). The hash stands for the working directory but
+        // isn't a documented function of it, so the whole `claude` folder under the temporary
+        // folder is allowed: it holds only Claude Code's own scratch files for this user.
         let _ = cwd;
-        Vec::new()
+        let mut roots: Vec<Utf8PathBuf> = Utf8PathBuf::from_path_buf(std::env::temp_dir()).into_iter().collect();
+        if let Some(t) = std::env::var("CLAUDE_CODE_TMPDIR").ok().filter(|s| !s.is_empty()) {
+            roots.push(Utf8PathBuf::from(t));
+        }
+        roots.into_iter().map(|r| r.join("claude")).collect()
     }
 }
 
@@ -446,6 +454,14 @@ mod tests {
         // Claude Code's slug for a Windows folder: `C:\GitHub\video-editor` → `C--GitHub-video-editor`
         let win = claude_project_dir(r"C:\Runs\2026-11-14-1753-shorts".into()).unwrap();
         assert!(win.ends_with("projects/C--Runs-2026-11-14-1753-shorts"), "{win}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn background_command_output_is_under_the_temporary_folder() {
+        let dirs = claude_task_dirs(r"C:\Runs\r1".into());
+        let temp = Utf8PathBuf::from_path_buf(std::env::temp_dir()).unwrap();
+        assert_eq!(dirs.first(), Some(&temp.join("claude")), "{dirs:?}");
     }
 
     #[test]

@@ -4,7 +4,7 @@
 import { h, clear, button, iconButton, icon, Icons, checkbox, emptyState, select } from '../../dom';
 import { request } from '../../bridge';
 import { effect } from '../../store';
-import { environment, claudeAvailable, modelName } from '../../app-state';
+import { environment, claudeAvailable, modelName, settings } from '../../app-state';
 import { prompt, confirm, openFolders } from '../../dialogs';
 import { questionCard } from '../../widgets';
 import { copyButton, copyable, inline, markdownText } from '../../text-tools';
@@ -48,6 +48,12 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
     if (box.value !== v) box.value = v;
   });
 
+  const modelLabel = h('span', { class: 'muted small', title: 'The spec assistant model. Change it in the Project inspector.' });
+  effect([w.doc.project, settings], () => {
+    const name = modelName(w.doc.assistantModel);
+    if (modelLabel.textContent !== name) modelLabel.textContent = name;
+  });
+
   effect([a.sessions, a.current, a.running, environment], () => {
     const sessions = [...a.sessions.value].reverse();
     clear(
@@ -66,7 +72,7 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
         const c = await confirm('Delete this session?', 'Its transcript is removed. The spec isn’t changed.', ['Delete', 'Cancel'], true);
         if (c === 0) a.remove(a.current.value);
       }, { disabled: a.running.value }),
-      h('span', { class: 'muted small', title: 'Spec assistant model' }, modelName(w.doc.p.models.assistant)),
+      modelLabel,
     );
     renderTranscript();
     sendBtn.toggleAttribute('disabled', a.running.value || !claudeAvailable());
@@ -78,9 +84,16 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
     composerNote.hidden = !a.review.value;
   });
 
-  effect([w.doc.project, w.selectionLines, w.previewOn], () => {
+  effect([w.doc.project, w.selectionLines, w.previewOn, w.doc.report, w.doc.lint, a.includeValidation], () => {
     const sel = w.selectionLines.value;
-    clear(selectionToggle, sel && !w.previewOn.value ? checkbox(`Selection, lines ${sel[0]}–${sel[1]}`, includeSelection, (v) => (includeSelection = v)) : null);
+    const n = a.validationFindingCount;
+    clear(
+      selectionToggle,
+      sel && !w.previewOn.value ? checkbox(`Selection, lines ${sel[0]}–${sel[1]}`, includeSelection, (v) => (includeSelection = v)) : null,
+      n > 0
+        ? checkbox(`Validation findings (${n})`, a.includeValidation.value, (v) => (a.includeValidation.value = v), { title: 'Send what validation found with your message, so Claude can fix it. Findings outside the spec are marked as such.' })
+        : null,
+    );
     const folders = w.doc.p.assistant_folders ?? [];
     clear(
       actions,
@@ -122,7 +135,12 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
         return h('div', { class: 'msg assistant', 'aria-label': `Claude: ${m.text}` }, markdownText(m.text));
       case 'tool': {
         const detail = m.detail;
-        const det = h('details', { class: `msg tool${m.failed ? ' failed' : ''}` }, h('summary', { class: 'md-inline' }, icon(m.failed ? Icons.dismiss : Icons.wrench), ' ', ...inline(m.text)), detail ? copyable(h('pre', null, detail), 'Copy the details', () => detail) : null);
+        const det = h(
+          'details',
+          { class: `msg tool${m.failed ? ' failed' : ''}`, title: m.failed ? 'This step didn’t work. Claude sees the same message and usually tries again.' : '' },
+          h('summary', { class: 'md-inline' }, icon(m.failed ? Icons.warning : Icons.wrench), ' ', ...inline(m.text)),
+          detail ? copyable(h('pre', null, detail), 'Copy the details', () => detail) : null,
+        );
         return det;
       }
       case 'question':
