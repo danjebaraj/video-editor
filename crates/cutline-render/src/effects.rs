@@ -327,7 +327,10 @@ pub fn zoom_chain(c: &TClip, g: &Geometry, dur: f64) -> Option<String> {
     }
     let (w, h) = (g.width, g.height);
     let t = format!("((in-1)/({}))", g.fps.ff());
-    let s = format!("({})", terms.iter().map(|x| x.expr(&t)).collect::<Vec<_>>().join("*"));
+    // Never below 1: the numbers are written with six decimals, so a zoom that has eased back
+    // out can come to 0.9999999. The window would then be wider than the frame, its `clip` range
+    // empty, and ffmpeg stops the whole segment with "Invalid argument".
+    let s = format!("max({},1)", terms.iter().map(|x| x.expr(&t)).collect::<Vec<_>>().join("*"));
     let (fx, fy) = match kb {
         Some(((x0, y0), (x1, y1), ez)) => {
             let u = ease_expr(ez, &u_expr(&t, 0.0, dur));

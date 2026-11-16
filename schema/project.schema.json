@@ -4574,6 +4574,10 @@
           "$ref": "#/$defs/ReframeMode",
           "default": "cover"
         },
+        "narrower_only": {
+          "description": "`rect` mode: crop only in an output that is narrower than the source (4:5, 9:16). In an\noutput as wide as the source or wider the clip is shown whole, as if it had no\n`reframe`, and takes the project's `default_frame`. For one project that exports both a\n16:9 and vertical versions of a screen recording.",
+          "type": "boolean"
+        },
         "pad_color": {
           "description": "fit_pad color (default brand background); also fills the bars of a `rect` reframe\nwhose rect is larger than any crop of the target's aspect ratio.",
           "type": [

@@ -91,8 +91,9 @@ fn init_validate_dryrun_preview() {
         assert!(dir.join("cuts").is_dir() && dir.join("annotations").is_dir() && dir.join("reframe").is_dir());
     }
     assert!(!proj.join("review").join("summary.md").exists());
-    // --out still names the folder itself
-    let (code, v, err) = run_json(bin().arg("review").arg(&pf).args(["--ocr", "off", "--out", "review-x"]));
+    // --out still names the folder itself, from where the command is run (as `preview --out` does)
+    let (code, v, err) =
+        run_json(bin().current_dir(&proj).arg("review").arg(&pf).args(["--ocr", "off", "--out", "review-x"]));
     assert_eq!(code, 0, "{err} {v}");
     assert!(proj.join("review-x").join("summary.md").exists());
 }

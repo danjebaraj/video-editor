@@ -124,7 +124,7 @@ impl Finish {
             )),
         }
         s.push_str(&format!(
-            "- **Open and close with room to breathe.** The picture and the music start first and the first spoken word comes {lead} s later: give the voice-over layer `start: {lead}` (after a title card, start it as the card hands over). Open on a title card or the strongest still picture, faded up from black over about half a second, not on a cold cut into motion. After the last spoken word the end card holds for another {tail} s, so the video never stops on the final syllable. Plan the length with both in mind.\n",
+            "- **Open and close with room to breathe.** The picture and the music start first and the first spoken word comes {lead} s later: give the voice-over layer `start: {lead}` (after a title card, start it as the card hands over). Open on a title card or the strongest still picture, not on a cold cut into motion. The very first frame is that picture, never black: feeds and players show it before anything plays, and QA flags a black one (`first_frame`). Ease the title's text in over the card instead of fading the whole picture up from black. After the last spoken word the end card holds for another {tail} s, so the video never stops on the final syllable. Plan the length with both in mind.\n",
             lead = secs(f.lead_in_s),
             tail = secs(f.tail_s),
         ));
@@ -166,6 +166,7 @@ mod tests {
             "duration: 0.4",
             "snap_to_beats",
             "start: 1.2",
+            "never black",
             "another 2 s",
             "fade_in: 1",
             "fade_out: 2",
