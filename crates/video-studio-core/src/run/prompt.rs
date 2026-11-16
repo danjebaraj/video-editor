@@ -20,6 +20,9 @@ pub struct PromptInput<'a> {
     pub manifest: &'a [ManifestEntry],
     pub cutline_guide: &'a str,
     pub eleven_available: bool,
+    /// Who speaks the voice-over (Settings › Voice), and whether Cartesia's key is stored.
+    pub voice_provider: crate::eleven::VoiceProvider,
+    pub cartesia_available: bool,
     pub default_voice: Option<&'a str>,
     /// How to choose a voice when none is fixed (Settings › ElevenLabs), in words.
     pub voice_choosing: Option<&'a str>,
@@ -206,7 +209,8 @@ fn audio_section(input: &PromptInput) -> String {
          - Music and sound effects: `video-studio standin audio --out audio/<name>.mp3 --seconds <n>`.\n\
          {voice}\n");
     }
-    if !input.eleven_available {
+    let cartesia = input.voice_provider == crate::eleven::VoiceProvider::Cartesia;
+    if !input.eleven_available && !(cartesia && input.cartesia_available) {
         return "Audio: no ElevenLabs key is configured, so nothing can be generated. Use only audio files from the media manifest; if the spec needs narration or music that isn't attached, say so in summary.md under Known issues.\n".into();
     }
     let voice = match input.default_voice {
@@ -230,9 +234,42 @@ fn audio_section(input: &PromptInput) -> String {
          - When a take is wrong (a long pause, a rushed or dragging read, a mispronounced word), ask for another with `--take 2`, then `--take 3`: same text, same settings, a new reading. Do not change the settings for one passage; if the settings are wrong, change them for all and voice every passage again.\n\
          - After transcribing, compare the passages: `cutline validate` reports one spoken much faster or slower than the rest (`W_VOICE_PACE`). The render brings every voice file to the same loudness, so do not correct their levels with `gain_db`.\n\
          {voice}\n\
+         {provider}\
          Budget: this run may spend at most {} ElevenLabs credits. Every call is quoted first; a call that would pass the cap fails with a message telling you how much is left. Identical requests are served from a cache at no cost, so never change text just to regenerate.\n",
-        rc.eleven_credit_cap
+        rc.eleven_credit_cap,
+        provider = cartesia_note(input)
     )
+}
+
+/// What changes when Cartesia speaks the voice-over instead of ElevenLabs.
+fn cartesia_note(input: &PromptInput) -> String {
+    use crate::finish::Energy;
+    if input.voice_provider != crate::eleven::VoiceProvider::Cartesia {
+        return String::new();
+    }
+    if !input.cartesia_available {
+        return "The voice-over of this run is to be spoken by Cartesia (Settings › ElevenLabs › Voice-over by), but no Cartesia key is stored, so `video-studio eleven tts` will fail. Do not generate the voice another way: use voice-over files from the media manifest if there are any, and otherwise say in summary.md under Known issues that the Cartesia key is missing.\n".into();
+    }
+    let settings = match input.finish.energy {
+        Energy::Upbeat => {
+            "For this video's upbeat read pass `--settings '{\"speed\": 1.03, \"emotion\": \"excited\"}'`"
+        }
+        Energy::Balanced => "For this video's even read pass no `--settings`",
+        Energy::Calm => "For this video's calm read pass `--settings '{\"speed\": 0.97, \"emotion\": \"calm\"}'`",
+    };
+    let mut s = format!(
+        "The voice-over of this run is spoken by Cartesia, not ElevenLabs (Settings › ElevenLabs › Voice-over by). The commands stay the same: in this run `video-studio eleven tts` and `video-studio eleven voices` reach Cartesia, and voice IDs are Cartesia's. What differs:\n\
+         - `--settings` takes Cartesia's own: `{{\"speed\": 0.6 to 1.5, \"emotion\": \"<one word, e.g. calm, content, excited>\", \"volume\": 0.5 to 2}}`. {settings}, in place of any ElevenLabs settings (stability, similarity_boost, style) the Finish section gives; the brand's are ElevenLabs' too and only their speed is used.\n\
+         - `--model` is a Cartesia model (default `{model}`). Delivery tags in square brackets are read aloud: write none.\n\
+         - `--before-file` and `--after-file` have no effect, so give every passage complete sentences. `--take <n>` still gives another reading.\n\
+         - A character costs one credit, counted against the same cap.\n\
+         - Music, sound effects and transcripts (`eleven music`, `sfx`, `scribe`) are still ElevenLabs.\n",
+        model = crate::eleven::cartesia::DEFAULT_MODEL
+    );
+    if !input.eleven_available {
+        s.push_str("No ElevenLabs key is configured, so `eleven music`, `eleven sfx` and `eleven scribe` will fail: take word timings from `cutline transcribe` instead, use music and sound effects only from the media manifest, and say in summary.md what the video lacks for it.\n");
+    }
+    s
 }
 
 /// How a production run makes footage of an app that nobody recorded beforehand.
@@ -526,6 +563,8 @@ mod tests {
             cutline_guide: "GUIDE TEXT",
             eleven_available: true,
             default_voice: Some("voice-abc"),
+            voice_provider: Default::default(),
+            cartesia_available: false,
             voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
@@ -577,6 +616,8 @@ mod tests {
             cutline_guide: "",
             eleven_available: false,
             default_voice: None,
+            voice_provider: Default::default(),
+            cartesia_available: false,
             voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
@@ -600,6 +641,8 @@ mod tests {
             cutline_guide: "",
             eleven_available: true,
             default_voice: None,
+            voice_provider: Default::default(),
+            cartesia_available: false,
             voice_choosing: Some(&how),
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
@@ -624,6 +667,8 @@ mod tests {
             cutline_guide: "",
             eleven_available: true,
             default_voice: None,
+            voice_provider: Default::default(),
+            cartesia_available: false,
             voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
@@ -665,6 +710,8 @@ mod tests {
                     cutline_guide: "",
                     eleven_available: true,
                     default_voice: None,
+                    voice_provider: Default::default(),
+                    cartesia_available: false,
                     voice_choosing: None,
                     platforms: &platforms,
                     finish: &crate::finish::Finish::default(),

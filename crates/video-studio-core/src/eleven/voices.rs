@@ -12,6 +12,39 @@ use serde::{Deserialize, Serialize};
 use super::VoiceInfo;
 use crate::{paths, timeutil};
 
+/// Who speaks the voice-over (Settings › Voice). Music, sound effects and transcripts are
+/// ElevenLabs' either way.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceProvider {
+    #[default]
+    Elevenlabs,
+    Cartesia,
+}
+
+impl VoiceProvider {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Elevenlabs => "ElevenLabs",
+            Self::Cartesia => "Cartesia",
+        }
+    }
+    /// The secret store entry of its API key.
+    pub fn key_name(self) -> &'static str {
+        match self {
+            Self::Elevenlabs => crate::platform::ELEVEN_KEY,
+            Self::Cartesia => crate::platform::CARTESIA_KEY,
+        }
+    }
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "elevenlabs" | "eleven" | "" => Some(Self::Elevenlabs),
+            "cartesia" => Some(Self::Cartesia),
+            _ => None,
+        }
+    }
+}
+
 /// Which voices come first when a run has to choose one.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -139,13 +172,22 @@ pub fn rank(
 
 /// What a run is told when no voice is fixed.
 pub fn choosing(prefer: VoicePreference, gender: VoiceGender) -> String {
+    choosing_from(VoiceProvider::Elevenlabs, prefer, gender)
+}
+
+/// The same for a given voice provider: the list is that provider's.
+pub fn choosing_from(provider: VoiceProvider, prefer: VoicePreference, gender: VoiceGender) -> String {
     let who = match gender.word() {
         Some(g) => format!("a {g} voice"),
         None => "a voice of either gender".to_string(),
     };
     format!(
-        "Settings › ElevenLabs asks for {who}, and for {}. `video-studio eleven voices` lists the voices that way, best first: take the first one whose description fits the tone of the video (add `--search <words>` to narrow the list), and name it in summary.md.",
-        prefer.describe()
+        "Settings › ElevenLabs asks for {who}, and for {}. `video-studio eleven voices` lists the {} that way, best first: take the first one whose description fits the tone of the video (add `--search <words>` to narrow the list), and name it in summary.md.",
+        prefer.describe(),
+        match provider {
+            VoiceProvider::Elevenlabs => "voices",
+            VoiceProvider::Cartesia => "Cartesia voices",
+        }
     )
 }
 

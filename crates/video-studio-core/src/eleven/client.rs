@@ -240,7 +240,7 @@ impl Client {
     }
 }
 
-fn urlencode(s: &str) -> String {
+pub(super) fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {

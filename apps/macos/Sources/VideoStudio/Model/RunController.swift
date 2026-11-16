@@ -164,7 +164,8 @@ final class RunController: ObservableObject {
         if kind == "production", plan.model != plan.runConfig.production_model { request["model"] = plan.model }
         if let r = plan.revise, kind == "production" { request["revise"] = ["previous_run": r.runID, "feedback": r.feedback] }
         if let t = plan.runConfig.question_timeout_s, t > 0 { request["question_timeout_s"] = t }
-        var options: [String: Any] = ["helper": Helper.path, "eleven_key_present": AppState.shared.keyStatus.present]
+        var options: [String: Any] = ["helper": Helper.path, "eleven_key_present": AppState.shared.keyStatus.present,
+                                      "cartesia_key_present": AppState.shared.cartesiaKeyStatus.present]
         for (k, v) in testOptions { options[k] = v }
         let toJSON: ([String: Any]) -> String = { String(data: (try? JSONSerialization.data(withJSONObject: $0)) ?? Data(), encoding: .utf8) ?? "{}" }
         let forwarder = EventForwarder { [weak self] line in self?.handle(line) }

@@ -275,10 +275,67 @@ struct ElevenSettings: View {
     @State private var newKey = ""
     @State private var testing = false
     @State private var cacheBytes: UInt64 = 0
+    @State private var newCartesiaKey = ""
+    @State private var testingCartesia = false
 
     var body: some View {
         Form {
-            Section("API key") {
+            Section("Voice-over") {
+                Picker("Voice-over by", selection: $app.settings.voice_provider) {
+                    Text("ElevenLabs").tag("elevenlabs")
+                    Text("Cartesia").tag("cartesia")
+                }
+                .pickerStyle(.segmented)
+                .help("Who speaks the narration. Music, sound effects and word timings come from ElevenLabs either way.")
+                if app.settings.voice_provider == "cartesia" {
+                    HStack {
+                        if app.cartesiaKeyStatus.present {
+                            Image(systemName: "key.fill").foregroundStyle(.green)
+                            Text(app.cartesiaKeyStatus.masked ?? "••••").font(.system(.body, design: .monospaced))
+                        } else {
+                            Image(systemName: "key").foregroundStyle(.secondary)
+                            Text("No Cartesia key stored").foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            testingCartesia = true
+                            Task {
+                                let s = await Task.detached { Helper.testKey(provider: "cartesia") }.value
+                                app.refreshCartesiaKeyStatus(test: true)
+                                testingCartesia = false
+                                _ = s
+                            }
+                        } label: { if testingCartesia { ProgressView().controlSize(.small) } else { Text("Test") } }
+                        .disabled(!app.cartesiaKeyStatus.present || testingCartesia)
+                        .accessibilityLabel("Test the Cartesia key")
+                        if app.cartesiaKeyStatus.present {
+                            Button("Remove", role: .destructive) {
+                                Task { _ = await Task.detached { Helper.deleteKey(provider: "cartesia") }.value; app.refreshCartesiaKeyStatus() }
+                            }
+                            .accessibilityLabel("Remove the Cartesia key")
+                        }
+                    }
+                    if app.cartesiaKeyStatus.works {
+                        Label("The key works.", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                    } else if let e = app.cartesiaKeyStatus.error {
+                        Label(e, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
+                    }
+                    HStack {
+                        SecureField("Paste a Cartesia key", text: $newCartesiaKey).accessibilityLabel("New Cartesia API key")
+                        Button("Save") {
+                            let key = newCartesiaKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                            newCartesiaKey = ""
+                            Task { _ = await Task.detached { Helper.setKey(key, provider: "cartesia") }.value; app.refreshCartesiaKeyStatus() }
+                        }
+                        .disabled(newCartesiaKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityLabel("Save the Cartesia key")
+                    }
+                    TextField("Cartesia voice ID", text: $app.settings.cartesia_default_voice, prompt: Text("Used when a brand preset has no Cartesia voice"))
+                    Text("Cartesia speaks the narration. ElevenLabs voice IDs don't apply to it: give the brand preset a Cartesia voice ID, set one here, or leave both empty and Claude chooses one by the preferences below. Music, sound effects and word timings still use the ElevenLabs key.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Section("ElevenLabs API key") {
                 HStack {
                     if app.keyStatus.present {
                         Image(systemName: "key.fill").foregroundStyle(.green)

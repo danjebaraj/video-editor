@@ -168,8 +168,9 @@ struct BrandEditor: View {
                     TextField("Caption style", text: $brand.caption_style, prompt: Text("Sentence captions, bottom third, high contrast"))
                     TextField("Music mood", text: $brand.music_mood, prompt: Text("Light, optimistic, unobtrusive"))
                 }
-                InspectorSection(title: "Voice (ElevenLabs)") {
+                InspectorSection(title: "Voice") {
                     TextField("Voice ID", text: $brand.voice.voice_id)
+                    TextField("Cartesia voice ID", text: Binding(get: { brand.voice.cartesia_voice_id ?? "" }, set: { brand.voice.cartesia_voice_id = $0.isEmpty ? nil : $0 }), prompt: Text("Used when Settings has Cartesia speak"))
                     TextField("Voice name", text: Binding(get: { brand.voice.name ?? "" }, set: { brand.voice.name = $0.isEmpty ? nil : $0 }), prompt: Text("For your reference"))
                     TextField("Model", text: Binding(get: { brand.voice.model ?? "" }, set: { brand.voice.model = $0.isEmpty ? nil : $0 }), prompt: Text("eleven_multilingual_v2"))
                     TextField("Settings (JSON)", text: $voiceSettings, prompt: Text("{\"stability\": 0.4, \"similarity_boost\": 0.8}"))

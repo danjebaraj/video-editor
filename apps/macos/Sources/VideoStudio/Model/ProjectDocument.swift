@@ -485,7 +485,7 @@ final class ProjectDocument: ObservableObject, Identifiable {
         save()
         let app = AppState.shared
         var args: Core.Args = ["project": Core.arg(project), "path": fileURL.path, "kind": kind, "run_config": selectedRunConfig?.id,
-                               "eleven_key_present": app.keyStatus.present, "eleven_remaining": app.keyStatus.remaining.map { NSNumber(value: $0) }]
+                               "eleven_key_present": app.keyStatus.present, "cartesia_key_present": app.cartesiaKeyStatus.present, "eleven_remaining": app.keyStatus.remaining.map { NSNumber(value: $0) }]
         if let env = app.environment { args["environment"] = Core.arg(env) }
         if let readiness { args["readiness"] = Core.arg(readiness) }
         guard let r: ValidateResult = try? await Core.async("validate", args) else {

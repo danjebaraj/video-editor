@@ -207,6 +207,10 @@ pub trait EnvProbe {
     fn eleven_key_present(&self) -> bool;
     /// Remaining ElevenLabs credits, when the key is present and the API answers.
     fn eleven_remaining(&self) -> Option<u64>;
+    /// Whether a Cartesia key is stored (it speaks the voice-over when Settings › Voice says so).
+    fn cartesia_key_present(&self) -> bool {
+        false
+    }
     /// Whether this computer lets the app record the screen and control other apps.
     fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
         None
@@ -242,6 +246,9 @@ impl EnvProbe for SystemEnv<'_> {
     }
     fn eleven_key_present(&self) -> bool {
         matches!(self.secrets.get(crate::platform::ELEVEN_KEY), Ok(Some(k)) if !k.is_empty())
+    }
+    fn cartesia_key_present(&self) -> bool {
+        matches!(self.secrets.get(crate::platform::CARTESIA_KEY), Ok(Some(k)) if !k.is_empty())
     }
     fn eleven_remaining(&self) -> Option<u64> {
         let key = self.secrets.get(crate::platform::ELEVEN_KEY).ok().flatten()?;
@@ -448,7 +455,15 @@ fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, ne
         },
     }
     if needs_audio {
-        if !env.eleven_key_present() {
+        let cartesia = input.settings.voice_provider == crate::eleven::VoiceProvider::Cartesia
+            && needs_generated_audio(input.project).0;
+        if cartesia && !env.cartesia_key_present() {
+            c.add("cartesia_key_missing", None, Severity::Blocker, "environment", "The voice-over is set to Cartesia, but there is no Cartesia API key".into(), Some("Add the key in Settings › ElevenLabs under Voice-over by, switch the voice-over back to ElevenLabs there, or attach a recorded voice-over file and mark its role.".into()), FixLink::target("settings", "elevenlabs"));
+        }
+        if !env.eleven_key_present() && cartesia {
+            // Cartesia speaks; ElevenLabs is still what makes music, sound effects and word timings.
+            c.add("eleven_key_missing", None, Severity::Warning, "environment", "There is no ElevenLabs API key for music, sound effects and word timings".into(), Some("Cartesia speaks the voice-over, but generated music and sound effects need ElevenLabs, and without it the timing of the words comes from cutline's own transcription. Add the key in Settings › ElevenLabs, or attach the music as a file.".into()), FixLink::target("settings", "elevenlabs"));
+        } else if !env.eleven_key_present() {
             c.add("eleven_key_missing", None, Severity::Blocker, "environment", "The spec needs generated audio, but there is no ElevenLabs API key".into(), Some("Add the key in Settings › ElevenLabs, or attach recorded voice-over and music files and mark their roles.".into()), FixLink::target("settings", "elevenlabs"));
         } else if let Some(remaining) = env.eleven_remaining() {
             est.eleven_remaining = Some(remaining);
@@ -680,12 +695,22 @@ fn check_spec(c: &mut Ctx, input: &ValidateInput, est: &Estimates) {
 fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput]) {
     let p = input.project;
     let (needs_voice, _) = needs_generated_audio(p);
-    let brand_voice = p.brand.as_ref().map(|b| b.snapshot.voice.voice_id.trim()).unwrap_or("");
-    if needs_voice && brand_voice.is_empty() && input.settings.eleven_default_voice.trim().is_empty() {
+    let cartesia = input.settings.voice_provider == crate::eleven::VoiceProvider::Cartesia;
+    let voice_of = |v: &brand::Voice| -> String {
+        if cartesia {
+            v.cartesia_voice_id.trim().to_string()
+        } else {
+            v.voice_id.trim().to_string()
+        }
+    };
+    let brand_voice = p.brand.as_ref().map(|b| voice_of(&b.snapshot.voice)).unwrap_or_default();
+    let default_voice =
+        if cartesia { &input.settings.cartesia_default_voice } else { &input.settings.eleven_default_voice };
+    if needs_voice && brand_voice.is_empty() && default_voice.trim().is_empty() {
         // A voice added to the preset in the library doesn't reach a project that already holds a
         // copy of the preset: say so, or the warning looks wrong.
         let waiting_in_library = p.brand.as_ref().is_some_and(|b| {
-            brand::get(input.library, &b.preset_id).is_some_and(|lib| !lib.voice.voice_id.trim().is_empty())
+            brand::get(input.library, &b.preset_id).is_some_and(|lib| !voice_of(&lib.voice).is_empty())
         });
         let (title, detail) = if waiting_in_library {
             (
@@ -695,7 +720,11 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
         } else {
             (
                 "No voice is chosen for the voice-over",
-                "Claude will pick one itself, following the voice preferences in Settings › ElevenLabs (female or male, tried or latest voices). To fix the voice, choose one in the brand preset or set a default voice in Settings › ElevenLabs.",
+                if cartesia {
+                    "Claude will pick a Cartesia voice itself, following the voice preferences in Settings › ElevenLabs (female or male, tried or latest voices). To fix the voice, give the brand preset a Cartesia voice ID or set a default Cartesia voice in Settings › ElevenLabs."
+                } else {
+                    "Claude will pick one itself, following the voice preferences in Settings › ElevenLabs (female or male, tried or latest voices). To fix the voice, choose one in the brand preset or set a default voice in Settings › ElevenLabs."
+                },
             )
         };
         c.add(
@@ -1359,6 +1388,7 @@ pub struct FakeEnv {
     pub free: Option<u64>,
     pub writable: bool,
     pub eleven_key: bool,
+    pub cartesia_key: bool,
     pub eleven_remaining: Option<u64>,
     pub capture: Option<crate::capture::Permissions>,
 }
@@ -1381,6 +1411,7 @@ impl Default for FakeEnv {
             free: Some(500_000_000_000),
             writable: true,
             eleven_key: true,
+            cartesia_key: false,
             eleven_remaining: Some(1_000_000),
             capture: Some(crate::capture::Permissions { screen_recording: true, accessibility: true, supported: true }),
         }
@@ -1408,6 +1439,9 @@ impl EnvProbe for FakeEnv {
     }
     fn eleven_key_present(&self) -> bool {
         self.eleven_key
+    }
+    fn cartesia_key_present(&self) -> bool {
+        self.cartesia_key
     }
     fn eleven_remaining(&self) -> Option<u64> {
         self.eleven_remaining
@@ -1509,6 +1543,31 @@ mod tests {
     }
     fn rules(r: &Report) -> Vec<String> {
         r.issues.iter().map(|i| format!("{:?}:{}", i.severity, i.rule)).collect()
+    }
+
+    #[test]
+    fn cartesia_voice_needs_its_own_key_and_voice() {
+        let mut f = Fx::new();
+        f.settings.voice_provider = crate::eleven::VoiceProvider::Cartesia;
+        // the ElevenLabs default voice is no Cartesia voice
+        f.settings.eleven_default_voice = "voice_1".into();
+        let r = f.run();
+        assert!(has(&r, "cartesia_key_missing", Severity::Blocker), "{:?}", rules(&r));
+        let unset = r.issues.iter().find(|i| i.rule == "voice_unset").expect("no Cartesia voice is set");
+        assert!(unset.detail.as_deref().unwrap().contains("Cartesia voice"));
+        assert!(
+            !has(&f.run_kind(RunKind::DryRun), "cartesia_key_missing", Severity::Blocker),
+            "a dry run generates no audio"
+        );
+        f.env.cartesia_key = true;
+        f.settings.cartesia_default_voice = "c-voice".into();
+        let r = f.run();
+        assert!(!has(&r, "cartesia_key_missing", Severity::Blocker) && !has(&r, "voice_unset", Severity::Warning));
+        // without ElevenLabs the voice still works: what is lost is a warning, not a blocker
+        f.env.eleven_key = false;
+        let r = f.run();
+        assert!(has(&r, "eleven_key_missing", Severity::Warning), "{:?}", rules(&r));
+        assert!(!has(&r, "eleven_key_missing", Severity::Blocker));
     }
 
     #[test]

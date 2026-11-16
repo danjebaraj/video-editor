@@ -131,7 +131,11 @@ fn tts_request(ctx: &HelperContext, a: &TtsArgs) -> Result<Request, Error> {
     Ok(Request::Tts {
         voice: a.voice.clone().or_else(|| ctx.default_voice.clone()).unwrap_or_default(),
         text: text.trim().to_string(),
-        model: a.model.clone().or_else(|| ctx.default_model.clone()),
+        // With Cartesia the model is always named, so its requests never share a cache entry
+        // or a log line with an ElevenLabs request for the same text.
+        model: a.model.clone().or_else(|| ctx.default_model.clone()).or_else(|| {
+            (ctx.voice_provider == eleven::VoiceProvider::Cartesia).then(|| eleven::cartesia::DEFAULT_MODEL.to_string())
+        }),
         settings,
         before: neighbour(&a.before_file)?,
         after: neighbour(&a.after_file)?,
@@ -204,14 +208,19 @@ pub fn run(command: ElevenCommand, secrets: &dyn Secrets) -> i32 {
                     .ok_or_else(|| Error::other(format!("--prefer is tried or latest; got `{p}`")))?,
                 None => ctx.voice_preference,
             };
-            let key = match &ctx.test_api_key {
-                Some(k) => k.clone(),
-                None => secrets
-                    .get(video_studio_core::platform::ELEVEN_KEY)?
-                    .filter(|k| !k.is_empty())
-                    .ok_or_else(|| Error::Environment("No ElevenLabs API key is set.".into()))?,
+            let all = match ctx.voice_provider {
+                eleven::VoiceProvider::Cartesia => ctx.cartesia(secrets)?.voices(search.as_deref(), gender)?,
+                eleven::VoiceProvider::Elevenlabs => {
+                    let key = match &ctx.test_api_key {
+                        Some(k) => k.clone(),
+                        None => secrets
+                            .get(video_studio_core::platform::ELEVEN_KEY)?
+                            .filter(|k| !k.is_empty())
+                            .ok_or_else(|| Error::Environment("No ElevenLabs API key is set.".into()))?,
+                    };
+                    eleven::Client::new(&key, ctx.base_url.as_deref()).voices(search.as_deref())?
+                }
             };
-            let all = eleven::Client::new(&key, ctx.base_url.as_deref()).voices(search.as_deref())?;
             let used = eleven::voices::used(&ctx.cache_dir);
             let found = all.len();
             let voices = eleven::voices::rank(all, prefer, gender, &used);
@@ -224,7 +233,11 @@ pub fn run(command: ElevenCommand, secrets: &dyn Secrets) -> i32 {
                 }
             } else {
                 println!(
-                    "# {}; {}. Best first.",
+                    "# {}{}; {}. Best first.",
+                    match ctx.voice_provider {
+                        eleven::VoiceProvider::Cartesia => "Cartesia ",
+                        eleven::VoiceProvider::Elevenlabs => "",
+                    },
                     gender.word().map(|g| format!("{g} voices")).unwrap_or_else(|| "voices of either gender".into()),
                     prefer.describe()
                 );

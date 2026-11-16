@@ -1021,6 +1021,10 @@
     },
     "Voice": {
       "properties": {
+        "cartesia_voice_id": {
+          "description": "Cartesia voice ID, used when Settings › Voice has Cartesia speak the voice-over.",
+          "type": "string"
+        },
         "model": {
           "type": [
             "string",

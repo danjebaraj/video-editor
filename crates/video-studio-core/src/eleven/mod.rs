@@ -6,6 +6,7 @@
 //! the folders Claude can read. Every call is quoted first, checked against the run's credit cap,
 //! served from the cache when an identical request was made before, and logged.
 
+pub mod cartesia;
 mod client;
 pub mod voices;
 
@@ -17,11 +18,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub use client::{Client, Subscription, VoiceInfo};
-pub use voices::{VoiceGender, VoicePreference};
+pub use voices::{VoiceGender, VoicePreference, VoiceProvider};
 
 use crate::claude::broker::append_line;
 use crate::claude::Mode;
-use crate::platform::{Secrets, ELEVEN_KEY};
+use crate::platform::{Secrets, CARTESIA_KEY, ELEVEN_KEY};
 use crate::{paths, timeutil, Error, Result};
 
 pub const CONTEXT_ENV: &str = "VIDEO_STUDIO_RUN_CONTEXT";
@@ -75,6 +76,14 @@ pub struct HelperContext {
     pub voice_preference: VoicePreference,
     #[serde(default)]
     pub voice_gender: VoiceGender,
+    /// Settings › Voice: who speaks the voice-over. With Cartesia, `eleven tts` and
+    /// `eleven voices` go to Cartesia; everything else stays with ElevenLabs.
+    #[serde(default)]
+    pub voice_provider: VoiceProvider,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cartesia_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cartesia_test_key: Option<String>,
     /// API base URL override (the fake server in tests).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -132,6 +141,18 @@ impl HelperContext {
             Some(k) if !k.trim().is_empty() => Ok(k.trim().to_string()),
             _ => Err(Error::Environment("No ElevenLabs API key is set. Ask the user to add one in Settings › ElevenLabs; until then, use media files for voice and music.".into())),
         }
+    }
+
+    /// The Cartesia client, when Cartesia speaks the voice-over.
+    pub fn cartesia(&self, secrets: &dyn Secrets) -> Result<cartesia::Client> {
+        let key = match self.cartesia_test_key.as_deref().filter(|k| !k.is_empty()) {
+            Some(k) => k.to_string(),
+            None => match secrets.get(CARTESIA_KEY)? {
+                Some(k) if !k.trim().is_empty() => k.trim().to_string(),
+                _ => return Err(Error::Environment("No Cartesia API key is set. Ask the user to add one in Settings › ElevenLabs (Voice-over by Cartesia), or to switch the voice-over back to ElevenLabs there.".into())),
+            },
+        };
+        Ok(cartesia::Client::new(&key, self.cartesia_base_url.as_deref()))
     }
 
     fn client(&self, secrets: &dyn Secrets) -> Result<Client> {
@@ -372,20 +393,26 @@ pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secr
             log_call(ctx, req, None, quoted, 0, false, 0, Some(&msg), Value::Null);
             return Err(Error::Budget(msg));
         }
-        let client = ctx.client(secrets)?;
+        let cartesia_speaks = ctx.voice_provider == VoiceProvider::Cartesia && matches!(req, Request::Tts { .. });
         let result = match req {
-            Request::Tts { voice, text, model, settings, before, after, take } => client.tts(
-                voice,
-                text,
-                model.as_deref().or(ctx.default_model.as_deref()),
-                settings.as_ref(),
-                before.as_deref(),
-                after.as_deref(),
-                *take,
-            ),
-            Request::Music { prompt, length_s } => client.music(prompt, *length_s),
-            Request::Sfx { prompt, length_s } => client.sfx(prompt, *length_s),
-            Request::Scribe { input } => client.scribe(input),
+            // Cartesia takes no neighbouring text and no seed: every request is a new reading.
+            Request::Tts { voice, text, model, settings, .. } if cartesia_speaks => ctx
+                .cartesia(secrets)
+                .and_then(|c| c.tts(voice, text, model.as_deref().or(ctx.default_model.as_deref()), settings.as_ref())),
+            Request::Tts { voice, text, model, settings, before, after, take } => ctx.client(secrets).and_then(|c| {
+                c.tts(
+                    voice,
+                    text,
+                    model.as_deref().or(ctx.default_model.as_deref()),
+                    settings.as_ref(),
+                    before.as_deref(),
+                    after.as_deref(),
+                    *take,
+                )
+            }),
+            Request::Music { prompt, length_s } => ctx.client(secrets).and_then(|c| c.music(prompt, *length_s)),
+            Request::Sfx { prompt, length_s } => ctx.client(secrets).and_then(|c| c.sfx(prompt, *length_s)),
+            Request::Scribe { input } => ctx.client(secrets).and_then(|c| c.scribe(input)),
         };
         match result {
             Err(e) => {
@@ -507,6 +534,9 @@ mod tests {
             default_model: None,
             voice_preference: Default::default(),
             voice_gender: Default::default(),
+            voice_provider: Default::default(),
+            cartesia_base_url: None,
+            cartesia_test_key: None,
             base_url: Some("http://127.0.0.1:9".into()),
             test_api_key: None,
             capture: None,

@@ -134,6 +134,9 @@ fn helper_context(w: &World, url: &str, cap: u64, mode: Mode) -> (Utf8PathBuf, U
         default_model: None,
         voice_preference: Default::default(),
         voice_gender: Default::default(),
+        voice_provider: Default::default(),
+        cartesia_base_url: None,
+        cartesia_test_key: None,
         base_url: Some(url.to_string()),
         test_api_key: None,
         capture: Some(Default::default()),
@@ -192,6 +195,81 @@ fn a_passage_is_voiced_with_its_neighbours_as_context() {
     );
     let missing = eleven(&["tts", "--text-file", "vo2.txt", "--before-file", "nope.txt", "--out", "x.mp3"]);
     assert!(stderr(&missing).contains("couldn't read nope.txt"), "{}", stderr(&missing));
+}
+
+/// Settings › Voice set to Cartesia: the same helper commands reach Cartesia for the voice and
+/// its list of voices, under the same budget, cache and log; music stays with ElevenLabs.
+#[test]
+fn cartesia_speaks_the_voice_over_through_the_same_helper() {
+    let w = World::new();
+    let server = fake_eleven();
+    let (run, ctx_file) = helper_context(&w, &server.url, 1000, Mode::Production);
+    let mut ctx: HelperContext = serde_json::from_str(&std::fs::read_to_string(&ctx_file).unwrap()).unwrap();
+    ctx.voice_provider = video_studio_core::eleven::VoiceProvider::Cartesia;
+    ctx.cartesia_base_url = Some(server.url.clone());
+    ctx.default_voice = Some("c1".into());
+    // the brand's ElevenLabs settings: only their speed means anything to Cartesia
+    ctx.default_voice_settings = Some(serde_json::json!({"stability": 0.5, "speed": 1.03}));
+    std::fs::write(&ctx_file, serde_json::to_string(&ctx).unwrap()).unwrap();
+    let secrets_file = w.root.join("secrets.json");
+    let eleven = |args: &[&str]| {
+        let mut full = vec!["eleven"];
+        full.extend_from_slice(args);
+        w.command(&full)
+            .env("VIDEO_STUDIO_RUN_CONTEXT", ctx_file.as_str())
+            .env("VIDEO_STUDIO_TEST_SECRETS", secrets_file.as_str())
+            .current_dir(&run)
+            .output()
+            .unwrap()
+    };
+    std::fs::write(run.join("vo.txt"), "Meet the fastest way to ship.\n").unwrap();
+    // no Cartesia key yet: the helper says where to add one, and nothing is charged
+    let no_key = eleven(&["tts", "--text-file", "vo.txt", "--out", "vo.mp3"]);
+    assert_ne!(no_key.status.code(), Some(0));
+    assert!(stderr(&no_key).contains("No Cartesia API key is set"), "{}", stderr(&no_key));
+    std::fs::write(&secrets_file, r#"{"cartesia-api-key": "test-key"}"#).unwrap();
+
+    let tts = eleven(&["tts", "--text-file", "vo.txt", "--out", "vo.mp3"]);
+    assert_eq!(tts.status.code(), Some(0), "{}", stderr(&tts));
+    assert_eq!(stdout(&tts).trim(), "audio/vo.mp3 (29 credits; 29 of 1000 used in this run)");
+    assert_eq!(
+        std::fs::read_to_string(run.join("audio/vo.mp3")).unwrap(),
+        r#"FAKE-CARTESIA voice c1 model sonic-3.6 text: Meet the fastest way to ship. [{"speed":1.03}]"#
+    );
+    assert_eq!(server.count("/tts/bytes"), 1);
+    assert_eq!(server.count("/v1/text-to-speech"), 0, "ElevenLabs isn't asked for the voice");
+    // Cartesia's own settings, and the cache
+    let own = eleven(&[
+        "tts",
+        "--text-file",
+        "vo.txt",
+        "--settings",
+        r#"{"speed": 1.1, "emotion": "excited"}"#,
+        "--out",
+        "vo-b.mp3",
+    ]);
+    assert_eq!(own.status.code(), Some(0), "{}", stderr(&own));
+    assert!(std::fs::read_to_string(run.join("audio/vo-b.mp3"))
+        .unwrap()
+        .ends_with(r#"[{"emotion":"excited","speed":1.1}]"#));
+    let again = eleven(&["tts", "--text-file", "vo.txt", "--out", "vo-copy.mp3"]);
+    assert!(stdout(&again).contains("from cache"), "{}", stdout(&again));
+    assert_eq!(server.count("/tts/bytes"), 2);
+
+    // the list of voices is Cartesia's, narrowed and printed like the other
+    let voices = stdout(&eleven(&["voices", "--gender", "female"]));
+    let lines: Vec<&str> = voices.lines().collect();
+    assert!(lines[0].starts_with("# Cartesia female voices"), "{voices}");
+    assert_eq!(lines[1], "c1  Skylar  (female)  [library]  used 3×  — Approachable narrator");
+    assert_eq!(lines.len(), 2, "{voices}");
+    assert!(stdout(&eleven(&["voices"])).contains("c2  Ronan  (male)  [yours]"));
+
+    // music is still ElevenLabs, which has no key here
+    let music = eleven(&["music", "--prompt", "calm", "--length", "5", "--out", "bed.mp3"]);
+    assert!(stderr(&music).contains("No ElevenLabs API key is set"), "{}", stderr(&music));
+    let log = ndjson(&run.join("logs/eleven.ndjson"));
+    assert_eq!(log[0]["request"]["model"], "sonic-3.6");
+    assert!(!std::fs::read_to_string(run.join("logs/eleven.ndjson")).unwrap().contains("test-key"));
 }
 
 #[test]
@@ -600,6 +678,9 @@ fn run_env(w: &World, script: &Utf8Path) -> RunEnv {
         eleven_base_url: Some("http://127.0.0.1:9".into()),
         eleven_test_key: None,
         eleven_key_present: false,
+        cartesia_base_url: None,
+        cartesia_test_key: None,
+        cartesia_key_present: false,
         extra_env,
         file_refs: Arc::new(NoFileRefs),
     }

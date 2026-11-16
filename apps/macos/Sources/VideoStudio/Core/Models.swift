@@ -308,6 +308,8 @@ struct Watermark: Codable, Equatable {
 
 struct Voice: Codable, Equatable {
     var voice_id = ""
+    /// Cartesia voice ID, used when Settings has Cartesia speak the voice-over.
+    var cartesia_voice_id: String?
     var name: String?
     var model: String?
     var settings: JSONValue?
@@ -604,6 +606,9 @@ struct CoreSettings: Codable, Equatable {
     var cutline_path = ""
     var cutline_repo = ""
     var default_quality = "final"
+    /// Who speaks the voice-over: `elevenlabs` or `cartesia`.
+    var voice_provider = "elevenlabs"
+    var cartesia_default_voice = ""
     var eleven_default_voice = ""
     /// When no voice is fixed: `tried` (voices earlier videos used first) or `latest`.
     var eleven_voice_preference = "tried"

@@ -33,6 +33,11 @@ pub struct Settings {
     pub cutline_repo: String,
     /// `draft` or `final`.
     pub default_quality: String,
+    // Voice
+    /// Who speaks the voice-over: ElevenLabs or Cartesia.
+    pub voice_provider: crate::eleven::VoiceProvider,
+    /// The Cartesia voice used when the brand names none.
+    pub cartesia_default_voice: String,
     // ElevenLabs
     pub eleven_default_voice: String,
     /// When no voice is fixed: prefer voices earlier videos used, or the newest ones.
@@ -72,6 +77,8 @@ impl Default for Settings {
             cutline_path: String::new(),
             cutline_repo: String::new(),
             default_quality: "final".into(),
+            voice_provider: Default::default(),
+            cartesia_default_voice: String::new(),
             eleven_default_voice: String::new(),
             eleven_voice_preference: Default::default(),
             eleven_voice_gender: Default::default(),
