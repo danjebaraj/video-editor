@@ -560,6 +560,22 @@ enum SelfTest {
         check("the voice preferences are saved with the settings", voiceSaved.contains("latest") && voiceSaved.contains("female"), String(voiceSaved.prefix(120)))
         (app.settings.eleven_voice_preference, app.settings.eleven_voice_gender) = voiceBefore
         app.saveSettings()
+        // Cartesia as the voice: its own key, stored and shown masked like the other
+        check("ElevenLabs speaks the voice-over unless Settings says otherwise", app.settings.voice_provider == "elevenlabs" && !app.cartesiaKeyStatus.present, app.settings.voice_provider)
+        app.settings.voice_provider = "cartesia"
+        _ = await Task.detached { Helper.setKey("selftest-cartesia", provider: "cartesia") }.value
+        app.refreshCartesiaKeyStatus()
+        await wait("Cartesia key status") { app.cartesiaKeyStatus.present }
+        check("the Cartesia key is stored apart from the ElevenLabs key and shown masked", app.cartesiaKeyStatus.masked == "••••esia" && app.keyStatus.masked == "••••-key", "\(app.cartesiaKeyStatus.masked ?? "nil") \(app.keyStatus.masked ?? "nil")")
+        let providerSaved = (try? Core.raw("settings.save", ["settings": Core.arg(app.settings)])).map { String(describing: $0) } ?? ""
+        check("the voice provider is saved with the settings", providerSaved.contains("cartesia"), String(providerSaved.prefix(120)))
+        await sleep(0.4)
+        await snapshot(NSApp.windows.first { $0.title == "Settings" }, "settings-voice-cartesia")
+        _ = await Task.detached { Helper.deleteKey(provider: "cartesia") }.value
+        app.refreshCartesiaKeyStatus()
+        await wait("Cartesia key removed") { !app.cartesiaKeyStatus.present }
+        app.settings.voice_provider = "elevenlabs"
+        app.saveSettings()
         delegate.showSettings(pane: "finish")
         await sleep(0.4)
         await snapshot(NSApp.windows.first { $0.title == "Settings" }, "settings-finish")

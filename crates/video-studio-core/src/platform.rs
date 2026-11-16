@@ -17,7 +17,14 @@ pub mod windows;
 /// Manager (`Syncfusion Video Studio` / `elevenlabs`).
 fn secret_entry(name: &str) -> Result<keyring::Entry> {
     let (service, account) = if cfg!(windows) {
-        (crate::APP_NAME, if name == ELEVEN_KEY { "elevenlabs" } else { name })
+        (
+            crate::APP_NAME,
+            match name {
+                ELEVEN_KEY => "elevenlabs",
+                CARTESIA_KEY => "cartesia",
+                _ => name,
+            },
+        )
     } else {
         (BUNDLE_ID, name)
     };
@@ -33,6 +40,8 @@ pub trait Secrets: Send + Sync {
 
 /// Name of the ElevenLabs API key entry.
 pub const ELEVEN_KEY: &str = "elevenlabs-api-key";
+/// Name of the Cartesia API key entry.
+pub const CARTESIA_KEY: &str = "cartesia-api-key";
 
 /// The OS secret store through the `keyring` crate.
 pub struct OsSecrets;

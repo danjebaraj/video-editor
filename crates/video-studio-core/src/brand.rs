@@ -117,6 +117,9 @@ pub struct Voice {
     /// ElevenLabs voice ID.
     #[serde(default)]
     pub voice_id: String,
+    /// Cartesia voice ID, used when Settings › Voice has Cartesia speak the voice-over.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cartesia_voice_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

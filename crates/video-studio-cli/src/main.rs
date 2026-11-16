@@ -150,11 +150,14 @@ enum Command {
         #[command(subcommand)]
         command: StandinCommand,
     },
-    /// Store, check or remove the ElevenLabs API key in the system keychain
+    /// Store, check or remove an API key (ElevenLabs, or Cartesia with --provider) in the system keychain
     Secret {
         /// set (key on stdin), status, test or delete
         #[arg(value_parser = ["set", "status", "test", "delete"])]
         action: String,
+        /// elevenlabs (default) or cartesia
+        #[arg(long, default_value = "elevenlabs", value_parser = ["elevenlabs", "cartesia"])]
+        provider: String,
         #[arg(long)]
         json: bool,
     },
@@ -262,7 +265,7 @@ fn main() {
         Command::Eleven { command } => logged_helper(|| eleven_cmd::run(command, secrets().as_ref())),
         Command::Capture { target, command } => logged_helper(|| capture_cmd::run(command, &target)),
         Command::Standin { command } => logged_helper(|| cmd_standin(command)),
-        Command::Secret { action, json } => cmd_secret(&action, json),
+        Command::Secret { action, provider, json } => cmd_secret(&action, &provider, json),
         Command::Schema => {
             println!("{}", serde_json::to_string_pretty(&project::json_schema()).unwrap_or_default());
             0
@@ -551,6 +554,9 @@ fn execute_run(
     let mut env = RunEnv::detect(&lib, &helper_path())?;
     let secrets = secrets();
     env.eleven_key_present = matches!(secrets.get(ELEVEN_KEY), Ok(Some(k)) if !k.is_empty());
+    env.cartesia_key_present =
+        matches!(secrets.get(video_studio_core::platform::CARTESIA_KEY), Ok(Some(k)) if !k.is_empty());
+    env.cartesia_test_key = std::env::var("VIDEO_STUDIO_TEST_CARTESIA_KEY").ok().filter(|k| !k.is_empty());
     env.eleven_test_key = std::env::var("VIDEO_STUDIO_TEST_ELEVEN_KEY").ok().filter(|k| !k.is_empty());
     let interactive =
         !json && std::io::stdin().is_terminal() && std::io::stderr().is_terminal() && !request.assume_answers;
@@ -1020,8 +1026,11 @@ fn cmd_new(path: &Utf8Path, name: Option<&str>, intent: &str, media_paths: &[Utf
 
 // MARK: secret, hook
 
-fn cmd_secret(action: &str, as_json: bool) -> i32 {
+fn cmd_secret(action: &str, provider: &str, as_json: bool) -> i32 {
+    use video_studio_core::eleven::VoiceProvider;
     let secrets = secrets();
+    let provider = VoiceProvider::parse(provider).unwrap_or_default();
+    let (key_name, label) = (provider.key_name(), provider.label());
     let base = std::env::var("VIDEO_STUDIO_ELEVEN_BASE_URL").ok().filter(|s| !s.is_empty());
     let result: Result<Value, Error> = match action {
         "set" => {
@@ -1031,19 +1040,23 @@ fn cmd_secret(action: &str, as_json: bool) -> i32 {
             if key.is_empty() {
                 Err(Error::other("no key was given on stdin"))
             } else {
-                secrets.set(ELEVEN_KEY, key).map(|_| json!({"present": true}))
+                secrets.set(key_name, key).map(|_| json!({"present": true}))
             }
         }
-        "delete" => secrets.delete(ELEVEN_KEY).map(|_| json!({"present": false})),
-        "status" => secrets.get(ELEVEN_KEY).map(|k| {
+        "delete" => secrets.delete(key_name).map(|_| json!({"present": false})),
+        "status" => secrets.get(key_name).map(|k| {
             // Shown masked: the last four characters only.
             let masked = k.as_deref().filter(|k| !k.is_empty()).map(|k| format!("••••{}", k.chars().rev().take(4).collect::<String>().chars().rev().collect::<String>()));
             json!({"present": masked.is_some(), "masked": masked})
         }),
-        "test" => match secrets.get(ELEVEN_KEY) {
-            Ok(Some(k)) if !k.is_empty() => video_studio_core::eleven::test_key(&k, base.as_deref()).map(|s| json!({"present": true, "ok": true, "tier": s.tier, "used": s.character_count, "limit": s.character_limit, "remaining": s.remaining()})),
-            Ok(_) => Err(Error::Environment("no ElevenLabs key is stored".into())),
-            Err(e) => Err(e),
+        "test" => match (secrets.get(key_name), provider) {
+            (Ok(Some(k)), VoiceProvider::Elevenlabs) if !k.is_empty() => video_studio_core::eleven::test_key(&k, base.as_deref()).map(|s| json!({"present": true, "ok": true, "tier": s.tier, "used": s.character_count, "limit": s.character_limit, "remaining": s.remaining()})),
+            (Ok(Some(k)), VoiceProvider::Cartesia) if !k.is_empty() => {
+                let base = std::env::var("VIDEO_STUDIO_CARTESIA_BASE_URL").ok().filter(|s| !s.is_empty());
+                video_studio_core::eleven::cartesia::Client::new(&k, base.as_deref()).test().map(|_| json!({"present": true, "ok": true}))
+            }
+            (Ok(_), _) => Err(Error::Environment(format!("no {label} key is stored"))),
+            (Err(e), _) => Err(e),
         },
         _ => unreachable!("clap limits the actions"),
     };
@@ -1057,9 +1070,10 @@ fn cmd_secret(action: &str, as_json: bool) -> i32 {
                         "{}",
                         v["masked"]
                             .as_str()
-                            .map(|m| format!("ElevenLabs key: {m}"))
-                            .unwrap_or_else(|| "No ElevenLabs key is stored.".into())
+                            .map(|m| format!("{label} key: {m}"))
+                            .unwrap_or_else(|| format!("No {label} key is stored."))
                     ),
+                    "test" if provider == VoiceProvider::Cartesia => println!("The key works."),
                     "test" => println!(
                         "The key works. {} of {} credits remain ({}).",
                         v["remaining"],

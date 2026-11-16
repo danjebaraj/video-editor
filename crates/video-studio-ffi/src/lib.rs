@@ -149,6 +149,7 @@ struct ShellEnv {
     env: Environment,
     eleven_key_present: bool,
     eleven_remaining: Option<u64>,
+    cartesia_key_present: bool,
 }
 
 impl EnvProbe for ShellEnv {
@@ -175,6 +176,9 @@ impl EnvProbe for ShellEnv {
     }
     fn eleven_remaining(&self) -> Option<u64> {
         self.eleven_remaining
+    }
+    fn cartesia_key_present(&self) -> bool {
+        self.cartesia_key_present
     }
     fn capture_permissions(&self) -> Option<core::capture::Permissions> {
         Some(core::capture::permissions(false))
@@ -534,6 +538,7 @@ pub fn call(method: String, args: String) -> R<String> {
                 env,
                 eleven_key_present: opt(&args, "eleven_key_present")?.unwrap_or(false),
                 eleven_remaining: opt(&args, "eleven_remaining")?,
+                cartesia_key_present: opt(&args, "cartesia_key_present")?.unwrap_or(false),
             };
             let mut report = validation::validate(&ValidateInput {
                 project: &p,
@@ -649,6 +654,11 @@ pub fn start_run(request_json: String, options_json: String, listener: Box<dyn E
     let mut env = RunEnv::detect(&library(), Utf8Path::new(&helper))?;
     env.eleven_key_present = opt(&options, "eleven_key_present")?.unwrap_or(false);
     env.eleven_test_key = opt(&options, "eleven_test_key")?;
+    env.cartesia_key_present = opt(&options, "cartesia_key_present")?.unwrap_or(false);
+    env.cartesia_test_key = opt(&options, "cartesia_test_key")?;
+    if let Some(u) = opt::<String>(&options, "cartesia_base_url")? {
+        env.cartesia_base_url = Some(u);
+    }
     if let Some(u) = opt::<String>(&options, "eleven_base_url")? {
         env.eleven_base_url = Some(u);
     }

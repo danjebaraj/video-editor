@@ -197,6 +197,8 @@ enum Helper {
         var remaining: UInt64?
         var limit: UInt64?
         var tier: String?
+        /// The key was accepted by the last Test (Cartesia reports no credits).
+        var works = false
         var error: String?
     }
 
@@ -205,19 +207,20 @@ enum Helper {
     }
 
     /// Whether an ElevenLabs key is stored, shown masked.
-    static func keyStatus() -> KeyStatus {
-        let o = run(["secret", "status", "--json"])
+    static func keyStatus(provider: String = "elevenlabs") -> KeyStatus {
+        let o = run(["secret", "status", "--provider", provider, "--json"])
         let j = json(o.stdout)
         return KeyStatus(present: j["present"] as? Bool ?? false, masked: j["masked"] as? String)
     }
 
     /// Checks the stored key against ElevenLabs and reads the remaining credits.
-    static func testKey() -> KeyStatus {
-        var s = keyStatus()
+    static func testKey(provider: String = "elevenlabs") -> KeyStatus {
+        var s = keyStatus(provider: provider)
         guard s.present else { s.error = "No key is stored."; return s }
-        let o = run(["secret", "test", "--json"])
+        let o = run(["secret", "test", "--provider", provider, "--json"])
         let j = json(o.stdout)
         if j["ok"] as? Bool == true {
+            s.works = true
             s.remaining = (j["remaining"] as? NSNumber)?.uint64Value
             s.limit = (j["limit"] as? NSNumber)?.uint64Value
             s.tier = j["tier"] as? String
@@ -227,12 +230,12 @@ enum Helper {
         return s
     }
 
-    static func setKey(_ key: String) -> Bool {
-        run(["secret", "set"], stdin: key + "\n").status == 0
+    static func setKey(_ key: String, provider: String = "elevenlabs") -> Bool {
+        run(["secret", "set", "--provider", provider], stdin: key + "\n").status == 0
     }
 
-    static func deleteKey() -> Bool {
-        run(["secret", "delete"]).status == 0
+    static func deleteKey(provider: String = "elevenlabs") -> Bool {
+        run(["secret", "delete", "--provider", provider]).status == 0
     }
 }
 

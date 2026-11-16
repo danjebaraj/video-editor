@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::claude::broker::{hook_settings, Mode, Policy};
 use crate::claude::locate::{self, ClaudeInfo, CutlineInfo};
 use crate::claude::process::{containing_dir, ClaudeOptions};
-use crate::eleven::{self, HelperContext, CONTEXT_ENV};
+use crate::eleven::{self, HelperContext, VoiceProvider, CONTEXT_ENV};
 use crate::media::{self, MediaStatus, Resolution};
 use crate::models::ModelList;
 use crate::platform::{FileRefs, NoFileRefs};
@@ -37,6 +37,10 @@ pub struct RunEnv {
     pub eleven_test_key: Option<String>,
     /// Whether an ElevenLabs key is stored (the caller checks through the helper binary).
     pub eleven_key_present: bool,
+    /// The same for Cartesia, which speaks the voice-over when Settings › Voice says so.
+    pub cartesia_base_url: Option<String>,
+    pub cartesia_test_key: Option<String>,
+    pub cartesia_key_present: bool,
     /// Extra environment for the Claude Code process (proxies, test doubles).
     pub extra_env: std::collections::HashMap<String, String>,
     pub file_refs: std::sync::Arc<dyn FileRefs>,
@@ -79,6 +83,9 @@ impl RunEnv {
             eleven_base_url: std::env::var("VIDEO_STUDIO_ELEVEN_BASE_URL").ok().filter(|s| !s.is_empty()),
             eleven_test_key: None,
             eleven_key_present: false,
+            cartesia_base_url: std::env::var("VIDEO_STUDIO_CARTESIA_BASE_URL").ok().filter(|s| !s.is_empty()),
+            cartesia_test_key: None,
+            cartesia_key_present: false,
             extra_env: Default::default(),
             file_refs: std::sync::Arc::new(NoFileRefs),
         })
@@ -354,6 +361,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     // The helper's context and the hook's policy live outside anything Claude can read.
     let context_dir = env.library.join("run-contexts").join(&run_id);
     std::fs::create_dir_all(&context_dir)?;
+    let provider = env.settings.voice_provider;
     let helper_context = HelperContext {
         run_id: run_id.clone(),
         run_folder: folder.clone(),
@@ -363,14 +371,27 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         credit_cap: rc.eleven_credit_cap,
         cache_dir: eleven::cache_dir(&env.library),
         cache_limit_bytes: env.settings.eleven_cache_limit_bytes,
-        default_voice: brand
-            .map(|b| b.voice.voice_id.clone())
-            .filter(|v| !v.is_empty())
-            .or_else(|| Some(env.settings.eleven_default_voice.clone()).filter(|v| !v.is_empty())),
+        default_voice: match provider {
+            VoiceProvider::Elevenlabs => brand
+                .map(|b| b.voice.voice_id.clone())
+                .filter(|v| !v.is_empty())
+                .or_else(|| Some(env.settings.eleven_default_voice.clone()).filter(|v| !v.is_empty())),
+            VoiceProvider::Cartesia => brand
+                .map(|b| b.voice.cartesia_voice_id.clone())
+                .filter(|v| !v.is_empty())
+                .or_else(|| Some(env.settings.cartesia_default_voice.clone()).filter(|v| !v.is_empty())),
+        },
+        // A brand's voice settings and model are ElevenLabs': Cartesia takes its speed, no more.
         default_voice_settings: brand.and_then(|b| b.voice.settings.clone()),
-        default_model: brand.and_then(|b| b.voice.model.clone()),
+        default_model: match provider {
+            VoiceProvider::Elevenlabs => brand.and_then(|b| b.voice.model.clone()),
+            VoiceProvider::Cartesia => None,
+        },
         voice_preference: env.settings.eleven_voice_preference,
         voice_gender: env.settings.eleven_voice_gender,
+        voice_provider: provider,
+        cartesia_base_url: env.cartesia_base_url.clone(),
+        cartesia_test_key: env.cartesia_test_key.clone(),
         base_url: env.eleven_base_url.clone(),
         test_api_key: env.eleven_test_key.clone(),
         capture: project
@@ -418,8 +439,9 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     let guide = locate::cutline_guide(Utf8Path::new(&env.cutline.path)).unwrap_or_default();
     let has_key = env.eleven_test_key.is_some() || env.eleven_key_present;
     let finish = project.finish_or(&env.settings);
+    let has_cartesia_key = env.cartesia_test_key.is_some() || env.cartesia_key_present;
     let voice_choosing =
-        eleven::voices::choosing(env.settings.eleven_voice_preference, env.settings.eleven_voice_gender);
+        eleven::voices::choosing_from(provider, env.settings.eleven_voice_preference, env.settings.eleven_voice_gender);
     let system = super::prompt::system_prompt(&super::prompt::PromptInput {
         project: &project,
         run_config: &rc,
@@ -430,6 +452,8 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         manifest: &manifest_entries,
         cutline_guide: &guide,
         eleven_available: has_key,
+        voice_provider: provider,
+        cartesia_available: has_cartesia_key,
         default_voice: helper_context.default_voice.as_deref(),
         voice_choosing: Some(&voice_choosing),
         platforms: &env.platforms,

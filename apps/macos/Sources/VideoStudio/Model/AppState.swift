@@ -14,6 +14,8 @@ final class AppState: ObservableObject {
     @Published private(set) var platforms = Platforms()
     @Published private(set) var brands: [BrandPreset] = []
     @Published private(set) var keyStatus = Helper.KeyStatus()
+    /// The Cartesia key, which speaks the voice-over when Settings says so.
+    @Published private(set) var cartesiaKeyStatus = Helper.KeyStatus()
     /// IDs of projects with a production or dry run in progress.
     @Published var activeRuns: Set<String> = []
     /// Production run folders seen in opened projects, for Settings › Storage.
@@ -58,6 +60,8 @@ final class AppState: ObservableObject {
             let key = await Task.detached { Helper.exists ? Helper.keyStatus() : Helper.KeyStatus() }.value
             self.environment = env ?? CoreEnvironment()
             if self.keyStatus.masked != key.masked || self.keyStatus.present != key.present { self.keyStatus = key }
+            let cartesia = await Task.detached { Helper.exists ? Helper.keyStatus(provider: "cartesia") : Helper.KeyStatus() }.value
+            if self.cartesiaKeyStatus.masked != cartesia.masked || self.cartesiaKeyStatus.present != cartesia.present { self.cartesiaKeyStatus = cartesia }
             self.isDetecting = false
         }
     }
@@ -66,6 +70,13 @@ final class AppState: ObservableObject {
         Task {
             let key = await Task.detached { test ? Helper.testKey() : Helper.keyStatus() }.value
             self.keyStatus = key
+        }
+    }
+
+    func refreshCartesiaKeyStatus(test: Bool = false) {
+        Task {
+            let key = await Task.detached { test ? Helper.testKey(provider: "cartesia") : Helper.keyStatus(provider: "cartesia") }.value
+            self.cartesiaKeyStatus = key
         }
     }
 

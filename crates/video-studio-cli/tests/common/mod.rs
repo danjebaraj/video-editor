@@ -247,6 +247,7 @@ pub fn fake_eleven() -> FakeEleven {
                 }
                 let mut length = 0usize;
                 let mut key = String::new();
+                let mut version = String::new();
                 loop {
                     let mut h = String::new();
                     if reader.read_line(&mut h).is_err() || h.trim().is_empty() {
@@ -258,6 +259,13 @@ pub fn fake_eleven() -> FakeEleven {
                     }
                     if lower.starts_with("xi-api-key:") {
                         key = h[11..].trim().to_string();
+                    }
+                    // Cartesia: a bearer token and a version header
+                    if lower.starts_with("authorization: bearer ") {
+                        key = h[22..].trim().to_string();
+                    }
+                    if lower.starts_with("cartesia-version:") {
+                        version = h[17..].trim().to_string();
                     }
                 }
                 let mut body = vec![0u8; length];
@@ -286,7 +294,40 @@ pub fn fake_eleven() -> FakeEleven {
                     );
                     return;
                 }
-                if path.starts_with("/v1/user/subscription") {
+                if path.starts_with("/tts/bytes") || path.starts_with("/voices") {
+                    // the fake Cartesia
+                    if version.is_empty() {
+                        respond(
+                            &mut stream,
+                            "400 Bad Request",
+                            "application/json",
+                            "",
+                            br#"{"message":"Cartesia-Version header is required"}"#,
+                        );
+                    } else if path.starts_with("/voices") {
+                        let all = [
+                            r#"{"id":"c1","name":"Skylar","description":"Approachable narrator","gender":"feminine","language":"en","is_owner":false,"created_at":"2026-03-31T17:37:05.961874Z"}"#,
+                            r#"{"id":"c2","name":"Ronan","description":"Steady explainer","gender":"masculine","language":"en","is_owner":true,"created_at":"2026-05-02T10:00:00Z"}"#,
+                        ];
+                        let kept: Vec<&str> = all
+                            .iter()
+                            .copied()
+                            .filter(|v| !path.contains("gender=feminine") || v.contains("feminine"))
+                            .filter(|v| !path.contains("gender=masculine") || v.contains("masculine"))
+                            .collect();
+                        let body = format!(r#"{{"data":[{}],"has_more":false,"next_page":null}}"#, kept.join(","));
+                        respond(&mut stream, "200 OK", "application/json", "", body.as_bytes());
+                    } else {
+                        let audio = format!(
+                            "FAKE-CARTESIA voice {} model {} text: {}{}",
+                            body_json["voice"]["id"].as_str().unwrap_or(""),
+                            body_json["model_id"].as_str().unwrap_or(""),
+                            body_json["transcript"].as_str().unwrap_or(""),
+                            body_json.get("generation_config").map(|c| format!(" [{c}]")).unwrap_or_default()
+                        );
+                        respond(&mut stream, "200 OK", "audio/mpeg", "", audio.as_bytes());
+                    }
+                } else if path.starts_with("/v1/user/subscription") {
                     respond(
                         &mut stream,
                         "200 OK",
