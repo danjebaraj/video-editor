@@ -9,6 +9,16 @@ struct FinishEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 8 : 12) {
+            Picker("Voice and music", selection: $finish.energy) {
+                Text("Calm").tag("calm")
+                Text("Balanced").tag("balanced")
+                Text("Upbeat").tag("upbeat")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden(compact)
+            .accessibilityLabel("Energy of the voice and music")
+            .help("How lively the narration and the music are. Upbeat: an animated read, short pauses and bright, driving music. Balanced: a natural read over light music. Calm: an unhurried read over soft, slow music.")
+            Text(energyNote).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Picker("Between scenes", selection: $finish.transitions) {
                 Text("Smooth").tag("smooth")
                 Text("Plain cuts").tag("cuts")
@@ -44,6 +54,14 @@ struct FinishEditor: View {
     /// Labels wrap instead of pushing the narrow inspector wider than its column.
     private func wrapping(_ text: String) -> some View {
         Text(text).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var energyNote: String {
+        switch finish.energy {
+        case "calm": return "An unhurried, warm voice over soft, slow music. For explainers and serious subjects."
+        case "balanced": return "A natural read over light music with a steady beat."
+        default: return "A bright, animated voice with short pauses, over driving music at about 120 beats a minute. A brand's own voice settings still win."
+        }
     }
 
     private var transitionNote: String {
