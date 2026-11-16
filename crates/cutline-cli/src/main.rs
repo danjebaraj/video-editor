@@ -72,6 +72,9 @@ enum Cmd {
         /// Directory to create the project in.
         #[arg(default_value = ".")]
         dir: PathBuf,
+        /// The same directory, for those who reach for a flag.
+        #[arg(long = "dir", value_name = "DIR", hide = true, conflicts_with = "dir")]
+        dir_flag: Option<PathBuf>,
         /// Default: shorts (long_1080p with --style business).
         #[arg(long)]
         target: Option<String>,
@@ -349,7 +352,8 @@ fn dispatch(cli: Cli) -> CmdResult {
         }
         Cmd::Validate { project } => edit::validate(&project),
         Cmd::Schema => edit::schema(),
-        Cmd::Init { dir, target, style, assets, name } => {
+        Cmd::Init { dir, dir_flag, target, style, assets, name } => {
+            let dir = dir_flag.unwrap_or(dir);
             edit::init(&dir, target.as_deref(), &style, assets.as_deref(), name.as_deref())
         }
         Cmd::Expand { project } => edit::expand(&project),

@@ -596,7 +596,8 @@ pub fn review(path: &Path, out: Option<&Path>, ocr: Option<&str>) -> CmdResult {
     }
     let out = match out {
         Some(o) if o.is_absolute() => o.to_path_buf(),
-        Some(o) => l.dir.join(o),
+        // like every other `--out`: from where the command is run, not from the project's folder
+        Some(o) => std::env::current_dir().map(|d| d.join(o)).unwrap_or_else(|_| o.to_path_buf()),
         None => review_dir(&l),
     };
     let r = cutline_qa::review::review_with(&l, &out, ocr).map_err(classify)?;

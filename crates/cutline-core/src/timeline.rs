@@ -184,6 +184,16 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
     let mut d: Vec<Diagnostic> = vec![];
     if let Some(r) = &p.default_reframe {
         check_reframe(r, "/default_reframe", &mut d);
+        if r.narrower_only {
+            d.push(
+                Diagnostic::error(
+                    "E_FIELD_CONFLICT",
+                    "/default_reframe/narrower_only",
+                    "`narrower_only` belongs on a clip's own `reframe`",
+                )
+                .hint("each clip names the part of its recording to show: `reframe: {mode: \"rect\", rect: {…}, narrower_only: true}`"),
+            );
+        }
     }
 
     // ---- assets
@@ -298,6 +308,17 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
     let mut clips: Vec<TClip> = vec![];
     let mut transitions: Vec<TTransition> = vec![];
     let mut pending_trans: Option<(usize, Transition)> = None;
+    // `clips.len()` once the latest clip of `main` is accepted; larger than it while that clip
+    // was rejected, so what follows does not report the same mistake again
+    let mut clips_wanted = 0usize;
+    let main_ids: BTreeSet<&str> = p
+        .main
+        .iter()
+        .filter_map(|m| match m {
+            MainItem::Clip(c) => Some(c.id.as_str()),
+            _ => None,
+        })
+        .collect();
     let mut ok = true;
     // start of the edit (after a brand intro): project times count from here
     let mut origin: Option<i64> = None;
@@ -334,11 +355,14 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     );
                 }
                 if clips.is_empty() || pending_trans.is_some() {
-                    d.push(Diagnostic::error(
-                        "E_TRANSITION_POSITION",
-                        base.clone(),
-                        "a transition must sit between two clips",
-                    ));
+                    // after a clip that was just rejected, this is that clip's error again
+                    if clips_wanted == clips.len() {
+                        d.push(Diagnostic::error(
+                            "E_TRANSITION_POSITION",
+                            base.clone(),
+                            "a transition must sit between two clips",
+                        ));
+                    }
                     ok = false;
                 } else {
                     pending_trans = Some((mi, t.clone()));
@@ -348,6 +372,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 }
             }
             MainItem::Clip(c) => {
+                clips_wanted = clips.len() + 1;
                 if !ids.insert(c.id.clone()) {
                     d.push(Diagnostic::error(
                         "E_DUPLICATE_ID",
@@ -356,13 +381,23 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     ));
                 }
                 let Some(asset) = p.assets.get(&c.clip) else {
+                    let defined = p.assets.keys().cloned().collect::<Vec<_>>().join(", ");
+                    // a colour or a file written where the asset id goes
+                    let hint = if c.clip.starts_with("color:") || c.clip.contains('/') || c.clip.contains('.') {
+                        format!(
+                            "`clip` takes an asset id, not a path or a colour: add `assets: {{ bg: {{ path: \"{}\" }} }}` and write `clip: \"bg\"`. Defined assets: {defined}",
+                            c.clip
+                        )
+                    } else {
+                        format!("defined assets: {defined}")
+                    };
                     d.push(
                         Diagnostic::error(
                             "E_UNKNOWN_ASSET",
                             format!("{base}/clip"),
                             format!("unknown asset `{}`", c.clip),
                         )
-                        .hint(format!("defined assets: {}", p.assets.keys().cloned().collect::<Vec<_>>().join(", "))),
+                        .hint(hint),
                     );
                     ok = false;
                     continue;
@@ -677,6 +712,15 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 }
                 let mut clip = (**c).clone();
                 clip.effects = effects;
+                // a crop meant for the vertical versions only: in a wide output show the clip whole
+                if clip.reframe.as_ref().is_some_and(|r| r.mode == ReframeMode::Rect && r.narrower_only) {
+                    let narrower = f.filter(|f| f.width > 0 && f.height > 0).map_or(true, |f| {
+                        (spec.width as f64 / spec.height as f64) < 0.9 * (f.width as f64 / f.height as f64)
+                    });
+                    if !narrower {
+                        clip.reframe = None;
+                    }
+                }
                 if fit_frames.is_some() && !is_visual_still(kind) {
                     // keep the clip copy consistent with what `end_at` resolved to
                     clip.speed = Some(crate::time::round6(speed));
@@ -690,7 +734,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     .or_else(|| {
                         p.default_frame
                             .clone()
-                            .filter(|_| kind == AssetKind::Video && !c.is_bumper() && c.reframe.is_none())
+                            .filter(|_| kind == AssetKind::Video && !c.is_bumper() && clip.reframe.is_none())
                     })
                     .filter(|f| f.style != FrameStyle::Off);
                 if let Some(fr) = &frame {
@@ -703,7 +747,7 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                             .content_rect((spec.width, spec.height)),
                     ),
                     // a rect reframe: the source runs past the frame where it is cropped
-                    None => rect_crop(p, c, kind, src_size, (spec.width, spec.height))
+                    None => rect_crop(p, &clip, kind, src_size, (spec.width, spec.height))
                         .zip(src_size)
                         .map(|(rc, s)| rc.content(s)),
                 };
@@ -726,11 +770,13 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
         }
     }
     if let Some((tmi, _)) = pending_trans {
-        d.push(Diagnostic::error(
-            "E_TRANSITION_POSITION",
-            format!("/main/{tmi}"),
-            "a transition cannot end the storyline",
-        ));
+        if clips_wanted == clips.len() {
+            d.push(Diagnostic::error(
+                "E_TRANSITION_POSITION",
+                format!("/main/{tmi}"),
+                "a transition cannot end the storyline",
+            ));
+        }
         ok = false;
     }
     // Dissolving one screen recording into another double-exposes two layouts of text.
@@ -883,11 +929,14 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     Some(a) => match clips.iter().find(|c| &c.id == a) {
                         Some(c) => c.start + fps.secs_to_frames(offset.unwrap_or(0.0)),
                         None => {
-                            d.push(Diagnostic::error(
-                                "E_UNKNOWN_ANCHOR",
-                                format!("{base}/anchor"),
-                                format!("unknown anchor clip `{a}`"),
-                            ));
+                            // a clip of `main` that was rejected has its own error already
+                            if !main_ids.contains(a.as_str()) {
+                                d.push(Diagnostic::error(
+                                    "E_UNKNOWN_ANCHOR",
+                                    format!("{base}/anchor"),
+                                    format!("unknown anchor clip `{a}`"),
+                                ));
+                            }
                             continue;
                         }
                     },
@@ -902,11 +951,14 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                     Some(a) => match clips.iter().find(|c| &c.id == a) {
                         Some(c) => c.start + fps.secs_to_frames(at.offset.unwrap_or(0.0)),
                         None => {
-                            d.push(Diagnostic::error(
-                                "E_UNKNOWN_ANCHOR",
-                                format!("{base}/anchor"),
-                                format!("unknown anchor clip `{a}`"),
-                            ));
+                            // a clip of `main` that was rejected has its own error already
+                            if !main_ids.contains(a.as_str()) {
+                                d.push(Diagnostic::error(
+                                    "E_UNKNOWN_ANCHOR",
+                                    format!("{base}/anchor"),
+                                    format!("unknown anchor clip `{a}`"),
+                                ));
+                            }
                             continue;
                         }
                     },
@@ -1758,7 +1810,9 @@ fn check_reframe(r: &Reframe, base: &str, d: &mut Vec<Diagnostic>) {
             d.push(Diagnostic::error("E_BAD_VALUE", format!("{base}/padding"), "padding must be within 0–0.4"));
         }
     } else {
-        for (field, set) in [("rect", r.rect.is_some()), ("padding", r.padding.is_some())] {
+        for (field, set) in
+            [("rect", r.rect.is_some()), ("padding", r.padding.is_some()), ("narrower_only", r.narrower_only)]
+        {
             if set {
                 d.push(
                     Diagnostic::error(
