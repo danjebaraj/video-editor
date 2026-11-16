@@ -57,3 +57,7 @@ pub fn hash_key(parts: &[&[u8]]) -> String {
     }
     hex::encode(&h.finalize()[..16])
 }
+
+pub(crate) fn round3(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
+}

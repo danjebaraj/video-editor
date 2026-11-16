@@ -309,7 +309,7 @@ pub fn edl_table(tl: &cutline_core::Timeline) -> String {
 
 #[derive(Clone)]
 pub struct RenderArgs {
-    pub export: Option<String>,
+    pub export: Vec<String>,
     pub draft: bool,
     pub dry_run: bool,
     pub no_cache: bool,
@@ -358,10 +358,8 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
         let mut text = String::new();
         let mut plans = vec![];
         for (name, e) in pipeline::exports(&l.project) {
-            if let Some(o) = &a.export {
-                if &pipeline::export_name(&e) != o {
-                    continue;
-                }
+            if !a.export.is_empty() && !a.export.contains(&pipeline::export_name(&e)) {
+                continue;
             }
             let pr = pipeline::prepare(&l, name.clone(), &e, a.draft).map_err(CliError::validation)?;
             let plan = pipeline::plan_for(&l, &pr, &pipeline::options_for(&pr, &opts)).map_err(CliError::internal)?;
@@ -374,7 +372,7 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
         }
         return Ok(Output::ok(json!({"dry_run": true, "plans": plans}), text));
     }
-    let results = cutline_qa::deliver::render_all(&l, &opts, a.export.as_deref()).map_err(classify)?;
+    let results = cutline_qa::deliver::render_all(&l, &opts, &a.export).map_err(classify)?;
     let mut human = vec![];
     let mut qa_err = false;
     for r in &results {

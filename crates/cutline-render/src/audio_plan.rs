@@ -478,6 +478,7 @@ pub fn execute(tc: &Toolchain, a: &AudioPlan) -> Result<Option<LoudnessResult>> 
                 d.params.amount_db,
                 d.params.attack,
                 d.params.release,
+                d.params.hold,
             );
             wav::write_f32(&a.env_wav, &env, ENV_RATE, 1)?;
         }

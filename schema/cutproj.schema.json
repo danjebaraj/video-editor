@@ -194,6 +194,60 @@
       ],
       "type": "object"
     },
+    "Finish": {
+      "properties": {
+        "cut_on_beat": {
+          "default": true,
+          "description": "Land cuts on the music's beat and ask for music with a beat that can be followed.",
+          "type": "boolean"
+        },
+        "ease_text": {
+          "default": true,
+          "description": "Ease on-screen text in and out instead of popping it on.",
+          "type": "boolean"
+        },
+        "guide_the_eye": {
+          "default": true,
+          "description": "Ease into close-ups of the part of the screen being talked about.",
+          "type": "boolean"
+        },
+        "lead_in_s": {
+          "default": 1.2,
+          "description": "Seconds of picture and music before the first spoken word.",
+          "format": "double",
+          "type": "number"
+        },
+        "music_fade_in_s": {
+          "default": 1.0,
+          "description": "Seconds the music takes to come in.",
+          "format": "double",
+          "type": "number"
+        },
+        "music_fade_out_s": {
+          "default": 2.0,
+          "description": "Seconds the music takes to go out when it has no ending of its own to land.",
+          "format": "double",
+          "type": "number"
+        },
+        "tail_s": {
+          "default": 2.0,
+          "description": "Seconds the last picture holds after the last spoken word.",
+          "format": "double",
+          "type": "number"
+        },
+        "transition_s": {
+          "default": 0.4,
+          "description": "Length of a transition between scenes, in seconds.",
+          "format": "double",
+          "type": "number"
+        },
+        "transitions": {
+          "$ref": "#/$defs/Transitions",
+          "default": "smooth"
+        }
+      },
+      "type": "object"
+    },
     "FontRef": {
       "description": "A font by installed family name or by file.",
       "properties": {
@@ -920,6 +974,26 @@
       ],
       "type": "string"
     },
+    "Transitions": {
+      "description": "How one shot hands over to the next.",
+      "oneOf": [
+        {
+          "const": "smooth",
+          "description": "A short soft move between scenes, plain cuts inside a scene.",
+          "type": "string"
+        },
+        {
+          "const": "cuts",
+          "description": "Plain cuts everywhere; fades only for the title and the end card.",
+          "type": "string"
+        },
+        {
+          "const": "lively",
+          "description": "Quick moving transitions (whips, pushes) between scenes, for social cuts.",
+          "type": "string"
+        }
+      ]
+    },
     "Voice": {
       "properties": {
         "model": {
@@ -1011,6 +1085,17 @@
     },
     "created": {
       "type": "string"
+    },
+    "finish": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Finish"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "This project's own finish (transitions, beat cuts, music fades). Absent: the project\nfollows the finish in Settings, including later changes to it."
     },
     "format": {
       "type": "string"

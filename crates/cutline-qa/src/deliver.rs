@@ -151,13 +151,19 @@ fn side_path(out: &Path, ext: &str) -> PathBuf {
 }
 
 /// Render all (or one named) exports with QA.
-pub fn render_all(l: &Loaded, opts: &RenderOptions, only: Option<&str>) -> Result<Vec<ExportResult>> {
+pub fn render_all(l: &Loaded, opts: &RenderOptions, only: &[String]) -> Result<Vec<ExportResult>> {
     let tc = cutline_deps::toolchain()?;
     let mut results = vec![];
-    for (name, e) in pipeline::exports(&l.project) {
-        if let Some(o) = only {
+    let all = pipeline::exports(&l.project);
+    let named = |o: &String| all.iter().any(|(name, e)| &pipeline::export_name(e) == o || name.as_ref() == Some(o));
+    if let Some(unknown) = only.iter().find(|o| !named(o)) {
+        let have: Vec<String> = all.iter().map(|(_, e)| pipeline::export_name(e)).collect();
+        anyhow::bail!("no export named {unknown:?} (the project has: {})", have.join(", "));
+    }
+    for (name, e) in all.clone() {
+        if !only.is_empty() {
             let n = pipeline::export_name(&e);
-            if n != o && name.as_deref() != Some(o) {
+            if !only.contains(&n) && !name.as_ref().map(|x| only.contains(x)).unwrap_or(false) {
                 continue;
             }
         }
@@ -171,9 +177,6 @@ pub fn render_all(l: &Loaded, opts: &RenderOptions, only: Option<&str>) -> Resul
         results.push(finish(tc, l, &pr, &plan, exec)?);
         // temp hygiene: remove the run's tmp dir on success
         let _ = std::fs::remove_dir_all(&plan.work_dir);
-    }
-    if results.is_empty() {
-        anyhow::bail!("no export named {:?}", only);
     }
     Ok(results)
 }

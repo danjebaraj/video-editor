@@ -40,7 +40,7 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
      list, `--at 3.2 7.5`, or `--at` repeated), since the draft is rendered once for all of them
      (drafts capture HTML graphics at half density and 15 fps;
      stills skip frame capture for graphics not on screen at the requested times).
-6. **Render.** `cutline render project.json5` (all exports; `--export name` for one). QA runs
+6. **Render.** `cutline render project.json5` (all exports; `--export name` for one, repeated or comma-separated for several). QA runs
    automatically; the command fails on QA errors unless `--allow-qa-errors`. Outputs next to the
    video: `<name>.qa.json`, `<name>.render_report.json`, `<name>.srt`, `credits.txt`. Then:
    `cutline chapters project.json5` (long form; a chapter under YouTube's 10 s minimum, such as
@@ -228,7 +228,10 @@ Segments are cached: changing captions, text or music does not re-render clips.
     where the track begins); `align: "end"` cannot be combined with them.
 - Music under narration: set `audio.music_level: 18` instead of guessing `gain_db`, and put
   `align: "end"` (with a `fade_in`) on the music layer so the track's real ending closes the
-  video rather than a fade-out mid-phrase.
+  video rather than a fade-out mid-phrase. A music asset ends where its sound does: silence
+  after the last note is not counted, so the ending itself lands on the end.
+- The music stays ducked through pauses in the voice shorter than `audio.duck.hold` (1.5 s by
+  default), so it does not swell and drop between sentences; it comes up in longer pauses.
 
 - Roles: `dialogue` (clip audio), `voice` (VO assets), `music`, `sfx`. Voice/dialogue chain
   `clean_voice` by default (`podcast_warm`, `raw` available).

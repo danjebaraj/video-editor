@@ -22,6 +22,8 @@ pub struct PromptInput<'a> {
     pub eleven_available: bool,
     pub default_voice: Option<&'a str>,
     pub platforms: &'a Platforms,
+    /// How the video is finished: the project's own choices or the ones in Settings.
+    pub finish: &'a crate::finish::Finish,
 }
 
 /// One line per media item: ID, kind, role, duration, size, status, notes.
@@ -348,6 +350,9 @@ pub fn system_prompt(input: &PromptInput) -> String {
         s.push_str(&format!("Languages: {}. The first is the base language; add the others as cutline `locales` with translated strings and voice-over.\n", locales.join(", ")));
     }
     s.push('\n');
+    s.push_str("## Finish\n");
+    s.push_str(&input.finish.directions());
+    s.push('\n');
     s.push_str("## Brand\n");
     s.push_str(&brand_section(p));
     s.push('\n');
@@ -422,6 +427,7 @@ pub fn assistant_system_prompt(
          - Footage of an app does not have to exist yet. When \"App recording\" is on in the project summary below, the production run records it: Claude Code itself opens the desktop app or the web app (in a browser) on this computer, clicks, types and uses menus, and records the screen. cutline is not involved in that; it only edits the recordings. So never tell the user such footage can't be captured or must be recorded by hand. Write the scene so the run can perform it: a `- **Record:**` line naming the app (as shown in Applications) or the web address, followed by numbered steps that say exactly what to click, type or choose and what should be on screen at the end, plus any sample content to use. Keep each recorded scene to one continuous action. Recordings have no sound. If App recording is off, or limited to apps that don't include the one needed, tell the user they can change it under Project › App recording, or attach a recording instead. The first time a run drives apps, the computer asks the user to allow Screen Recording and Accessibility for Syncfusion Video Studio.\n\
          - Structured blocks, all plain Markdown: a scene is a heading that starts with \"Scene\" followed by `- **Duration:**`, `- **Media:**` and `- **On-screen text:**` lines; text to be voiced goes in a fenced block tagged `vo`; a music brief goes in a fenced block tagged `music` with `mood:`, `tempo:` and `source:` lines; the call to action goes under a \"Call to action\" heading.\n\
          - Voice-over is spoken at about 150 words per minute. Keep the script within the target length.\n\
+         - How the video is finished is not written in the spec unless this video should differ: transitions between scenes, cuts on the music's beat, a short lead-in before the first word, and how the music fades in and out come from Settings › Finish (or Project › Finish) and every run applies them. In a `music` block describe the mood and tempo; the run asks for a steady beat it can cut to.\n\
          - When you need the user to choose or to tell you something only they know (audience, length, tone, call to action, must-include shots), use the AskUserQuestion tool rather than guessing.\n\
          - Replace `{{{{…}}}}` template placeholders with real content or remove them.\n\n\
          About this project:\n{project_summary}",
@@ -511,7 +517,12 @@ mod tests {
             eleven_available: true,
             default_voice: Some("voice-abc"),
             platforms: &platforms,
+            finish: &crate::finish::Finish::default(),
         });
+        assert!(
+            s.contains("## Finish\n") && s.contains("snap_to_beats") && s.contains("smoothleft"),
+            "the finish is part of every run"
+        );
         for needle in [
             "/runs/r1",
             "media-manifest.json",
@@ -556,6 +567,7 @@ mod tests {
             eleven_available: false,
             default_voice: None,
             platforms: &platforms,
+            finish: &crate::finish::Finish::default(),
         });
         assert!(
             d.contains("cutline render project.json5 --draft")
@@ -579,6 +591,7 @@ mod tests {
             eleven_available: true,
             default_voice: None,
             platforms: &platforms,
+            finish: &crate::finish::Finish::default(),
         });
         assert!(
             s.contains("DRY RUN")
@@ -616,6 +629,7 @@ mod tests {
                     eleven_available: true,
                     default_voice: None,
                     platforms: &platforms,
+                    finish: &crate::finish::Finish::default(),
                 })
             };
             let s = prompt(&off);

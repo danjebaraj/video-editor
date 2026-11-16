@@ -69,7 +69,7 @@ fn webm_silent_loop_capped_and_cut_out_exports() {
     );
     let l = pipeline::load(&pp).unwrap_or_else(|e| panic!("{e}"));
     assert!(!cutline_core::diag::has_errors(&l.diags), "{:?}", l.diags);
-    let res = render_all(&l, &RenderOptions { jobs: 3, ..Default::default() }, None).unwrap();
+    let res = render_all(&l, &RenderOptions { jobs: 3, ..Default::default() }, &[]).unwrap();
     assert_eq!(res.len(), 4);
     for r in &res {
         assert!(r.qa.ok, "{:?}: {}", r.export, cutline_qa::qa::summary(&r.qa));
@@ -127,7 +127,7 @@ fn silent_export_without_captions_is_flagged_and_bad_exports_are_errors() {
     setup(d.path());
     let pp = project(d.path(), "{name: 'quiet', audio: false, captions: 'none'}");
     let l = pipeline::load(&pp).unwrap();
-    let res = render_all(&l, &RenderOptions { jobs: 3, ..Default::default() }, None).unwrap();
+    let res = render_all(&l, &RenderOptions { jobs: 3, ..Default::default() }, &[]).unwrap();
     let m = finding(&res[0], "muted");
     assert!(!m.ok && m.message.contains("no audio"), "{m:?}");
 

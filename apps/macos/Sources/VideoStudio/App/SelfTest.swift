@@ -494,6 +494,8 @@ enum SelfTest {
         check("logs export as a zip", count > 8 && fm.fileExists(atPath: zip.path), "\(count)")
         let logNames = Set(((try? Core.run("run.results", ["folder": folder.path], as: RunResults.self))?.logs ?? []).map(\.name))
         check("a run keeps the instructions Claude was given", logNames.contains("prompt-system.md") && logNames.contains("prompt.md"), "\(logNames.sorted())")
+        let systemPrompt = (try? String(contentsOf: folder.appendingPathComponent("logs/prompt-system.md"), encoding: .utf8)) ?? ""
+        check("a run is told how to finish the video", systemPrompt.contains("## Finish") && systemPrompt.contains("snap_to_beats") && systemPrompt.contains("smoothleft"), String(systemPrompt.prefix(80)))
         let unzip = Process()
         unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
         unzip.arguments = ["-Z1", zip.path]
@@ -539,6 +541,20 @@ enum SelfTest {
         delegate.showSettings(pane: "elevenlabs")
         await sleep(0.4)
         await snapshot(NSApp.windows.first { $0.title == "Settings" }, "settings-elevenlabs")
+        delegate.showSettings(pane: "finish")
+        await sleep(0.4)
+        await snapshot(NSApp.windows.first { $0.title == "Settings" }, "settings-finish")
+        check("the finish defaults are smooth and on the beat", app.settings.finish == Finish() && app.settings.finish.transitions == "smooth" && app.settings.finish.cut_on_beat)
+        check("a project follows the Settings finish until it is given its own", doc.project.finish == nil)
+        doc.update { $0.finish = app.settings.finish }
+        doc.update { $0.finish?.transitions = "cuts" }
+        doc.inspectorTab = .project
+        await sleep(0.5)
+        await snapshot(wc2.window, "project-finish")
+        _ = doc.save()
+        let savedFinish = (try? String(contentsOf: doc.fileURL, encoding: .utf8))?.contains("\"transitions\": \"cuts\"") == true
+        check("a project's own finish is saved with it", savedFinish)
+        doc.update { $0.finish = nil }
         doc.inspectorTab = .outputs
         await sleep(0.4)
         await snapshot(wc2.window, "outputs")

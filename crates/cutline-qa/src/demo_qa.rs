@@ -125,13 +125,19 @@ fn read_frame(l: &Loaded, engine: Engine, c: &TClip, t: f64, work: &std::path::P
     let tc = cutline_deps::toolchain()?;
     std::fs::create_dir_all(work)?;
     let png = work.join(format!("{key}.png"));
-    let o = tc
-        .ffmpeg_cmd()
-        .args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-ss", &format!("{t:.3}"), "-i"])
-        .arg(&m.path)
-        .args(["-frames:v", "1"])
-        .arg(&png)
-        .output()?;
+    let mut cmd = tc.ffmpeg_cmd();
+    cmd.args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error"]);
+    if m.sparse() {
+        // A recording that only stores a frame when the screen changes: a seek to `t` can land
+        // where no frame follows. Read from the start and hold the last frame instead.
+        cmd.args(["-t", &format!("{:.3}", t + 1.0), "-i"]).arg(&m.path).args([
+            "-vf",
+            &format!("fps=10:start_time=0,tpad=stop_mode=clone:stop_duration={:.3},trim=start={t:.3}", t + 1.0),
+        ]);
+    } else {
+        cmd.args(["-ss", &format!("{t:.3}"), "-i"]).arg(&m.path);
+    }
+    let o = cmd.args(["-frames:v", "1"]).arg(&png).output()?;
     anyhow::ensure!(o.status.success() && png.is_file(), "frame grab failed: {}", String::from_utf8_lossy(&o.stderr));
     let lines = ocr::recognize(engine, &png)?;
     let _ = std::fs::remove_file(&png);

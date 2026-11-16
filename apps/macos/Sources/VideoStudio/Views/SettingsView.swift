@@ -2,11 +2,12 @@ import SwiftUI
 import AppKit
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, claude, cutline, elevenlabs, storage, editor
+    case general, finish, claude, cutline, elevenlabs, storage, editor
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: return "General"
+        case .finish: return "Finish"
         case .claude: return "Claude"
         case .cutline: return "cutline"
         case .elevenlabs: return "ElevenLabs"
@@ -17,6 +18,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .general: return "gearshape"
+        case .finish: return "wand.and.stars"
         case .claude: return "sparkles"
         case .cutline: return "scissors"
         case .elevenlabs: return "waveform"
@@ -45,7 +47,7 @@ struct SettingsView: View {
                             Image(systemName: pane.symbol).font(.system(size: 18))
                             Text(pane.title).font(.caption)
                         }
-                        .frame(width: 84, height: 46)
+                        .frame(width: 80, height: 46)
                         .foregroundStyle(state.pane == pane ? Color.accentColor : Color.secondary)
                         .background(state.pane == pane ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
                         .contentShape(Rectangle())
@@ -61,6 +63,7 @@ struct SettingsView: View {
                 Group {
                     switch state.pane {
                     case .general: GeneralSettings()
+                    case .finish: FinishSettings()
                     case .claude: ClaudeSettings()
                     case .cutline: CutlineSettings()
                     case .elevenlabs: ElevenSettings()

@@ -1086,7 +1086,13 @@
         "attack": {
           "type": "number",
           "format": "double",
-          "default": 0.12
+          "default": 0.25
+        },
+        "hold": {
+          "description": "Pauses in the speech shorter than this many seconds stay ducked (default 1.5), so the\nmusic does not swell and drop between sentences. `0`: only pauses shorter than\n`attack + release` stay ducked.",
+          "type": "number",
+          "format": "double",
+          "default": 1.5
         },
         "mode": {
           "description": "envelope (default) | sidechain",
@@ -1098,7 +1104,7 @@
         "release": {
           "type": "number",
           "format": "double",
-          "default": 0.45
+          "default": 0.8
         },
         "target": {
           "description": "Roles that get ducked.",

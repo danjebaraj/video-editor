@@ -97,7 +97,7 @@ fn check_shorts_pipeline(d: &Path) -> Result<Outcome> {
     let l = pipeline::load(&pp).map_err(|e| anyhow::anyhow!("{e}"))?;
     anyhow::ensure!(!cutline_core::diag::has_errors(&l.diags), "project invalid: {:?}", l.diags);
     let opts = cutline_render::RenderOptions::default();
-    let res = crate::deliver::render_all(&l, &opts, None)?;
+    let res = crate::deliver::render_all(&l, &opts, &[])?;
     let r = &res[0];
     let pr = pipeline::prepare(&l, None, &pipeline::exports(&l.project)[0].1, false)?;
     let tl = &pr.timeline;

@@ -259,6 +259,7 @@ struct ProjectInspector: View {
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                FinishSection(document: document)
                 InspectorSection(title: "Models") {
                     ModelPicker(title: "Spec assistant", model: Binding(get: { document.project.models.assistant }, set: { v in document.update { $0.models.assistant = v } }),
                                 settingsDefault: AppState.shared.settings.default_assistant_model)
