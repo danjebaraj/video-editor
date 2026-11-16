@@ -305,6 +305,13 @@ struct ClaudePanel: View {
                 .toggleStyle(.checkbox).controlSize(.small)
                 .help("Send the selected text as context")
             }
+            if chat.validationFindingCount > 0 {
+                Toggle(isOn: $chat.includeValidation) {
+                    Label("Validation findings (\(chat.validationFindingCount))", systemImage: "checkmark.shield").font(.caption)
+                }
+                .toggleStyle(.checkbox).controlSize(.small)
+                .help("Send what validation found with your message, so Claude can fix it. Findings outside the spec are marked as such.")
+            }
             if document.review.pending != nil {
                 Label("Review Claude's changes in the editor to continue.", systemImage: "arrow.left.circle").font(.caption).foregroundStyle(.orange)
             }

@@ -410,6 +410,16 @@ enum SelfTest {
         check("the unknown media ID is a blocker", report?.issues.contains { $0.rule == "spec_unresolved_media" && $0.severity == "blocker" } == true, "\(report?.issues.map(\.rule) ?? [])")
         check("each issue links to where it can be fixed", report?.issues.first { $0.rule == "spec_unresolved_media" }?.fix?.line == 16, "\(String(describing: report?.issues.first { $0.rule == "spec_unresolved_media" }?.fix))")
         await snapshot(wc2.window, "validation-blockers")
+        let findings = doc.assistant.validationContext()
+        check("validation findings are ready to go to Claude with the next message", doc.assistant.includeValidation && doc.assistant.validationFindingCount == (report?.issues.count ?? -1) && findings.contains("[blocker]") && findings.contains("(spec.md line 16)"), String(findings.prefix(300)))
+        if let issue = report?.issues.first(where: { $0.rule == "spec_unresolved_media" }) {
+            doc.assistant.askToFix(issue: issue)
+            check("Ask Claude to Fix writes the request for one finding", doc.inspectorTab == .claude && doc.assistant.draft.contains(issue.title), doc.assistant.draft)
+            await sleep(0.4)
+            await snapshot(wc2.window, "claude-validation-context")
+            doc.assistant.draft = ""
+            doc.inspectorTab = .validation
+        }
         doc.runs.requestRun()
         await wait("blocked run") { !doc.runs.isPreparing }
         check("a run can't start with blockers", doc.runs.plan == nil && !doc.runs.isRunning && doc.inspectorTab == .validation)

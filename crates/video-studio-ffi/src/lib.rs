@@ -554,6 +554,11 @@ pub fn call(method: String, args: String) -> R<String> {
             // Probe results are a cache worth keeping: hand the project back with them.
             out(json!({"report": report, "project": p, "resolutions": resolutions}))
         }
+        "validation.assistant_context" => {
+            let report: video_studio_core::validation::Report = arg(&args, "report")?;
+            let only = args.get("only").and_then(|v| v.as_str());
+            out(json!({"context": report.assistant_context(only), "request": report.fix_request(only)}))
+        }
         "validation.fix_prompt" => out(arg::<ReadinessReport>(&args, "readiness")?.fix_prompt()),
 
         // Runs and logs

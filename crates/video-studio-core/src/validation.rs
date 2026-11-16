@@ -106,6 +106,64 @@ impl Report {
         self.infos = self.issues.iter().filter(|i| i.severity == Severity::Info).count();
     }
 
+    /// The findings as context for the spec assistant: attached to a message so Claude knows
+    /// what validation reported without the user copying it over. `only` limits it to one
+    /// issue ID. Empty when there is nothing to report.
+    ///
+    /// Findings are split by where they can be fixed, because the assistant edits spec.md
+    /// only: a missing permission or an unset voice written into the spec as a note is worse
+    /// than the finding itself.
+    pub fn assistant_context(&self, only: Option<&str>) -> String {
+        let line = |i: &Issue| {
+            let sev = match i.severity {
+                Severity::Blocker => "blocker",
+                Severity::Warning => "warning",
+                Severity::Info => "note",
+            };
+            let at = i.fix.as_ref().and_then(|f| f.line).map(|l| format!(" (spec.md line {l})")).unwrap_or_default();
+            let detail = i
+                .detail
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+                .map(|d| format!(" — {}", d.replace('\n', " ")))
+                .unwrap_or_default();
+            format!("- [{sev}] {}{at}{detail}\n", i.title.trim())
+        };
+        let in_spec = |i: &Issue| {
+            i.category == "spec" || i.category == "dry_run" || i.fix.as_ref().is_some_and(|f| f.kind == "spec")
+        };
+        let chosen: Vec<&Issue> = self.issues.iter().filter(|i| only.map_or(true, |id| i.id == id)).collect();
+        if chosen.is_empty() {
+            return String::new();
+        }
+        let (spec, other): (Vec<&Issue>, Vec<&Issue>) = chosen.into_iter().partition(|i| in_spec(i));
+        let mut s = format!(
+            "Validation findings for this project{}. Line numbers refer to spec.md as it was then; if the text has moved, find it by what the finding says.\n",
+            if self.generated.is_empty() { String::new() } else { format!(" (checked {})", self.generated) }
+        );
+        if !spec.is_empty() {
+            s.push_str("\nAbout the spec (these can be fixed in spec.md):\n");
+            spec.iter().for_each(|i| s.push_str(&line(i)));
+        }
+        if !other.is_empty() {
+            s.push_str("\nOutside the spec (media, outputs, brand, settings, this computer). You can't fix these by editing spec.md and must not write them into it as notes; when one matters to what I asked, tell me what to change and where:\n");
+            other.iter().for_each(|i| s.push_str(&line(i)));
+        }
+        s
+    }
+
+    /// The message behind "Ask Claude to Fix": the findings themselves travel as context.
+    pub fn fix_request(&self, only: Option<&str>) -> String {
+        match only.and_then(|id| self.issues.iter().find(|i| i.id == id)) {
+            Some(i) => format!(
+                "Fix this validation finding: \"{}\". If it can't be fixed in the spec, tell me what to change and where. Ask me about anything only I can decide.",
+                i.title.trim()
+            ),
+            None => "Fix the validation findings that can be fixed in the spec, blockers first, and leave the rest of the spec as it is. For the findings outside the spec, tell me what to change and where. Ask me about anything only I can decide.".into(),
+        }
+    }
+
     pub fn has_blockers(&self) -> bool {
         self.blockers > 0
     }
@@ -1880,6 +1938,51 @@ mod tests {
         }
         let e = f.run().estimates;
         assert!((e.claude_usd_low - 3.0).abs() < 1e-9 && (e.claude_usd_high - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn findings_travel_to_the_assistant_split_by_where_they_are_fixed() {
+        let issue = |id: &str, sev, category: &str, title: &str, fix: Option<FixLink>| Issue {
+            id: id.into(),
+            rule: id.into(),
+            severity: sev,
+            category: category.into(),
+            title: title.into(),
+            detail: Some("Two lines\nof detail".into()),
+            fix,
+        };
+        let mut r = Report {
+            generated: "2026-11-15T10:00:00Z".into(),
+            issues: vec![
+                issue(
+                    "vo_long",
+                    Severity::Warning,
+                    "spec",
+                    "Scene 2 narration is too long",
+                    Some(FixLink { kind: "spec".into(), target: None, line: Some(31) }),
+                ),
+                issue("voice_unset", Severity::Blocker, "brand", "No voice is chosen", FixLink::to("brand")),
+            ],
+            ..Default::default()
+        };
+        r.recount();
+        let c = r.assistant_context(None);
+        let (spec, outside) = c.split_once("Outside the spec").unwrap();
+        assert!(
+            spec.contains("- [warning] Scene 2 narration is too long (spec.md line 31) — Two lines of detail"),
+            "{c}"
+        );
+        assert!(
+            outside.contains("- [blocker] No voice is chosen") && outside.contains("must not write them into it"),
+            "{c}"
+        );
+        // one finding on its own, and nothing when there is nothing
+        let one = r.assistant_context(Some("vo_long"));
+        assert!(one.contains("Scene 2") && !one.contains("No voice"));
+        assert!(r.fix_request(Some("vo_long")).contains("\"Scene 2 narration is too long\""));
+        assert!(r.fix_request(None).contains("blockers first"));
+        assert_eq!(Report::default().assistant_context(None), "");
+        assert_eq!(r.assistant_context(Some("gone")), "");
     }
 
     #[test]
