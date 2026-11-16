@@ -38,13 +38,11 @@ struct ValidationView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             estimates(r)
-                            if let dry = r.dry_run, !(dry.ambiguities.isEmpty && dry.risks.isEmpty && dry.missing_media.isEmpty && dry.assumptions.isEmpty) {
-                                Button { document.assistant.askToFix(dry) } label: {
-                                    Label("Ask Claude to fix the spec", systemImage: "sparkles").frame(maxWidth: .infinity)
-                                }
-                                .help("Opens a Claude session with the dry run's findings")
-                                .disabled(!app.claudeAvailable)
+                            Button { document.assistant.askToFix() } label: {
+                                Label("Ask Claude to Fix", systemImage: "sparkles").frame(maxWidth: .infinity)
                             }
+                            .help("Opens Claude with a request to fix these findings. The findings are sent along; you can edit the request before sending.")
+                            .disabled(!app.claudeAvailable || document.assistant.isRunning)
                             ForEach(r.issues) { issue in IssueRow(document: document, issue: issue) }
                         }
                         .padding(12)
@@ -161,6 +159,11 @@ struct IssueRow: View {
                 }
             }
             Spacer(minLength: 0)
+            Button { document.assistant.askToFix(issue: issue) } label: { Image(systemName: "sparkles") }
+                .buttonStyle(.borderless)
+                .help("Ask Claude to fix this")
+                .accessibilityLabel("Ask Claude to fix this")
+                .disabled(document.assistant.isRunning)
             CopyButton("Copy this result") { Self.text(of: issue) }
         }
         .padding(8)

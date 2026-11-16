@@ -37,6 +37,11 @@ final class AssistantModel: ObservableObject {
     @Published private(set) var isRunning = false
     @Published var draft = ""
     @Published var includeSelection = true
+    /// Send what validation found with each message, so Claude can fix it without the findings
+    /// being copied over by hand. On by default.
+    @Published var includeValidation = true
+    /// The next message already carries its own findings (the dry run's), so none are added.
+    private var skipValidationOnce = false
     @Published var scrollTrigger = 0
 
     private var turn: AssistantTurn?
@@ -164,10 +169,63 @@ final class AssistantModel: ObservableObject {
         return (ed.nsText.substring(with: sel), a...b)
     }
 
+    private struct ValidationContext: Decodable {
+        var context: String
+        var request: String
+    }
+
+    /// How many findings would go with the next message: the last validation's, or the live
+    /// spec notes when the project hasn't been validated yet.
+    var validationFindingCount: Int {
+        if let r = document.report { return r.issues.count }
+        return document.lint.count
+    }
+
+    /// The findings as text for Claude. Empty when there are none.
+    func validationContext() -> String {
+        if let r = document.report {
+            let c: ValidationContext? = try? Core.run("validation.assistant_context", ["report": Core.arg(r)])
+            return c?.context ?? ""
+        }
+        guard !document.lint.isEmpty else { return "" }
+        let lines = document.lint.map { "- [\($0.severity)] \($0.message) (spec.md line \($0.line))" }.joined(separator: "\n")
+        return "Notes on the spec from the editor's live check (these can be fixed in spec.md):\n" + lines + "\n"
+    }
+
     private func compose(_ text: String) -> (prompt: String, labels: [String]) {
-        guard includeSelection, let sel = currentSelection() else { return (text, []) }
-        let prompt = text + "\n\n---\nContext from the editor:\n- Selected text in spec.md (lines \(sel.lines.lowerBound)–\(sel.lines.upperBound)):\n\n```markdown\n\(sel.text)\n```"
-        return (prompt, ["Selection \(sel.lines.lowerBound)–\(sel.lines.upperBound)"])
+        var prompt = text
+        var labels: [String] = []
+        var context: [String] = []
+        if includeSelection, let sel = currentSelection() {
+            context.append("Selected text in spec.md (lines \(sel.lines.lowerBound)–\(sel.lines.upperBound)):\n\n```markdown\n\(sel.text)\n```")
+            labels.append("Selection \(sel.lines.lowerBound)–\(sel.lines.upperBound)")
+        }
+        if includeValidation, !skipValidationOnce {
+            let findings = validationContext()
+            if !findings.isEmpty {
+                context.append(findings + "\nThis is background: act on it when my message asks for fixes or when a finding bears on what I asked; otherwise just keep it in mind.")
+                let n = validationFindingCount
+                labels.append("Validation: \(n) finding\(n == 1 ? "" : "s")")
+            }
+        }
+        skipValidationOnce = false
+        if !context.isEmpty {
+            prompt += "\n\n---\nContext from the app:\n\n" + context.joined(separator: "\n\n")
+        }
+        return (prompt, labels)
+    }
+
+    /// Validation › Ask Claude to Fix: opens the Claude tab with the request written, for every
+    /// finding or for one. The findings themselves go along as context when it is sent.
+    func askToFix(issue: ValidationIssue? = nil) {
+        guard !isRunning, let r = document.report else { return }
+        var args: Core.Args = ["report": Core.arg(r)]
+        if let issue { args["only"] = issue.id }
+        let c: ValidationContext? = try? Core.run("validation.assistant_context", args)
+        includeValidation = true
+        skipValidationOnce = false
+        document.inspectorTab = .claude
+        draft = c?.request ?? "Fix the validation findings that can be fixed in the spec."
     }
 
     /// Sends a prompt in the current session. Returns false if the turn didn't start.
@@ -241,6 +299,7 @@ final class AssistantModel: ObservableObject {
         let prompt = (try? Core.run("validation.fix_prompt", ["readiness": Core.arg(readiness)], as: String.self)) ?? ""
         document.inspectorTab = .claude
         draft = prompt
+        skipValidationOnce = true
     }
 
     func stop() {
