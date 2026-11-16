@@ -143,6 +143,12 @@ Segments are cached: changing captions, text or music does not re-render clips.
   `manual` keys for this: with `manual` (and `cover`) annotation rects count against the output
   frame and have to be worked out again. Pick tall rects (a sidebar, a form, a chat column);
   check `review/<name>/reframe/*.jpg`.
+- **One project with a 16:9 export and vertical ones: add `narrower_only: true` to those rects.**
+  A `rect` reframe applies to every export, so without it the 16:9 version is cropped around
+  the rect too and loses its `default_frame`. With `reframe: {mode: "rect", rect: {…},
+  narrower_only: true}` the crop is made only where the output is narrower than the recording
+  (4:5, 9:16); the 16:9 export shows the whole recording in its window frame. `zoom_to` and
+  annotations keep working in both, since their rects are fractions of the recording.
 - Show where to look. Pair a `zoom_to` with a `highlight` on the same `rect` (it follows the
   zoom), use `spotlight` when the rest of the screen distracts, an `arrow` with a short `label`
   for "new here", `keys` when the narration names a shortcut (keycaps are literal text:

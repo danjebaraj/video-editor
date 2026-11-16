@@ -544,6 +544,8 @@ enum RunStatus {
 /// How a video is finished: how shots join, whether cuts follow the music's beat, and how the
 /// music comes in and goes out. Settings holds the app-wide default; a project may keep its own.
 struct Finish: Codable, Equatable {
+    /// How lively the voice and the music are: `calm`, `balanced` or `upbeat`.
+    var energy = "upbeat"
     /// `smooth`, `cuts` or `lively`.
     var transitions = "smooth"
     var transition_s = 0.4
@@ -561,6 +563,7 @@ struct Finish: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Finish()
+        energy = try c.decodeIfPresent(String.self, forKey: .energy) ?? d.energy
         transitions = try c.decodeIfPresent(String.self, forKey: .transitions) ?? d.transitions
         transition_s = try c.decodeIfPresent(Double.self, forKey: .transition_s) ?? d.transition_s
         cut_on_beat = try c.decodeIfPresent(Bool.self, forKey: .cut_on_beat) ?? d.cut_on_beat
@@ -575,7 +578,8 @@ struct Finish: Codable, Equatable {
     /// One line describing the choices, for the project inspector.
     var summary: String {
         let join = transitions == "cuts" ? "Plain cuts" : transitions == "lively" ? "Lively transitions" : "Smooth transitions"
-        return "\(join), \(cut_on_beat ? "cuts on the beat" : "cuts not tied to the beat"), music in over \(Finish.seconds(music_fade_in_s)) and out over \(Finish.seconds(music_fade_out_s))."
+        let mood = energy == "calm" ? "Calm" : energy == "balanced" ? "Balanced" : "Upbeat"
+        return "\(mood) voice and music. \(join), \(cut_on_beat ? "cuts on the beat" : "cuts not tied to the beat"), music in over \(Finish.seconds(music_fade_in_s)) and out over \(Finish.seconds(music_fade_out_s))."
     }
 
     static func seconds(_ v: Double) -> String {
@@ -601,6 +605,10 @@ struct CoreSettings: Codable, Equatable {
     var cutline_repo = ""
     var default_quality = "final"
     var eleven_default_voice = ""
+    /// When no voice is fixed: `tried` (voices earlier videos used first) or `latest`.
+    var eleven_voice_preference = "tried"
+    /// When no voice is fixed: `any`, `female` or `male`.
+    var eleven_voice_gender = "any"
     var eleven_default_credit_cap: UInt64 = 20_000
     var eleven_cache_limit_bytes: UInt64 = 2_000_000_000
     var words_per_minute = 150

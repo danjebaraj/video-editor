@@ -21,6 +21,8 @@ pub struct PromptInput<'a> {
     pub cutline_guide: &'a str,
     pub eleven_available: bool,
     pub default_voice: Option<&'a str>,
+    /// How to choose a voice when none is fixed (Settings › ElevenLabs), in words.
+    pub voice_choosing: Option<&'a str>,
     pub platforms: &'a Platforms,
     /// How the video is finished: the project's own choices or the ones in Settings.
     pub finish: &'a crate::finish::Finish,
@@ -196,7 +198,7 @@ fn audio_section(input: &PromptInput) -> String {
         let voice = match input.default_voice {
             Some(v) => format!("The voice for this project is `{v}`; plan with it unless the spec names another."),
             None => {
-                "No voice is chosen for this project. Report that once under ambiguities, and say where it is set: in the brand preset (App Library › Brands) or as the default voice in Settings › ElevenLabs. Don't pick one.".to_string()
+                "No voice is fixed for this project: the production run will choose one itself, following the voice preferences in Settings › ElevenLabs. Report that once under ambiguities, and say where a voice is fixed: in the brand preset (App Library › Brands) or as the default voice in Settings › ElevenLabs. Don't pick one.".to_string()
             }
         };
         return format!("Audio: this is a dry run, so no audio is generated. Where the edit needs voice-over, music or sound effects, plan each file under audio/ and estimate credits with `video-studio eleven quote …`. Hold each file's place with a stand-in:\n\
@@ -209,7 +211,10 @@ fn audio_section(input: &PromptInput) -> String {
     }
     let voice = match input.default_voice {
         Some(v) => format!("The brand's default voice is `{v}`: use it unless the spec names another."),
-        None => "No default voice is set: pick one with `video-studio eleven voices --search <words>` that fits the tone, and say which in summary.md.".to_string(),
+        None => match input.voice_choosing {
+            Some(how) => format!("No voice is fixed for this project, so you choose one. {how}"),
+            None => "No default voice is set: pick one with `video-studio eleven voices --search <words>` that fits the tone, and say which in summary.md.".to_string(),
+        },
     };
     format!(
         "Audio: generate voice-over, music and sound effects with the app's helper. It is the only way to reach ElevenLabs.\n\
@@ -217,7 +222,7 @@ fn audio_section(input: &PromptInput) -> String {
          - `video-studio eleven music --prompt \"<brief>\" --length <seconds> --out <name>.mp3`\n\
          - `video-studio eleven sfx --prompt \"<brief>\" --length <seconds> --out <name>.mp3`\n\
          - `video-studio eleven scribe --in <audio> --out <name>.json` (word timings; import with `cutline transcribe`)\n\
-         - `video-studio eleven voices [--search <words>]` and `video-studio eleven quote <tts|music|sfx> …` (estimate, costs nothing)\n\
+         - `video-studio eleven voices [--search <words>] [--gender female|male|any] [--prefer tried|latest]` (the account's voices, best first for the preferences in Settings) and `video-studio eleven quote <tts|music|sfx> …` (estimate, costs nothing)\n\
          Outputs land in audio/. Write voice-over text to a file under audio/ or work/ first, one file per scene or passage, and voice the `vo` blocks of the spec word for word.\n\
          {voice}\n\
          Budget: this run may spend at most {} ElevenLabs credits. Every call is quoted first; a call that would pass the cap fails with a message telling you how much is left. Identical requests are served from a cache at no cost, so never change text just to regenerate.\n",
@@ -516,6 +521,7 @@ mod tests {
             cutline_guide: "GUIDE TEXT",
             eleven_available: true,
             default_voice: Some("voice-abc"),
+            voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
         });
@@ -566,6 +572,7 @@ mod tests {
             cutline_guide: "",
             eleven_available: false,
             default_voice: None,
+            voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
         });
@@ -573,6 +580,28 @@ mod tests {
             d.contains("cutline render project.json5 --draft")
                 && d.contains("Web search and fetch are available")
                 && d.contains("no ElevenLabs key is configured")
+        );
+        // no voice fixed: the run is told how Settings wants one chosen
+        let how =
+            crate::eleven::voices::choosing(crate::eleven::VoicePreference::Latest, crate::eleven::VoiceGender::Male);
+        let v = system_prompt(&PromptInput {
+            project: &p,
+            run_config: &rc,
+            kind: RunKind::Production,
+            folder: "/r".into(),
+            outputs: &outs,
+            exports: &ex,
+            manifest: &manifest,
+            cutline_guide: "",
+            eleven_available: true,
+            default_voice: None,
+            voice_choosing: Some(&how),
+            platforms: &platforms,
+            finish: &crate::finish::Finish::default(),
+        });
+        assert!(
+            v.contains("so you choose one") && v.contains("a male voice") && v.contains("most recently added"),
+            "the voice preferences reach the run"
         );
     }
 
@@ -590,6 +619,7 @@ mod tests {
             cutline_guide: "",
             eleven_available: true,
             default_voice: None,
+            voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
         });
@@ -607,7 +637,7 @@ mod tests {
                 && s.contains("video-studio standin audio --out audio/")
         );
         assert!(s.contains("\"planned\"") && s.contains("never under `missing_media`"));
-        assert!(s.contains("No voice is chosen for this project"));
+        assert!(s.contains("No voice is fixed for this project") && s.contains("the production run will choose one itself"));
         assert!(s.contains("--text-file audio/<name>.txt") && s.contains("transcript: \"audio/<name>.json\""));
         assert!(s.contains("check-<output folder name>.json5") && s.contains("Settings › ElevenLabs"));
         // a project that turns app recording off, or limits it, says so in both kinds of run
@@ -628,6 +658,7 @@ mod tests {
                     cutline_guide: "",
                     eleven_available: true,
                     default_voice: None,
+                    voice_choosing: None,
                     platforms: &platforms,
                     finish: &crate::finish::Finish::default(),
                 })

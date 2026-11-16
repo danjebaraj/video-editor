@@ -551,10 +551,20 @@ enum SelfTest {
         delegate.showSettings(pane: "elevenlabs")
         await sleep(0.4)
         await snapshot(NSApp.windows.first { $0.title == "Settings" }, "settings-elevenlabs")
+        check("with no voice set, tried voices of either gender are preferred", app.settings.eleven_voice_preference == "tried" && app.settings.eleven_voice_gender == "any", "\(app.settings.eleven_voice_preference) \(app.settings.eleven_voice_gender)")
+        // the choice survives a save through the core and back
+        let voiceBefore = (app.settings.eleven_voice_preference, app.settings.eleven_voice_gender)
+        app.settings.eleven_voice_preference = "latest"
+        app.settings.eleven_voice_gender = "female"
+        let voiceSaved = (try? Core.raw("settings.save", ["settings": Core.arg(app.settings)])).map { String(describing: $0) } ?? ""
+        check("the voice preferences are saved with the settings", voiceSaved.contains("latest") && voiceSaved.contains("female"), String(voiceSaved.prefix(120)))
+        (app.settings.eleven_voice_preference, app.settings.eleven_voice_gender) = voiceBefore
+        app.saveSettings()
         delegate.showSettings(pane: "finish")
         await sleep(0.4)
         await snapshot(NSApp.windows.first { $0.title == "Settings" }, "settings-finish")
         check("the finish defaults are smooth and on the beat", app.settings.finish == Finish() && app.settings.finish.transitions == "smooth" && app.settings.finish.cut_on_beat)
+        check("the finish defaults to an upbeat voice and music", app.settings.finish.energy == "upbeat" && systemPrompt.contains("Upbeat voice and music"), app.settings.finish.energy)
         check("a project follows the Settings finish until it is given its own", doc.project.finish == nil)
         doc.update { $0.finish = app.settings.finish }
         doc.update { $0.finish?.transitions = "cuts" }

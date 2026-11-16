@@ -117,7 +117,15 @@ pub fn render(
     let u = fr.u();
     let vertical = fr.is_vertical();
     let accent = cfg.accent.clone().unwrap_or_else(|| brand.colors.accent.clone());
-    let color = cfg.color.clone().unwrap_or_else(|| brand.colors.text.clone());
+    // `clean_sentence` sits on a dark box: a brand whose text colour is dark (made for a light
+    // page) would be unreadable there, so only a colour that shows on the box is taken from it.
+    let color = cfg.color.clone().unwrap_or_else(|| {
+        if style == "clean_sentence" && !shows_on_dark(&brand.colors.text) {
+            "#FFFFFF".into()
+        } else {
+            brand.colors.text.clone()
+        }
+    });
     let (default_words, default_chars) = match style.as_str() {
         "word_by_word" => (1, 40),
         "karaoke" => (8, if vertical { 26 } else { 42 }),
@@ -370,12 +378,25 @@ pub fn srt(words: &[CWord], cuts: &[f64]) -> String {
     s
 }
 
+/// Whether `#RRGGBB` is light enough to read on the captions' dark box (Rec. 709 luma).
+fn shows_on_dark(c: &str) -> bool {
+    let h = c.trim().trim_start_matches('#').trim_start_matches("0x");
+    let p = |i: usize| h.get(i..i + 2).and_then(|x| u8::from_str_radix(x, 16).ok()).unwrap_or(255) as f64;
+    0.2126 * p(0) + 0.7152 * p(2) + 0.0722 * p(4) > 140.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     fn w(s: &str, a: f64, b: f64) -> CWord {
         CWord { w: s.into(), start: a, end: b }
     }
+    #[test]
+    fn dark_brand_text_is_not_used_on_the_dark_caption_box() {
+        assert!(shows_on_dark("#FFFFFF") && shows_on_dark("#FFD54A"));
+        assert!(!shows_on_dark("#111827") && !shows_on_dark("#1F2937") && !shows_on_dark("#0000FF"));
+    }
+
     #[test]
     fn chunking_rules() {
         let ws = vec![

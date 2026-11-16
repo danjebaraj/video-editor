@@ -172,6 +172,26 @@
       ],
       "type": "object"
     },
+    "Energy": {
+      "description": "How much drive the voice and the music have.",
+      "oneOf": [
+        {
+          "const": "calm",
+          "description": "Unhurried voice, soft slow music: explainers, serious subjects.",
+          "type": "string"
+        },
+        {
+          "const": "balanced",
+          "description": "A natural read over light music with a steady beat.",
+          "type": "string"
+        },
+        {
+          "const": "upbeat",
+          "description": "A bright, lively read over driving music, with short pauses.",
+          "type": "string"
+        }
+      ]
+    },
     "Fingerprint": {
       "properties": {
         "mtime": {
@@ -205,6 +225,11 @@
           "default": true,
           "description": "Ease on-screen text in and out instead of popping it on.",
           "type": "boolean"
+        },
+        "energy": {
+          "$ref": "#/$defs/Energy",
+          "default": "upbeat",
+          "description": "How lively the voice and the music are."
         },
         "guide_the_eye": {
           "default": true,

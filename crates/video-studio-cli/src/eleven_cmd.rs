@@ -80,6 +80,12 @@ pub enum ElevenCommand {
     Voices {
         #[arg(long)]
         search: Option<String>,
+        /// female, male or any (default: the choice in Settings › ElevenLabs)
+        #[arg(long)]
+        gender: Option<String>,
+        /// tried (voices used in earlier videos first) or latest (newest first); default: Settings
+        #[arg(long)]
+        prefer: Option<String>,
     },
     /// Estimate the credits a call would cost, without generating anything
     Quote {
@@ -173,7 +179,17 @@ pub fn run(command: ElevenCommand, secrets: &dyn Secrets) -> i32 {
             };
             generate(&ctx, Request::Scribe { input: p }, &out, secrets)
         }
-        ElevenCommand::Voices { search } => {
+        ElevenCommand::Voices { search, gender, prefer } => {
+            let gender = match gender.as_deref() {
+                Some(g) => eleven::VoiceGender::parse(g)
+                    .ok_or_else(|| Error::other(format!("--gender is female, male or any; got `{g}`")))?,
+                None => ctx.voice_gender,
+            };
+            let prefer = match prefer.as_deref() {
+                Some(p) => eleven::VoicePreference::parse(p)
+                    .ok_or_else(|| Error::other(format!("--prefer is tried or latest; got `{p}`")))?,
+                None => ctx.voice_preference,
+            };
             let key = match &ctx.test_api_key {
                 Some(k) => k.clone(),
                 None => secrets
@@ -181,16 +197,33 @@ pub fn run(command: ElevenCommand, secrets: &dyn Secrets) -> i32 {
                     .filter(|k| !k.is_empty())
                     .ok_or_else(|| Error::Environment("No ElevenLabs API key is set.".into()))?,
             };
-            let voices = eleven::Client::new(&key, ctx.base_url.as_deref()).voices(search.as_deref())?;
+            let all = eleven::Client::new(&key, ctx.base_url.as_deref()).voices(search.as_deref())?;
+            let used = eleven::voices::used(&ctx.cache_dir);
+            let found = all.len();
+            let voices = eleven::voices::rank(all, prefer, gender, &used);
             if voices.is_empty() {
-                println!("No voices match.");
+                match gender.word() {
+                    Some(g) if found > 0 => {
+                        println!("No {g} voices match ({found} of another gender do: try --gender any).")
+                    }
+                    _ => println!("No voices match."),
+                }
+            } else {
+                println!(
+                    "# {}; {}. Best first.",
+                    gender.word().map(|g| format!("{g} voices")).unwrap_or_else(|| "voices of either gender".into()),
+                    prefer.describe()
+                );
             }
             for v in voices {
+                let gender = eleven::voices::gender_of(&v);
                 println!(
-                    "{}  {}{}{}",
+                    "{}  {}{}{}{}{}",
                     v.voice_id,
                     v.name,
+                    gender.map(|g| format!("  ({g})")).unwrap_or_else(|| "  (gender not given)".into()),
                     v.category.map(|c| format!("  [{c}]")).unwrap_or_default(),
+                    used.get(&v.voice_id).map(|u| format!("  used {}×", u.count)).unwrap_or_default(),
                     v.description.map(|d| format!("  — {}", d.replace('\n', " "))).unwrap_or_default()
                 );
             }

@@ -132,6 +132,8 @@ fn helper_context(w: &World, url: &str, cap: u64, mode: Mode) -> (Utf8PathBuf, U
         default_voice: Some("v1".into()),
         default_voice_settings: None,
         default_model: None,
+        voice_preference: Default::default(),
+        voice_gender: Default::default(),
         base_url: Some(url.to_string()),
         test_api_key: None,
         capture: Some(Default::default()),
@@ -206,7 +208,17 @@ fn eleven_helper_budget_cache_and_logging() {
         "length is checked"
     );
     let voices = stdout(&eleven(&["voices", "--search", "narrator"]));
-    assert!(voices.contains("v1  Aria  [premade]  — Warm narrator") && voices.contains("v2  Bram"));
+    // Settings' defaults: either gender, voices this app has used before at the top
+    let lines: Vec<&str> = voices.lines().collect();
+    assert!(lines[0].starts_with("# voices of either gender; voices used in earlier videos first"), "{voices}");
+    assert_eq!(lines[1], "v1  Aria  (female)  [premade]  used 2×  — Warm narrator", "the most used voice leads");
+    assert_eq!(lines[2], "v2  Bram  (male)  [premade]  used 1×");
+    let female = stdout(&eleven(&["voices", "--gender", "female", "--prefer", "latest"]));
+    assert!(
+        female.contains("v1  Aria") && !female.contains("Bram") && female.contains("most recently added"),
+        "{female}"
+    );
+    assert_eq!(eleven(&["voices", "--gender", "robot"]).status.code(), Some(1));
     // out paths can't leave the run folder
     let escape = eleven(&["tts", "--text", "Hi", "--out", "../../stolen.mp3"]);
     assert_eq!(escape.status.code(), Some(126));

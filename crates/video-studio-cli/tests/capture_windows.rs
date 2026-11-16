@@ -67,6 +67,8 @@ fn drives_and_records_the_test_app() {
         default_voice: None,
         default_voice_settings: None,
         default_model: None,
+        voice_preference: Default::default(),
+        voice_gender: Default::default(),
         base_url: None,
         test_api_key: None,
         capture: Some(Default::default()),

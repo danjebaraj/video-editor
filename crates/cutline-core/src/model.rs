@@ -631,6 +631,12 @@ pub struct Reframe {
     /// `rect` mode: margin around the rect as a fraction of the source (default 0.03).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub padding: Option<f64>,
+    /// `rect` mode: crop only in an output that is narrower than the source (4:5, 9:16). In an
+    /// output as wide as the source or wider the clip is shown whole, as if it had no
+    /// `reframe`, and takes the project's `default_frame`. For one project that exports both a
+    /// 16:9 and vertical versions of a screen recording.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub narrower_only: bool,
 }
 
 /// The crop a `rect` reframe makes: a whole-pixel crop of the source and where it lands in

@@ -32,9 +32,42 @@ impl Transitions {
     }
 }
 
+/// How much drive the voice and the music have.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Energy {
+    /// Unhurried voice, soft slow music: explainers, serious subjects.
+    Calm,
+    /// A natural read over light music with a steady beat.
+    Balanced,
+    /// A bright, lively read over driving music, with short pauses.
+    #[default]
+    Upbeat,
+}
+
+impl Energy {
+    pub fn label(self) -> &'static str {
+        match self {
+            Energy::Calm => "Calm",
+            Energy::Balanced => "Balanced",
+            Energy::Upbeat => "Upbeat",
+        }
+    }
+    /// Tempo to ask for when music is generated.
+    fn bpm(self) -> &'static str {
+        match self {
+            Energy::Calm => "about 85 to 100",
+            Energy::Balanced => "about 100 to 115",
+            Energy::Upbeat => "about 118 to 126",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(default)]
 pub struct Finish {
+    /// How lively the voice and the music are.
+    pub energy: Energy,
     pub transitions: Transitions,
     /// Length of a transition between scenes, in seconds.
     pub transition_s: f64,
@@ -57,6 +90,7 @@ pub struct Finish {
 impl Default for Finish {
     fn default() -> Self {
         Finish {
+            energy: Energy::Upbeat,
             transitions: Transitions::Smooth,
             transition_s: 0.4,
             cut_on_beat: true,
@@ -92,7 +126,8 @@ impl Finish {
     pub fn summary(&self) -> String {
         let f = self.clamped();
         format!(
-            "{} transitions ({} s), {}, {} s lead-in, {} s tail, music in over {} s and out over {} s",
+            "{} voice and music, {} transitions ({} s), {}, {} s lead-in, {} s tail, music in over {} s and out over {} s",
+            f.energy.label().to_lowercase(),
             f.transitions.label().to_lowercase(),
             secs(f.transition_s),
             if f.cut_on_beat { "cuts on the beat" } else { "cuts not tied to the beat" },
@@ -111,6 +146,14 @@ impl Finish {
         let mut s = String::from(
             "These are the user's standing choices for how every video is finished. They apply unless spec.md or the brand rules say otherwise, and where they differ from the general advice in the cutline guide below, these win.\n",
         );
+        s.push_str(match f.energy {
+            Energy::Upbeat => "- **Upbeat voice and music.** The video should feel bright and moving, never sleepy.\n\
+                 \x20 - *Voice:* a lively, smiling, confident read. Unless the brand gives its own voice settings, pass `--settings '{\"stability\": 0.35, \"similarity_boost\": 0.8, \"style\": 0.45, \"speed\": 1.06}'` to `video-studio eleven tts` (lower stability and some style make the read more animated). When the brand or the spec names a voice model that takes delivery tags, open passages with a short one such as `[warmly]` or `[confident]`; with any other model write no tags, because they would be read aloud. If you choose the voice yourself, search for a bright, energetic one.\n\
+                 \x20 - *Pace:* keep the narration flowing. A pause added between scenes (`gaps`) is half a second to a second, never two; if a scene's pictures need longer than its words, shorten the shot or speed it up rather than leaving the voice silent.\n\
+                 \x20 - *Music:* bright and driving, in a major key, with a clear kick and light percussion from the first bar and a melodic hook; present under the voice, not wallpaper. The brand's music mood sets the colour (instruments, genre), not the energy: where it says \"unobtrusive\" or \"calm\", keep the mix out of the voice's way but keep the drive.\n",
+            Energy::Balanced => "- **A natural voice over light music.** An even, friendly read at the voice's normal settings; pauses between scenes of about a second; music with a steady beat that supports without pushing.\n",
+            Energy::Calm => "- **Calm voice and music.** An unhurried, warm read: unless the brand gives its own voice settings, pass `--settings '{\"stability\": 0.6, \"similarity_boost\": 0.8, \"style\": 0.15, \"speed\": 0.97}'` to `video-studio eleven tts`. Pauses between scenes may run to a second and a half. Music is soft and spacious (pads, piano, gentle pulse), well under the voice.\n",
+        });
         match f.transitions {
             Transitions::Smooth => s.push_str(&format!(
                 "- **Shots join smoothly.** A scene is one heading of the spec. Between two scenes put a transition item of {t} s: `{{transition: {{type: \"smoothleft\", duration: {t}}}}}` when the next scene moves on to a new page, screen or topic, and `{{transition: {{type: \"fade\", duration: {t}}}}}` into and out of full-frame cards (title, section, statistic, end card) and between camera footage. Use at most two transition types in one video. Inside a scene, between two views of the same page or app, use a plain cut. A `fade` between two different screen recordings shows both screens' text at once (`W_SCREEN_DISSOLVES`): use the moving transition there.\n\
@@ -124,7 +167,7 @@ impl Finish {
             )),
         }
         s.push_str(&format!(
-            "- **Open and close with room to breathe.** The picture and the music start first and the first spoken word comes {lead} s later: give the voice-over layer `start: {lead}` (after a title card, start it as the card hands over). Open on a title card or the strongest still picture, faded up from black over about half a second, not on a cold cut into motion. After the last spoken word the end card holds for another {tail} s, so the video never stops on the final syllable. Plan the length with both in mind.\n",
+            "- **Open and close with room to breathe.** The picture and the music start first and the first spoken word comes {lead} s later: give the voice-over layer `start: {lead}` (after a title card, start it as the card hands over). Open on a title card or the strongest still picture, not on a cold cut into motion. The very first frame is that picture, never black: feeds and players show it before anything plays, and QA flags a black one (`first_frame`). Ease the title's text in over the card instead of fading the whole picture up from black. After the last spoken word the end card holds for another {tail} s, so the video never stops on the final syllable. Plan the length with both in mind.\n",
             lead = secs(f.lead_in_s),
             tail = secs(f.tail_s),
         ));
@@ -134,10 +177,11 @@ impl Finish {
             fo = secs(f.music_fade_out_s),
         ));
         if f.cut_on_beat {
-            s.push_str(
-                "- **The edit follows the beat.** Add `auto: {snap_to_beats: {}}` so each cut timed to the narration moves onto the nearest beat, and run `cutline beats project.json5` to see the bars: put scene changes, the title and the end card on the first beat of a bar where one is close. A transition is centred on its cut, so the beat falls in the middle of it. `cutline expand` lists what moved; `W_SNAP_NO_BEATS` means the track has no beat that can be followed, so choose or generate another track.\n\
-                 - **Choose music that can be cut to.** When you generate music, ask for it in the brief, whatever mood the spec gives: an instrumental with a clear, steady beat in 4/4 at one constant tempo (name the BPM: about 100 to 120 for a calm business video, faster for social cuts), drums or a pulse from the first bar, no tempo changes, no long beatless intro or breakdown, and a clean ending on a final chord. Make it about as long as the video plus 4 seconds. When the spec attaches music, use it, and say in the summary if its beat could not be followed.\n",
-            );
+            s.push_str(&format!(
+                "- **The edit follows the beat.** Add `auto: {{snap_to_beats: {{}}}}` so each cut timed to the narration moves onto the nearest beat, and run `cutline beats project.json5` to see the bars: put scene changes, the title and the end card on the first beat of a bar where one is close. A transition is centred on its cut, so the beat falls in the middle of it. `cutline expand` lists what moved; `W_SNAP_NO_BEATS` means the track has no beat that can be followed, so choose or generate another track.\n\
+                 - **Choose music that can be cut to.** When you generate music, ask for it in the brief, whatever mood the spec gives: an instrumental with a clear, steady beat in 4/4 at one constant tempo (name the BPM: {bpm}), drums or a pulse from the first bar, no tempo changes, no long beatless intro or breakdown, and a clean ending on a final chord. Make it about as long as the video plus 4 seconds. When the spec attaches music, use it, and say in the summary if its beat could not be followed.\n",
+                bpm = f.energy.bpm()
+            ));
         }
         if f.ease_text {
             s.push_str(
@@ -163,9 +207,13 @@ mod tests {
         let d = Finish::default().directions();
         for needle in [
             "smoothleft",
+            "Upbeat voice and music",
+            "\"speed\": 1.06",
+            "118 to 126",
             "duration: 0.4",
             "snap_to_beats",
             "start: 1.2",
+            "never black",
             "another 2 s",
             "fade_in: 1",
             "fade_out: 2",
@@ -190,6 +238,10 @@ mod tests {
         assert!(d.contains("plain cuts") && !d.contains("smoothleft"));
         assert!(!d.contains("snap_to_beats") && !d.contains("zoom_to") && !d.contains("enter:"));
         assert!(Finish { transitions: Transitions::Lively, ..Finish::default() }.directions().contains("whip_left"));
+        let calm = Finish { energy: Energy::Calm, ..Finish::default() }.directions();
+        assert!(calm.contains("Calm voice and music") && calm.contains("85 to 100") && !calm.contains("Upbeat"));
+        let balanced = Finish { energy: Energy::Balanced, ..Finish::default() }.directions();
+        assert!(balanced.contains("100 to 115") && !balanced.contains("--settings"));
     }
 
     #[test]
@@ -199,6 +251,9 @@ mod tests {
         assert_eq!((f.transitions, f.cut_on_beat), (Transitions::Cuts, true));
         let wild = Finish { transition_s: 30.0, lead_in_s: -4.0, ..Finish::default() }.clamped();
         assert_eq!((wild.transition_s, wild.lead_in_s), (1.5, 0.0));
-        assert!(Finish::default().summary().starts_with("smooth transitions (0.4 s), cuts on the beat"));
+        assert_eq!(f.energy, Energy::Upbeat, "a file from before the choice existed gets the default");
+        assert!(Finish::default()
+            .summary()
+            .starts_with("upbeat voice and music, smooth transitions (0.4 s), cuts on the beat"));
     }
 }

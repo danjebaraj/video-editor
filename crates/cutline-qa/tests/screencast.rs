@@ -80,6 +80,35 @@ fn screencast_profile_444_and_zoom_to() {
     assert!(!freeze.ok, "a still camera clip is a freeze warning: {freeze:?}");
 }
 
+/// From a run's log: a zoom that eases back out (`end`) stopped the render with ffmpeg's
+/// "Invalid argument" for some rect sizes and not others. With the scale written to six
+/// decimals, the way out could finish a hair under 1.
+#[test]
+fn a_zoom_that_eases_back_out_renders_at_any_size() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let mut c = tc.ffmpeg_cmd();
+    c.args(["-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=3", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        .arg(d.path().join("screen.mp4"));
+    gen::run(c).unwrap();
+    for w in ["0.52", "0.693866", "0.6"] {
+        let p = d.path().join("z.json5");
+        std::fs::write(
+            &p,
+            format!(
+                "{{version: 1, name: 'z', target: 'custom', width: 640, height: 360, fps: 30,
+                  assets: {{s: {{path: 'screen.mp4'}}}},
+                  main: [{{id: 'c', clip: 's', effects: [{{type: 'zoom_to', rect: {{x: 0.1, y: 0.1, w: {w}, h: 0.3}}, padding: 0, start: 0.3, duration: 0.6, end: 1.5}}]}}],
+                  audio: {{voice_chain: 'raw'}}}}"
+            ),
+        )
+        .unwrap();
+        let l = pipeline::load(&p).unwrap();
+        let r = render_all(&l, &RenderOptions { jobs: 3, ..Default::default() }, &[]);
+        assert!(r.is_ok(), "zoom_to {w} wide: {:?}", r.err());
+    }
+}
+
 #[test]
 fn zoom_to_validation() {
     let Some(tc) = test_toolchain() else { return };

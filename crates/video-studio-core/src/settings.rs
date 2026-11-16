@@ -35,6 +35,10 @@ pub struct Settings {
     pub default_quality: String,
     // ElevenLabs
     pub eleven_default_voice: String,
+    /// When no voice is fixed: prefer voices earlier videos used, or the newest ones.
+    pub eleven_voice_preference: crate::eleven::VoicePreference,
+    /// When no voice is fixed: any voice, or only female or male ones.
+    pub eleven_voice_gender: crate::eleven::VoiceGender,
     pub eleven_default_credit_cap: u64,
     /// Cache size limit in bytes; the oldest entries go first when it is exceeded.
     pub eleven_cache_limit_bytes: u64,
@@ -69,6 +73,8 @@ impl Default for Settings {
             cutline_repo: String::new(),
             default_quality: "final".into(),
             eleven_default_voice: String::new(),
+            eleven_voice_preference: Default::default(),
+            eleven_voice_gender: Default::default(),
             eleven_default_credit_cap: 20_000,
             eleven_cache_limit_bytes: 2_000_000_000,
             words_per_minute: 150,

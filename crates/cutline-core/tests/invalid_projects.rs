@@ -362,3 +362,73 @@ fn schema_is_current() {
         "schema/project.schema.json is stale: run `CUTLINE_BLESS=1 cargo test -p cutline-core schema_is_current`"
     );
 }
+
+/// From a run's log: a colour written straight into `clip` came back as six errors, five of
+/// them about the transitions and anchors around the clip that had been rejected.
+#[test]
+fn one_rejected_clip_is_one_error() {
+    let got = check(
+        r#"main: [{id: "title", clip: "color:brand", duration: 3}, {transition: {type: "fade", duration: 0.4}},
+                  {id: "c1", clip: "a", out: 2}, {transition: {type: "fade", duration: 0.4}},
+                  {id: "endcard", clip: "color:brand", duration: 3}],
+           layers: [{type: "text", template: "title_card", anchor: "title", duration: 2, text: "Hello"},
+                    {type: "text", template: "title_card", anchor: "endcard", duration: 2, text: "Bye"}]"#,
+    );
+    let want: Vec<(String, String)> =
+        ["/main/0/clip", "/main/4/clip"].iter().map(|p| ("E_UNKNOWN_ASSET".to_string(), p.to_string())).collect();
+    assert_eq!(got, want);
+    // real mistakes of the same kinds are still reported
+    expect(
+        r#"main: [{transition: {type: "fade", duration: 0.4}}, {id: "c1", clip: "a"}]"#,
+        "E_TRANSITION_POSITION",
+        "/main/0",
+    );
+    expect(
+        r#"main: [{id: "c1", clip: "a"}, {transition: {type: "fade", duration: 0.4}}]"#,
+        "E_TRANSITION_POSITION",
+        "/main/1",
+    );
+    expect(
+        r#"main: [{id: "c1", clip: "a"}], layers: [{type: "text", template: "title_card", anchor: "nope", duration: 1, text: "x"}]"#,
+        "E_UNKNOWN_ANCHOR",
+        "/layers/0/anchor",
+    );
+}
+
+/// From a run's log: one project exported 16:9, 4:5 and 9:16, and the rect reframes written for
+/// the vertical versions also cropped the 16:9 one and took its window frame away.
+#[test]
+fn a_narrower_only_rect_reframe_leaves_the_wide_output_whole() {
+    let tl = |target: &str| {
+        let text = format!(
+            r#"{{ version: 1, {ASSETS}, target: "{target}", default_frame: {{style: "window"}},
+                 main: [{{id: "c1", clip: "a", out: 2,
+                          reframe: {{mode: "rect", rect: {{x: 0.6, y: 0.1, w: 0.3, h: 0.8}}, narrower_only: true}}}}] }}"#
+        );
+        let p = cutline_core::parse::parse_project(&text).unwrap();
+        let (tl, d) = resolve(&p, &lookup(), &Context::default());
+        assert!(d.iter().all(|x| x.severity != cutline_core::diag::Severity::Error), "{d:?}");
+        tl.unwrap()
+    };
+    // 16:9 source in a 16:9 output: no crop, and the default window frame is back
+    let wide = tl("long_1080p");
+    assert!(wide.clips[0].clip.reframe.is_none() && wide.clips[0].frame.is_some());
+    // the same clip in 9:16 and 4:5: cropped around the rect, no frame
+    for t in ["shorts", "portrait_4x5"] {
+        let v = tl(t);
+        assert!(v.clips[0].clip.reframe.is_some() && v.clips[0].frame.is_none(), "{t}");
+        assert!(v.clips[0].content.is_some_and(|c| c.w > 1.0), "{t}: the picture is larger than the frame");
+    }
+    expect(
+        &format!(
+            r#"default_reframe: {{mode: "rect", rect: {{x: 0, y: 0, w: 0.5, h: 0.5}}, narrower_only: true}}, {OK_MAIN}"#
+        ),
+        "E_FIELD_CONFLICT",
+        "/default_reframe/narrower_only",
+    );
+    expect(
+        r#"main: [{id: "c1", clip: "a", reframe: {mode: "cover", narrower_only: true}}]"#,
+        "E_FIELD_CONFLICT",
+        "/main/0/reframe/narrower_only",
+    );
+}
