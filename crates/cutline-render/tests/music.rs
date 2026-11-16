@@ -48,3 +48,40 @@ fn music_level_and_backtimed_ending() {
     let body = read_audio(tc, &plan.output, 2.1, Some(0.4), 1).unwrap();
     assert!((dominant_freq(&body) - 200.0).abs() < 20.0, "body before it: {}", dominant_freq(&body));
 }
+
+/// From a run's log: six generated voice passages arrived up to 12 dB apart, and the finished
+/// video's voice jumped in volume from scene to scene. Each voice file is levelled first.
+#[test]
+fn voice_files_are_levelled_before_the_mix() {
+    use cutline_testkit::analyze::rms_db;
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    gen::still(tc, &d.path().join("bg.png"), 320, 180, "0x223344").unwrap();
+    gen::tone(tc, &d.path().join("loud.wav"), 500.0, 2.0, 0.0).unwrap();
+    gen::tone(tc, &d.path().join("quiet.wav"), 500.0, 2.0, -12.0).unwrap();
+    let render = |name: &str, audio: &str| {
+        let pp = d.path().join(format!("{name}.json5"));
+        std::fs::write(
+            &pp,
+            format!(
+                "{{version: 1, name: '{name}', target: 'custom', width: 320, height: 180, fps: 30,
+                  assets: {{bg: {{path: 'bg.png'}}, a: {{path: 'loud.wav', role: 'voice'}}, b: {{path: 'quiet.wav', role: 'voice'}}}},
+                  main: [{{id: 'c', clip: 'bg', duration: 5}}],
+                  layers: [{{type: 'audio', asset: 'a', start: 0}}, {{type: 'audio', asset: 'b', start: 2.5}}],
+                  audio: {{voice_chain: 'raw'{audio}}}}}"
+            ),
+        )
+        .unwrap();
+        let l = pipeline::load(&pp).unwrap_or_else(|e| panic!("{e}"));
+        let (n, e) = pipeline::exports(&l.project).remove(0);
+        let pr = pipeline::prepare(&l, n, &e, false).unwrap();
+        let (plan, _) = pipeline::render(&l, &pr, &RenderOptions { jobs: 3, ..Default::default() }).unwrap();
+        let first = rms_db(&read_audio(tc, &plan.audio.stems["voice"], 0.5, Some(1.0), 1).unwrap());
+        let second = rms_db(&read_audio(tc, &plan.audio.stems["voice"], 3.0, Some(1.0), 1).unwrap());
+        first - second
+    };
+    let levelled = render("lv", "");
+    assert!(levelled.abs() < 1.0, "the two passages are {levelled:.1} dB apart");
+    let kept = render("raw", ", level_voice: false");
+    assert!((kept - 12.0).abs() < 1.0, "level_voice: false keeps each file's level ({kept:.1} dB apart)");
+}

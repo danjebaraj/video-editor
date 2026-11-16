@@ -46,6 +46,7 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
     captions(l, p, tl, &brand, &mut extras)?;
     let (script_notes, script_mismatches) = crate::auto::script_check(l, p, Some(tl), &brand);
     extras.warnings.extend(script_notes);
+    extras.warnings.extend(crate::auto::voice_pace(l, p));
     extras.script_mismatches = script_mismatches;
     let full = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
     let g = if draft { full.draft() } else { full };
@@ -302,10 +303,12 @@ pub fn text_layers(_p: &Project, tl: &Timeline, brand: &Brand, extras: &mut Plan
 /// Extra validation warnings that need media analysis (faces, captions in safe zone, …).
 pub fn warnings(l: &Loaded) -> Vec<cutline_core::Diagnostic> {
     // narration that differs from its script (from transcripts already made; whisper is not run)
-    match load_brand(l, &l.project) {
+    let mut out = match load_brand(l, &l.project) {
         Ok(brand) => crate::auto::script_check(l, &l.project, l.timeline.as_ref(), &brand).0,
         Err(_) => vec![],
-    }
+    };
+    out.extend(crate::auto::voice_pace(l, &l.project));
+    out
 }
 
 /// Apply `auto` directives, producing an explicit project.

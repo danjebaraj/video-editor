@@ -141,10 +141,29 @@ impl HelperContext {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Request {
-    Tts { voice: String, text: String, model: Option<String>, settings: Option<Value> },
-    Music { prompt: String, length_s: f64 },
-    Sfx { prompt: String, length_s: f64 },
-    Scribe { input: Utf8PathBuf },
+    Tts {
+        voice: String,
+        text: String,
+        model: Option<String>,
+        settings: Option<Value>,
+        /// What is spoken just before and just after this passage, when it is one of several:
+        /// the voice then carries its pace and tone across them instead of starting afresh.
+        before: Option<String>,
+        after: Option<String>,
+        /// Another take of the same request: a different number gives a different reading.
+        take: Option<u32>,
+    },
+    Music {
+        prompt: String,
+        length_s: f64,
+    },
+    Sfx {
+        prompt: String,
+        length_s: f64,
+    },
+    Scribe {
+        input: Utf8PathBuf,
+    },
 }
 
 impl Request {
@@ -167,8 +186,19 @@ impl Request {
     /// The request as logged and hashed: everything that changes the result, and never the key.
     pub fn describe(&self) -> Value {
         match self {
-            Request::Tts { voice, text, model, settings } => {
-                json!({"command": "tts", "voice": voice, "model": model, "settings": settings, "text": text})
+            Request::Tts { voice, text, model, settings, before, after, take } => {
+                let mut d =
+                    json!({"command": "tts", "voice": voice, "model": model, "settings": settings, "text": text});
+                if let Some(b) = before {
+                    d["before"] = json!(b);
+                }
+                if let Some(a) = after {
+                    d["after"] = json!(a);
+                }
+                if let Some(t) = take {
+                    d["take"] = json!(t);
+                }
+                d
             }
             Request::Music { prompt, length_s } => json!({"command": "music", "prompt": prompt, "length_s": length_s}),
             Request::Sfx { prompt, length_s } => json!({"command": "sfx", "prompt": prompt, "length_s": length_s}),
@@ -344,9 +374,15 @@ pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secr
         }
         let client = ctx.client(secrets)?;
         let result = match req {
-            Request::Tts { voice, text, model, settings } => {
-                client.tts(voice, text, model.as_deref().or(ctx.default_model.as_deref()), settings.as_ref())
-            }
+            Request::Tts { voice, text, model, settings, before, after, take } => client.tts(
+                voice,
+                text,
+                model.as_deref().or(ctx.default_model.as_deref()),
+                settings.as_ref(),
+                before.as_deref(),
+                after.as_deref(),
+                *take,
+            ),
             Request::Music { prompt, length_s } => client.music(prompt, *length_s),
             Request::Sfx { prompt, length_s } => client.sfx(prompt, *length_s),
             Request::Scribe { input } => client.scribe(input),
@@ -478,7 +514,15 @@ mod tests {
     }
 
     fn tts(text: &str) -> Request {
-        Request::Tts { voice: "v1".into(), text: text.into(), model: None, settings: None }
+        Request::Tts {
+            voice: "v1".into(),
+            text: text.into(),
+            model: None,
+            settings: None,
+            before: None,
+            after: None,
+            take: None,
+        }
     }
 
     #[test]
@@ -491,7 +535,10 @@ mod tests {
                     voice: "v".into(),
                     text: "Hello world".into(),
                     model: Some("eleven_flash_v2_5".into()),
-                    settings: None
+                    settings: None,
+                    before: None,
+                    after: None,
+                    take: None,
                 },
                 &p,
                 None
@@ -510,7 +557,16 @@ mod tests {
         assert_ne!(a.cache_key(), tts("Hello!").cache_key());
         assert_ne!(
             a.cache_key(),
-            Request::Tts { voice: "v2".into(), text: "Hello".into(), model: None, settings: None }.cache_key()
+            Request::Tts {
+                voice: "v2".into(),
+                text: "Hello".into(),
+                model: None,
+                settings: None,
+                before: None,
+                after: None,
+                take: None
+            }
+            .cache_key()
         );
         assert_ne!(
             a.cache_key(),
@@ -518,7 +574,10 @@ mod tests {
                 voice: "v1".into(),
                 text: "Hello".into(),
                 model: None,
-                settings: Some(json!({"stability": 0.3}))
+                settings: Some(json!({"stability": 0.3})),
+                before: None,
+                after: None,
+                take: None,
             }
             .cache_key()
         );
@@ -606,7 +665,7 @@ mod tests {
             matches!(execute(&c, &tts("  "), "a.mp3", &MemorySecrets::default()), Err(Error::Other(m)) if m.contains("empty"))
         );
         assert!(
-            matches!(execute(&c, &Request::Tts { voice: "".into(), text: "Hi".into(), model: None, settings: None }, "a.mp3", &MemorySecrets::default()), Err(Error::Other(m)) if m.contains("No voice"))
+            matches!(execute(&c, &Request::Tts { voice: "".into(), text: "Hi".into(), model: None, settings: None, before: None, after: None, take: None }, "a.mp3", &MemorySecrets::default()), Err(Error::Other(m)) if m.contains("No voice"))
         );
     }
 

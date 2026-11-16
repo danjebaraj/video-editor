@@ -118,3 +118,45 @@ fn a_misspoken_word_is_reported_with_its_time() {
         assert!(cutline_render::extras::warnings(&l).is_empty(), "{audio}");
     }
 }
+
+/// From a run's log: a voice-over generated one passage at a time, one take of which came back
+/// at half the pace of the others. A passage far from the rest's pace is a warning.
+#[test]
+fn a_passage_spoken_much_slower_than_the_rest_is_a_warning() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    gen::still(tc, &d.path().join("bg.png"), 320, 180, "0x223344").unwrap();
+    let mut assets = String::new();
+    // five words of five letters each; `per_word` seconds a word
+    for (name, per_word) in [("a", 0.4), ("b", 0.42), ("c", 0.38), ("slow", 0.8)] {
+        let mut c = tc.ffmpeg_cmd();
+        c.args(["-f", "lavfi", "-i", "sine=f=220:d=5", "-ac", "2"]).arg(d.path().join(format!("{name}.wav")));
+        gen::run(c).unwrap();
+        let words: Vec<_> = (0..5)
+            .map(|k| serde_json::json!({"w": "words", "start": k as f64 * per_word, "end": (k + 1) as f64 * per_word}))
+            .collect();
+        std::fs::write(
+            d.path().join(format!("{name}.json")),
+            serde_json::json!({"asset": name, "words": words}).to_string(),
+        )
+        .unwrap();
+        assets.push_str(&format!(", {name}: {{path: '{name}.wav', role: 'voice', transcript: '{name}.json'}}"));
+    }
+    let p = d.path().join("p.json5");
+    std::fs::write(
+        &p,
+        format!(
+            "{{version: 1, target: 'custom', width: 320, height: 180, fps: 30,
+              assets: {{bg: {{path: 'bg.png'}}{assets}}},
+              main: [{{id: 'm', clip: 'bg', duration: 20}}],
+              layers: [{{type: 'audio', asset: 'a', start: 0}}, {{type: 'audio', asset: 'b', start: 5}},
+                       {{type: 'audio', asset: 'c', start: 10}}, {{type: 'audio', asset: 'slow', start: 15}}]}}"
+        ),
+    )
+    .unwrap();
+    let l = pipeline::load(&p).unwrap_or_else(|e| panic!("{e}"));
+    let pace: Vec<_> = cutline_render::extras::warnings(&l).into_iter().filter(|x| x.code == "W_VOICE_PACE").collect();
+    assert_eq!(pace.len(), 1, "{pace:?}");
+    assert_eq!(pace[0].path, "/assets/slow");
+    assert!(pace[0].message.contains("slower than the other voice passages (75 words a minute)"), "{pace:?}");
+}

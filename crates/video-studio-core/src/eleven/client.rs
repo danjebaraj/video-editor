@@ -165,10 +165,35 @@ impl Client {
             .unwrap_or_default())
     }
 
-    pub fn tts(&self, voice: &str, text: &str, model: Option<&str>, settings: Option<&Value>) -> Result<Generated> {
-        let mut body = json!({"text": text, "model_id": model.unwrap_or("eleven_multilingual_v2")});
+    /// `take` is the request's `seed`: another number, another reading of the same text.
+    /// `before` and `after` are the neighbouring passages' text: ElevenLabs reads them as context
+    /// (`previous_text`/`next_text`) and keeps pace and tone continuous across separate requests.
+    pub fn tts(
+        &self,
+        voice: &str,
+        text: &str,
+        model: Option<&str>,
+        settings: Option<&Value>,
+        before: Option<&str>,
+        after: Option<&str>,
+        take: Option<u32>,
+    ) -> Result<Generated> {
+        let model = model.unwrap_or("eleven_multilingual_v2");
+        let mut body = json!({"text": text, "model_id": model});
         if let Some(s) = settings.filter(|s| s.is_object()) {
             body["voice_settings"] = s.clone();
+        }
+        if let Some(t) = take {
+            body["seed"] = json!(t);
+        }
+        // The v3 models take no neighbouring text.
+        if !model.starts_with("eleven_v3") {
+            if let Some(b) = before.filter(|b| !b.trim().is_empty()) {
+                body["previous_text"] = json!(b);
+            }
+            if let Some(a) = after.filter(|a| !a.trim().is_empty()) {
+                body["next_text"] = json!(a);
+            }
         }
         self.post_json(&format!("/v1/text-to-speech/{}?output_format=mp3_44100_128", urlencode(voice)), &body)
     }

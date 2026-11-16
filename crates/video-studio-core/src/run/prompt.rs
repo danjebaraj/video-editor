@@ -218,12 +218,17 @@ fn audio_section(input: &PromptInput) -> String {
     };
     format!(
         "Audio: generate voice-over, music and sound effects with the app's helper. It is the only way to reach ElevenLabs.\n\
-         - `video-studio eleven tts --voice <id> --text-file <file> --out <name>.mp3 [--model <id>] [--settings '<json>']`\n\
+         - `video-studio eleven tts --voice <id> --text-file <file> --out <name>.mp3 [--before-file <file>] [--after-file <file>] [--take <n>] [--model <id>] [--settings '<json>']`\n\
          - `video-studio eleven music --prompt \"<brief>\" --length <seconds> --out <name>.mp3`\n\
          - `video-studio eleven sfx --prompt \"<brief>\" --length <seconds> --out <name>.mp3`\n\
          - `video-studio eleven scribe --in <audio> --out <name>.json` (word timings; import with `cutline transcribe`)\n\
          - `video-studio eleven voices [--search <words>] [--gender female|male|any] [--prefer tried|latest]` (the account's voices, best first for the preferences in Settings) and `video-studio eleven quote <tts|music|sfx> …` (estimate, costs nothing)\n\
          Outputs land in audio/. Write voice-over text to a file under audio/ or work/ first, one file per scene or passage, and voice the `vo` blocks of the spec word for word.\n\
+         The passages must sound like one reading, not several:\n\
+         - Use the same voice, model and `--settings` for every passage of a video.\n\
+         - Give each passage its neighbours: `--before-file` is the text file of the passage spoken just before it, `--after-file` the one just after (the first passage has only an after, the last only a before). The voice then carries its pace and tone across them. They cost nothing extra.\n\
+         - When a take is wrong (a long pause, a rushed or dragging read, a mispronounced word), ask for another with `--take 2`, then `--take 3`: same text, same settings, a new reading. Do not change the settings for one passage; if the settings are wrong, change them for all and voice every passage again.\n\
+         - After transcribing, compare the passages: `cutline validate` reports one spoken much faster or slower than the rest (`W_VOICE_PACE`). The render brings every voice file to the same loudness, so do not correct their levels with `gain_db`.\n\
          {voice}\n\
          Budget: this run may spend at most {} ElevenLabs credits. Every call is quoted first; a call that would pass the cap fails with a message telling you how much is left. Identical requests are served from a cache at no cost, so never change text just to regenerate.\n",
         rc.eleven_credit_cap

@@ -1703,6 +1703,11 @@ pub struct AudioSettings {
     /// is measured and set at render time, replacing trial-and-error with `gain_db`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub music_level: Option<f64>,
+    /// Bring every voice-over file to the same loudness before the voice chain, so passages
+    /// recorded or generated one at a time don't jump in volume (default true; needs two or
+    /// more voice files to do anything). `false` keeps each file's own level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level_voice: Option<bool>,
     /// The check that compares what was heard in a narration with its `script`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub script_check: Option<ScriptCheck>,

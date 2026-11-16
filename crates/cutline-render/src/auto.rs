@@ -247,6 +247,53 @@ pub fn script_check(
     (out, found)
 }
 
+/// A voice-over made one passage at a time can come back at a different pace in each: one
+/// rushed, the next slow. Compare how fast each voice asset is spoken (letters per second,
+/// pauses included, from transcripts already made) and report the ones far from the rest
+/// (`W_VOICE_PACE`). Needs three or more passages of five or more words.
+pub fn voice_pace(l: &Loaded, p: &Project) -> Vec<Diagnostic> {
+    const OFF_BY: f64 = 0.22;
+    let lang = p.captions.as_ref().and_then(|c| c.lang.clone());
+    let mut paces: Vec<(&String, f64, f64)> = vec![];
+    for (id, a) in &p.assets {
+        if a.role != Some(cutline_core::model::Role::Voice) || (a.transcript.is_none() && a.script.is_none()) {
+            continue;
+        }
+        let bare = cutline_core::model::Asset { script: None, ..a.clone() };
+        let Ok(Some(t)) = load_transcript(&l.dir, id, Some(&bare), lang.as_deref(), false) else { continue };
+        let (Some(first), Some(last)) = (t.words.first(), t.words.last()) else { continue };
+        let span = last.end - first.start;
+        if t.words.len() < 5 || span < 1.0 {
+            continue;
+        }
+        let letters = t.words.iter().map(|w| w.w.chars().filter(|c| c.is_alphanumeric()).count()).sum::<usize>();
+        paces.push((id, letters as f64 / span, t.words.len() as f64 / span * 60.0));
+    }
+    if paces.len() < 3 {
+        return vec![];
+    }
+    let mut sorted: Vec<f64> = paces.iter().map(|x| x.1).collect();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let median = (sorted[(sorted.len() - 1) / 2] + sorted[sorted.len() / 2]) / 2.0;
+    paces
+        .iter()
+        .filter(|(_, pace, _)| (pace / median - 1.0).abs() > OFF_BY)
+        .map(|(id, pace, wpm)| {
+            let off = (pace / median - 1.0) * 100.0;
+            Diagnostic::warning(
+                "W_VOICE_PACE",
+                format!("/assets/{}", cutline_core::diag::ptr_token(id)),
+                format!(
+                    "`{id}` is spoken {:.0}% {} than the other voice passages ({wpm:.0} words a minute)",
+                    off.abs(),
+                    if off > 0.0 { "faster" } else { "slower" }
+                ),
+            )
+            .hint("listen to it next to its neighbours: if the change of pace is heard, generate this passage again with the same voice and settings as the others")
+        })
+        .collect()
+}
+
 /// Assets whose speech feeds captions/ducking: explicit `captions.assets`, else every clip
 /// asset with audio, every voice-role audio layer and every clip audio replacement.
 pub fn speech_assets(p: &Project, l: &Loaded) -> Vec<String> {

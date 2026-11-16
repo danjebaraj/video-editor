@@ -79,6 +79,11 @@ fn role_name(r: Role) -> &'static str {
     }
 }
 
+/// The loudness every voice-over file is brought to before the voice chain (`audio.level_voice`).
+const VOICE_LEVEL_LUFS: f64 = -20.0;
+/// The most one voice-over file is raised or lowered to get there.
+const VOICE_LEVEL_MAX_DB: f64 = 18.0;
+
 #[allow(clippy::too_many_arguments)]
 pub fn plan(
     tc: &Toolchain,
@@ -243,6 +248,27 @@ pub fn plan(
                 looped: false,
                 file_dur: d,
             });
+        }
+    }
+    // Voice-over files made one at a time (a generated passage per scene) arrive at very
+    // different levels, and one compressor over their sum can't even that out: bring each
+    // file to the same loudness first.
+    if p.audio.as_ref().and_then(|a| a.level_voice).unwrap_or(true) {
+        let mut measured: BTreeMap<PathBuf, Option<f64>> = BTreeMap::new();
+        for s in srcs.iter().filter(|s| s.role == Role::Voice && !s.looped) {
+            measured.entry(s.path.clone()).or_insert_with(|| {
+                cutline_media::probe::measure_loudness(tc, &s.path)
+                    .ok()
+                    .map(|l| l.integrated_lufs)
+                    .filter(|i| i.is_finite() && *i > -60.0)
+            });
+        }
+        if measured.values().flatten().count() >= 2 {
+            for s in srcs.iter_mut().filter(|s| s.role == Role::Voice && !s.looped) {
+                if let Some(i) = measured.get(&s.path).copied().flatten() {
+                    s.gain += (VOICE_LEVEL_LUFS - i).clamp(-VOICE_LEVEL_MAX_DB, VOICE_LEVEL_MAX_DB);
+                }
+            }
         }
     }
     for (k, s) in srcs.iter().enumerate() {

@@ -505,6 +505,9 @@ amount_db: -12, attack: 0.12, release: 0.45, mode: "envelope"|"sidechain"}`, `mi
 `music_level` (LU, 3–40): the music stem's gain is measured and set so the ducked music sits
 this far below the voice (`render_report.json` → `loudness.music_gain_db`); 18 is a typical
 narration bed.
+`level_voice` (default `true`): with two or more voice-role files, each is measured and brought
+to the same loudness (−20 LUFS) before the voice chain, so passages generated or recorded one
+at a time don't jump in volume from scene to scene; `false` keeps each file's own level.
 
 `script_check` (see [Script check](#script-check)):
 
