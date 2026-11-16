@@ -26,6 +26,17 @@ pub struct TtsArgs {
     /// Voice settings as JSON, e.g. '{"stability":0.4,"similarity_boost":0.8}'
     #[arg(long)]
     settings: Option<String>,
+    /// File holding the passage spoken just before this one (its script), so the voice
+    /// carries on from it instead of starting afresh
+    #[arg(long)]
+    before_file: Option<Utf8PathBuf>,
+    /// File holding the passage spoken just after this one
+    #[arg(long)]
+    after_file: Option<Utf8PathBuf>,
+    /// Another take of the same text, voice and settings: 2, 3, … (each number is its own
+    /// reading, and is cached like any other request)
+    #[arg(long)]
+    take: Option<u32>,
 }
 
 #[derive(Args, Clone)]
@@ -95,21 +106,21 @@ pub enum ElevenCommand {
 }
 
 fn tts_request(ctx: &HelperContext, a: &TtsArgs) -> Result<Request, Error> {
+    let read = |f: &Utf8PathBuf| -> Result<String, Error> {
+        let p = if f.is_absolute() {
+            f.clone()
+        } else {
+            std::env::current_dir().ok().and_then(|d| Utf8PathBuf::from_path_buf(d).ok()).unwrap_or_default().join(f)
+        };
+        std::fs::read_to_string(&p).map_err(|e| Error::NotFound(format!("couldn't read {f}: {e}")))
+    };
     let text = match (&a.text_file, &a.text) {
-        (Some(f), _) => {
-            let p = if f.is_absolute() {
-                f.clone()
-            } else {
-                std::env::current_dir()
-                    .ok()
-                    .and_then(|d| Utf8PathBuf::from_path_buf(d).ok())
-                    .unwrap_or_default()
-                    .join(f)
-            };
-            std::fs::read_to_string(&p).map_err(|e| Error::NotFound(format!("couldn't read {f}: {e}")))?
-        }
+        (Some(f), _) => read(f)?,
         (None, Some(t)) => t.clone(),
         (None, None) => return Err(Error::other("give --text-file <file> or --text \"…\"")),
+    };
+    let neighbour = |f: &Option<Utf8PathBuf>| -> Result<Option<String>, Error> {
+        Ok(f.as_ref().map(read).transpose()?.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()))
     };
     let settings = match &a.settings {
         Some(s) => Some(
@@ -122,6 +133,9 @@ fn tts_request(ctx: &HelperContext, a: &TtsArgs) -> Result<Request, Error> {
         text: text.trim().to_string(),
         model: a.model.clone().or_else(|| ctx.default_model.clone()),
         settings,
+        before: neighbour(&a.before_file)?,
+        after: neighbour(&a.after_file)?,
+        take: a.take,
     })
 }
 

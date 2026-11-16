@@ -298,7 +298,15 @@ pub fn fake_eleven() -> FakeEleven {
                     respond(&mut stream, "200 OK", "application/json", "", br#"{"voices":[{"voice_id":"v1","name":"Aria","category":"premade","description":"Warm narrator","labels":{"gender":"female","accent":"american"}},{"voice_id":"v2","name":"Bram","category":"premade","labels":{"gender":"male"},"created_at_unix":1760000000}]}"#);
                 } else if path.starts_with("/v1/text-to-speech/") {
                     let text = body_json["text"].as_str().unwrap_or("");
-                    let audio = format!("FAKE-MP3 voice text: {text}");
+                    let mut audio = format!("FAKE-MP3 voice text: {text}");
+                    if let Some(seed) = body_json["seed"].as_u64() {
+                        audio.push_str(&format!(" [take {seed}]"));
+                    }
+                    for (key, label) in [("previous_text", "previous"), ("next_text", "next")] {
+                        if let Some(t) = body_json[key].as_str() {
+                            audio.push_str(&format!(" [{label}: {t}]"));
+                        }
+                    }
                     respond(
                         &mut stream,
                         "200 OK",

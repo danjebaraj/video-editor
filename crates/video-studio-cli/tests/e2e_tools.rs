@@ -143,6 +143,57 @@ fn helper_context(w: &World, url: &str, cap: u64, mode: Mode) -> (Utf8PathBuf, U
     (run, file)
 }
 
+/// From a run's log: six passages voiced one request at a time came back at six different
+/// paces. Each request now carries its neighbours' text, which ElevenLabs reads as context.
+#[test]
+fn a_passage_is_voiced_with_its_neighbours_as_context() {
+    let w = World::new();
+    let server = fake_eleven();
+    let (run, ctx) = helper_context(&w, &server.url, 1000, Mode::Production);
+    let eleven = |args: &[&str]| {
+        let mut full = vec!["eleven"];
+        full.extend_from_slice(args);
+        w.command(&full).env("VIDEO_STUDIO_RUN_CONTEXT", ctx.as_str()).current_dir(&run).output().unwrap()
+    };
+    for (name, text) in [("vo1", "Your app needs a chart."), ("vo2", "Drop one in."), ("vo3", "Start today.")] {
+        std::fs::write(run.join(format!("{name}.txt")), text).unwrap();
+    }
+    let middle = eleven(&[
+        "tts",
+        "--text-file",
+        "vo2.txt",
+        "--before-file",
+        "vo1.txt",
+        "--after-file",
+        "vo3.txt",
+        "--out",
+        "vo2.mp3",
+    ]);
+    assert_eq!(middle.status.code(), Some(0), "{}", stderr(&middle));
+    // only the passage itself is paid for
+    assert_eq!(stdout(&middle).trim(), "audio/vo2.mp3 (12 credits; 12 of 1000 used in this run)");
+    assert_eq!(
+        std::fs::read_to_string(run.join("audio/vo2.mp3")).unwrap(),
+        "FAKE-MP3 voice text: Drop one in. [previous: Your app needs a chart.] [next: Start today.]"
+    );
+    // the neighbours are part of the request: the same text alone is a different take
+    let alone = eleven(&["tts", "--text-file", "vo2.txt", "--out", "vo2-alone.mp3"]);
+    assert!(stdout(&alone).contains("(12 credits; 24 of 1000"), "{}", stdout(&alone));
+    let log = ndjson(&run.join("logs/eleven.ndjson"));
+    assert_eq!(log[0]["request"]["before"], "Your app needs a chart.");
+    assert_eq!(log[0]["request"]["after"], "Start today.");
+    assert!(log[1]["request"].get("before").is_none());
+    // another take: same text, voice and settings, a new reading (and a new charge)
+    let retake = eleven(&["tts", "--text-file", "vo2.txt", "--take", "2", "--out", "vo2-take2.mp3"]);
+    assert!(stdout(&retake).contains("(12 credits; 36 of 1000"), "{}", stdout(&retake));
+    assert_eq!(
+        std::fs::read_to_string(run.join("audio/vo2-take2.mp3")).unwrap(),
+        "FAKE-MP3 voice text: Drop one in. [take 2]"
+    );
+    let missing = eleven(&["tts", "--text-file", "vo2.txt", "--before-file", "nope.txt", "--out", "x.mp3"]);
+    assert!(stderr(&missing).contains("couldn't read nope.txt"), "{}", stderr(&missing));
+}
+
 #[test]
 fn eleven_helper_budget_cache_and_logging() {
     let w = World::new();

@@ -404,6 +404,13 @@
             }
           ]
         },
+        "level_voice": {
+          "description": "Bring every voice-over file to the same loudness before the voice chain, so passages\nrecorded or generated one at a time don't jump in volume (default true; needs two or\nmore voice files to do anything). `false` keeps each file's own level.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "loudness": {
           "anyOf": [
             {

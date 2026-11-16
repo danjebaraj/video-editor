@@ -236,6 +236,9 @@ Segments are cached: changing captions, text or music does not re-render clips.
   `align: "end"` (with a `fade_in`) on the music layer so the track's real ending closes the
   video rather than a fade-out mid-phrase. A music asset ends where its sound does: silence
   after the last note is not counted, so the ending itself lands on the end.
+- Voice-over in several files (a passage per scene): the render brings every voice file to the
+  same loudness before the voice chain, so leave their `gain_db` alone (`audio.level_voice:
+  false` turns this off).
 - The music stays ducked through pauses in the voice shorter than `audio.duck.hold` (1.5 s by
   default), so it does not swell and drop between sentences; it comes up in longer pauses.
 
@@ -268,6 +271,7 @@ Segments are cached: changing captions, text or music does not re-render clips.
 | `W_EFFECT_UNSEEN` | the clip ends before the zoom is seen: start it earlier, shorten its `duration`, or use `src_start` on a retimed clip |
 | `W_LAYER_PAST_CLIP` | the annotation's `offset` is beyond its anchor clip: lower it or anchor it to the clip it belongs to |
 | `W_SCRIPT_MISMATCH` | listen at the time given; regenerate the line, or add the heard spelling to the brand `dictionary` |
+| `W_VOICE_PACE` | one voice passage is spoken much faster or slower than the rest: listen to it beside its neighbours and generate it again with the same voice and settings |
 | `E_GAP_NOT_FOUND` | the gap's phrase is not in the narration: copy it from the script (the hint lists the closest) |
 | `E_SPEED_NO_ANCHOR` | `{speed}` needs the layer to have an `anchor` clip |
 | `W_SHORTS_OVER_LIMIT` | trim to ≤ 180 s or use a long-form target |
