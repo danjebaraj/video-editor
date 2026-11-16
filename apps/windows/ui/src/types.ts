@@ -45,6 +45,10 @@ export interface Settings {
   cutline_repo: string;
   default_quality: string;
   eleven_default_voice: string;
+  /** When no voice is fixed: `tried` (voices earlier videos used first) or `latest`. */
+  eleven_voice_preference: string;
+  /** When no voice is fixed: `any`, `female` or `male`. */
+  eleven_voice_gender: string;
   eleven_default_credit_cap: number;
   eleven_cache_limit_bytes: number;
   words_per_minute: number;

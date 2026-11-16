@@ -637,7 +637,9 @@ mod tests {
                 && s.contains("video-studio standin audio --out audio/")
         );
         assert!(s.contains("\"planned\"") && s.contains("never under `missing_media`"));
-        assert!(s.contains("No voice is fixed for this project") && s.contains("the production run will choose one itself"));
+        assert!(
+            s.contains("No voice is fixed for this project") && s.contains("the production run will choose one itself")
+        );
         assert!(s.contains("--text-file audio/<name>.txt") && s.contains("transcript: \"audio/<name>.json\""));
         assert!(s.contains("check-<output folder name>.json5") && s.contains("Settings › ElevenLabs"));
         // a project that turns app recording off, or limits it, says so in both kinds of run

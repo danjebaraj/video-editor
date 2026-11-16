@@ -1,10 +1,11 @@
-// The controls for a finish (the macOS FinishViews): how shots join, the beat, eased text and
+// The controls for a finish (the macOS FinishViews): the energy of the voice and music, how shots join, the beat, eased text and
 // close-ups, and how the music comes and goes. Used for Settings › Finish and Project › Finish.
 
 import { h, select, checkbox } from './dom';
 import type { Finish } from './types';
 
 export const DEFAULT_FINISH: Finish = {
+  energy: 'upbeat',
   transitions: 'smooth',
   transition_s: 0.4,
   cut_on_beat: true,
@@ -36,8 +37,15 @@ export function seconds(v: number): string {
 /** One line describing the choices, for the project inspector. */
 export function finishSummary(f: Finish): string {
   const join = f.transitions === 'cuts' ? 'Plain cuts' : f.transitions === 'lively' ? 'Lively transitions' : 'Smooth transitions';
-  return `${join}, ${f.cut_on_beat ? 'cuts on the beat' : 'cuts not tied to the beat'}, music in over ${seconds(f.music_fade_in_s)} and out over ${seconds(f.music_fade_out_s)}.`;
+  const mood = f.energy === 'calm' ? 'Calm' : f.energy === 'balanced' ? 'Balanced' : 'Upbeat';
+  return `${mood} voice and music. ${join}, ${f.cut_on_beat ? 'cuts on the beat' : 'cuts not tied to the beat'}, music in over ${seconds(f.music_fade_in_s)} and out over ${seconds(f.music_fade_out_s)}.`;
 }
+
+const ENERGY_NOTE: Record<string, string> = {
+  calm: 'An unhurried, warm voice over soft, slow music. For explainers and serious subjects.',
+  balanced: 'A natural read over light music with a steady beat.',
+  upbeat: 'A bright, animated voice with short pauses, over driving music at about 120 beats a minute. A brand’s own voice settings still win.',
+};
 
 const TRANSITION_NOTE: Record<string, string> = {
   cuts: 'Every scene change is a plain cut. The title and the end card still fade.',
@@ -71,9 +79,17 @@ export function finishEditor(value: Finish, change: (f: Finish) => void, opts: {
     (v) => set('transitions', v as Finish['transitions']),
     { 'aria-label': 'Transitions between scenes', title: 'Smooth: a short soft move between scenes and plain cuts inside a scene. Plain cuts: no transitions except a fade for the title and end card. Lively: quick moving transitions, for social cuts.' },
   );
+  const energy = select(
+    [['calm', 'Calm'], ['balanced', 'Balanced'], ['upbeat', 'Upbeat']],
+    f.energy,
+    (v) => set('energy', v as Finish['energy']),
+    { 'aria-label': 'Energy of the voice and music', title: 'How lively the narration and the music are. Upbeat: an animated read, short pauses and bright, driving music. Balanced: a natural read over light music. Calm: an unhurried read over soft, slow music.' },
+  );
   return h(
     'div',
     { class: `finish-editor${opts.compact ? ' compact' : ''}` },
+    h('label', { class: 'field' }, h('span', null, 'Voice and music'), energy),
+    h('p', { class: 'hint' }, ENERGY_NOTE[f.energy] ?? ENERGY_NOTE.upbeat),
     h('label', { class: 'field' }, h('span', null, 'Between scenes'), transitions),
     h('p', { class: 'hint' }, TRANSITION_NOTE[f.transitions] ?? TRANSITION_NOTE.smooth),
     f.transitions !== 'cuts'

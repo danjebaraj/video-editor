@@ -150,7 +150,18 @@ export async function mount(root: HTMLElement) {
             }
           }, { appearance: 'primary' })),
           h('p', { class: 'muted small' }, 'The key is read only by the bundled helper during runs; Claude never sees it.'),
-          field('Default voice ID', textInput(s.eleven_default_voice, (v) => save((x) => (x.eleven_default_voice = v)))),
+          field('Default voice ID', textInput(s.eleven_default_voice, (v) => save((x) => (x.eleven_default_voice = v)), { placeholder: 'Used when a brand preset has no voice' })),
+          field('With no voice set', select([['tried', 'Prefer tried voices'], ['latest', 'Prefer latest voices']], s.eleven_voice_preference || 'tried', (v) => save((x) => (x.eleven_voice_preference = v)), {
+            'aria-label': 'With no voice set',
+            title: 'Used when neither the brand preset nor the default voice ID above names a voice, so Claude has to choose one. Tried voices: the ones earlier videos used come first, then the longest-standing voices in your ElevenLabs account. Latest voices: the most recently added ones come first.',
+          })),
+          field('Voice gender', select([['any', 'Any'], ['female', 'Female'], ['male', 'Male']], s.eleven_voice_gender || 'any', (v) => save((x) => (x.eleven_voice_gender = v)), {
+            'aria-label': 'Voice gender',
+            title: 'Limits the choice to female or male voices, as ElevenLabs labels them.',
+          })),
+          h('p', { class: 'muted small' }, s.eleven_default_voice.trim()
+            ? 'A default voice ID is set, so these two choices are only used if that field is cleared.'
+            : 'These two choices apply when a project’s brand preset has no voice. A voice named in the spec still wins.'),
           field('Default credit cap per run', numberInput(s.eleven_default_credit_cap, (v) => save((x) => (x.eleven_default_credit_cap = v ?? 0)), { min: 0 })),
           field('Cache size limit (GB)', numberInput(Math.round(s.eleven_cache_limit_bytes / 1e8) / 10, (v) => save((x) => (x.eleven_cache_limit_bytes = Math.round(Math.max(0.1, v ?? 2) * 1e9))), { min: 0.1, step: '0.1' })),
           h('div', { class: 'row' }, h('span', { class: 'muted' }, storage ? `Using ${bytes(storage.eleven_cache_bytes)}` : ''), button('Clear Cache', async () => {

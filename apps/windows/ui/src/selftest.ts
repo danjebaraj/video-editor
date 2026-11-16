@@ -315,7 +315,15 @@ async function run(w: ProjectWindow, fx: Fixture) {
     // Finish: the Settings default, and a project's own
     const fin = settings.value?.finish;
     check(sameFinish(fin, DEFAULT_FINISH) && fin?.transitions === 'smooth' && fin.cut_on_beat, `the finish defaults are smooth and on the beat (${JSON.stringify(fin)})`);
+    check(fin?.energy === 'upbeat' && system.includes('Upbeat voice and music'), `the finish defaults to an upbeat voice and music (${fin?.energy})`);
     check(!d.p.finish, 'a project follows the Settings finish until it is given its own');
+
+    // Voice preferences for when no voice is fixed (Settings › ElevenLabs)
+    const s0 = settings.value!;
+    check(s0.eleven_voice_preference === 'tried' && s0.eleven_voice_gender === 'any', `with no voice set, tried voices of either gender are preferred (${s0.eleven_voice_preference} ${s0.eleven_voice_gender})`);
+    const savedVoice = await core<any>('settings.save', { settings: { ...s0, eleven_voice_preference: 'latest', eleven_voice_gender: 'female' } });
+    check(savedVoice.eleven_voice_preference === 'latest' && savedVoice.eleven_voice_gender === 'female', 'the voice preferences are saved with the settings');
+    await core('settings.save', { settings: s0 });
     d.update((p) => (p.finish = { ...filledFinish(fin), transitions: 'cuts' }), { outputs: false });
     w.showTab('project');
     await sleep(200);

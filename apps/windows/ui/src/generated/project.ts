@@ -23,6 +23,13 @@ export type RunKind = ("dry_run" | "production")
  */
 export type RunStatus = ("running" | "succeeded" | "succeeded_with_warnings" | "failed" | "cancelled")
 /**
+ * How much drive the voice and the music have.
+ * 
+ * This interface was referenced by `Project`'s JSON-Schema
+ * via the `definition` "Energy".
+ */
+export type Energy = ("calm" | "balanced" | "upbeat")
+/**
  * This interface was referenced by `Project`'s JSON-Schema
  * via the `definition` "IntentKind".
  */
@@ -228,6 +235,10 @@ cut_on_beat?: boolean
  * Ease on-screen text in and out instead of popping it on.
  */
 ease_text?: boolean
+/**
+ * How lively the voice and the music are.
+ */
+energy?: ("calm" | "balanced" | "upbeat")
 /**
  * Ease into close-ups of the part of the screen being talked about.
  */
