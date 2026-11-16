@@ -295,7 +295,7 @@ pub fn fake_eleven() -> FakeEleven {
                         br#"{"tier":"creator","character_count":1000,"character_limit":100000}"#,
                     );
                 } else if path.starts_with("/v2/voices") {
-                    respond(&mut stream, "200 OK", "application/json", "", br#"{"voices":[{"voice_id":"v1","name":"Aria","category":"premade","description":"Warm narrator"},{"voice_id":"v2","name":"Bram","category":"premade"}]}"#);
+                    respond(&mut stream, "200 OK", "application/json", "", br#"{"voices":[{"voice_id":"v1","name":"Aria","category":"premade","description":"Warm narrator","labels":{"gender":"female","accent":"american"}},{"voice_id":"v2","name":"Bram","category":"premade","labels":{"gender":"male"},"created_at_unix":1760000000}]}"#);
                 } else if path.starts_with("/v1/text-to-speech/") {
                     let text = body_json["text"].as_str().unwrap_or("");
                     let audio = format!("FAKE-MP3 voice text: {text}");
