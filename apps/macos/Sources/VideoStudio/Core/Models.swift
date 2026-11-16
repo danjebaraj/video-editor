@@ -605,6 +605,10 @@ struct CoreSettings: Codable, Equatable {
     var cutline_repo = ""
     var default_quality = "final"
     var eleven_default_voice = ""
+    /// When no voice is fixed: `tried` (voices earlier videos used first) or `latest`.
+    var eleven_voice_preference = "tried"
+    /// When no voice is fixed: `any`, `female` or `male`.
+    var eleven_voice_gender = "any"
     var eleven_default_credit_cap: UInt64 = 20_000
     var eleven_cache_limit_bytes: UInt64 = 2_000_000_000
     var words_per_minute = 150

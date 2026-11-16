@@ -52,6 +52,22 @@ pub struct VoiceInfo {
     pub category: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// What ElevenLabs says about the voice: `gender`, `age`, `accent`, `use_case`…
+    #[serde(default, deserialize_with = "labels_or_none")]
+    pub labels: std::collections::BTreeMap<String, String>,
+    /// When the voice was added; the long-standing stock voices have none.
+    #[serde(default)]
+    pub created_at_unix: Option<i64>,
+}
+
+/// `labels` is an object of strings, but `null` and odd values turn up: keep what is usable.
+fn labels_or_none<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<std::collections::BTreeMap<String, String>, D::Error> {
+    let v = Value::deserialize(d)?;
+    Ok(v.as_object()
+        .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+        .unwrap_or_default())
 }
 
 impl Client {

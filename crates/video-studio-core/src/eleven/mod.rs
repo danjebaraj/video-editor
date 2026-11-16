@@ -7,6 +7,7 @@
 //! served from the cache when an identical request was made before, and logged.
 
 mod client;
+pub mod voices;
 
 use std::collections::BTreeMap;
 
@@ -16,6 +17,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 pub use client::{Client, Subscription, VoiceInfo};
+pub use voices::{VoiceGender, VoicePreference};
 
 use crate::claude::broker::append_line;
 use crate::claude::Mode;
@@ -68,6 +70,11 @@ pub struct HelperContext {
     pub default_voice_settings: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    /// Settings › ElevenLabs: the order `eleven voices` lists voices in, and the gender it keeps.
+    #[serde(default)]
+    pub voice_preference: VoicePreference,
+    #[serde(default)]
+    pub voice_gender: VoiceGender,
     /// API base URL override (the fake server in tests).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -305,7 +312,7 @@ pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secr
     let key = req.cache_key();
     let cache_file = ctx.cache_dir.join(format!("{key}.{}", req.extension()));
 
-    with_lock(ctx, || {
+    let done = with_lock(ctx, || {
         // A cache hit costs nothing and never touches the API.
         if cache_file.is_file() {
             if let Some(dir) = dest.parent() {
@@ -379,7 +386,12 @@ pub fn execute(ctx: &HelperContext, req: &Request, out: &str, secrets: &dyn Secr
                 })
             }
         }
-    })
+    });
+    // a voice that made a voice-over is a tried one from now on
+    if let (Ok(_), Request::Tts { voice, .. }) = (&done, req) {
+        voices::note_used(&ctx.cache_dir, voice);
+    }
+    done
 }
 
 fn filetime_touch(path: &Utf8Path) -> std::io::Result<()> {
@@ -457,6 +469,8 @@ mod tests {
             default_voice: None,
             default_voice_settings: None,
             default_model: None,
+            voice_preference: Default::default(),
+            voice_gender: Default::default(),
             base_url: Some("http://127.0.0.1:9".into()),
             test_api_key: None,
             capture: None,

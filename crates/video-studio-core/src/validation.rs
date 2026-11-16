@@ -695,7 +695,7 @@ fn check_run_needs(c: &mut Ctx, input: &ValidateInput, outputs: &[ResolvedOutput
         } else {
             (
                 "No voice is chosen for the voice-over",
-                "Claude would have to pick one itself. Choose a voice in the brand preset, or set a default voice in Settings › ElevenLabs.",
+                "Claude will pick one itself, following the voice preferences in Settings › ElevenLabs (female or male, tried or latest voices). To fix the voice, choose one in the brand preset or set a default voice in Settings › ElevenLabs.",
             )
         };
         c.add(

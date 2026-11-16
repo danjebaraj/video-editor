@@ -369,6 +369,8 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
             .or_else(|| Some(env.settings.eleven_default_voice.clone()).filter(|v| !v.is_empty())),
         default_voice_settings: brand.and_then(|b| b.voice.settings.clone()),
         default_model: brand.and_then(|b| b.voice.model.clone()),
+        voice_preference: env.settings.eleven_voice_preference,
+        voice_gender: env.settings.eleven_voice_gender,
         base_url: env.eleven_base_url.clone(),
         test_api_key: env.eleven_test_key.clone(),
         capture: project
@@ -416,6 +418,8 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     let guide = locate::cutline_guide(Utf8Path::new(&env.cutline.path)).unwrap_or_default();
     let has_key = env.eleven_test_key.is_some() || env.eleven_key_present;
     let finish = project.finish_or(&env.settings);
+    let voice_choosing =
+        eleven::voices::choosing(env.settings.eleven_voice_preference, env.settings.eleven_voice_gender);
     let system = super::prompt::system_prompt(&super::prompt::PromptInput {
         project: &project,
         run_config: &rc,
@@ -427,6 +431,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         cutline_guide: &guide,
         eleven_available: has_key,
         default_voice: helper_context.default_voice.as_deref(),
+        voice_choosing: Some(&voice_choosing),
         platforms: &env.platforms,
         finish: &finish,
     });

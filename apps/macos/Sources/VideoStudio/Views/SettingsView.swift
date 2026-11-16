@@ -323,6 +323,22 @@ struct ElevenSettings: View {
             }
             Section("Defaults") {
                 TextField("Default voice ID", text: $app.settings.eleven_default_voice, prompt: Text("Used when a brand preset has no voice"))
+                Picker("With no voice set", selection: $app.settings.eleven_voice_preference) {
+                    Text("Prefer tried voices").tag("tried")
+                    Text("Prefer latest voices").tag("latest")
+                }
+                .help("Used when neither the brand preset nor the default voice ID above names a voice, so Claude has to choose one. Tried voices: the ones earlier videos used come first, then the longest-standing voices in your ElevenLabs account. Latest voices: the most recently added ones come first.")
+                Picker("Voice gender", selection: $app.settings.eleven_voice_gender) {
+                    Text("Any").tag("any")
+                    Text("Female").tag("female")
+                    Text("Male").tag("male")
+                }
+                .pickerStyle(.segmented)
+                .help("Limits the choice to female or male voices, as ElevenLabs labels them.")
+                Text(app.settings.eleven_default_voice.trimmingCharacters(in: .whitespaces).isEmpty
+                     ? "These two choices apply when a project's brand preset has no voice. A voice named in the spec still wins."
+                     : "A default voice ID is set, so these two choices are only used if that field is cleared.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 LabeledContent("Default credit cap per run") {
                     TextField("", value: $app.settings.eleven_default_credit_cap, format: .number).frame(width: 100).accessibilityLabel("Default credit cap per run")
                 }
