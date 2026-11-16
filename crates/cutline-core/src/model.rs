@@ -1777,6 +1777,11 @@ pub struct Duck {
     pub attack: f64,
     #[serde(default = "duck_rel")]
     pub release: f64,
+    /// Pauses in the speech shorter than this many seconds stay ducked (default 1.5), so the
+    /// music does not swell and drop between sentences. `0`: only pauses shorter than
+    /// `attack + release` stay ducked.
+    #[serde(default = "duck_hold")]
+    pub hold: f64,
     /// envelope (default) | sidechain
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
@@ -1791,14 +1796,25 @@ fn duck_amt() -> f64 {
     -12.0
 }
 fn duck_att() -> f64 {
-    0.12
+    0.25
 }
 fn duck_rel() -> f64 {
-    0.45
+    0.8
+}
+fn duck_hold() -> f64 {
+    1.5
 }
 impl Default for Duck {
     fn default() -> Self {
-        Self { under: duck_under(), target: duck_target(), amount_db: -12.0, attack: 0.12, release: 0.45, mode: None }
+        Self {
+            under: duck_under(),
+            target: duck_target(),
+            amount_db: -12.0,
+            attack: duck_att(),
+            release: duck_rel(),
+            hold: duck_hold(),
+            mode: None,
+        }
     }
 }
 

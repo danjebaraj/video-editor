@@ -191,6 +191,7 @@ pub fn build(
     let mut input = vec![];
     let src_fps = m.facts.fps.unwrap_or(fps);
     let is_still = matches!(c.kind, AssetKind::Image);
+    let sparse = m.sparse() && extras.source_override.is_none() && c.kind == AssetKind::Video;
     let dur_secs = fps.frames_to_secs(frames);
     let path = m.path.to_string_lossy().to_string();
     if let Some(so) = &extras.source_override {
@@ -204,6 +205,10 @@ pub fn build(
             ["-framerate", &src_fps.ff(), "-ss", &f(ss), "-t", &f(c.src_out - ss + 2.0 / sf), "-i", &path]
                 .map(String::from),
         );
+    } else if sparse {
+        // No seek: the frame on screen at `in` is the last one stored before it, however long
+        // ago that was. The filter below holds frames across the gaps and trims at `in`.
+        input.extend(["-t", &f(c.src_out + 1.0), "-i", &path].map(String::from));
     } else {
         // Snap in-point to the source frame grid; seek a quarter frame early so the in-frame is
         // kept and the previous one discarded.
@@ -228,6 +233,14 @@ pub fn build(
     // clip earlier.
     let cfr = format!("fps={}:start_time=0", fps.ff());
     let mut pre: Vec<String> = vec![];
+    if sparse {
+        // Every frame made explicit from the start of the file, the last one held to the end
+        // of the clip (the recorder stops writing once the screen is still), then cut at `in`.
+        pre.push(cfr.clone());
+        pre.push(format!("tpad=stop_mode=clone:stop_duration={}", f(c.src_out + 1.0)));
+        pre.push(format!("trim=start={}", f(c.src_in)));
+        pre.push("setpts=PTS-STARTPTS".into());
+    }
     if c.clip.reverse {
         pre.push("setpts=PTS-STARTPTS".into());
         pre.push("reverse".into());
@@ -310,7 +323,11 @@ pub fn build(
     let secs = samples as f64 / SAMPLE_RATE as f64;
     let mf = 0.01f64.min(secs / 4.0);
     if has_audio && !mute {
-        let mut ch = vec!["asetpts=PTS-STARTPTS".to_string()];
+        let mut ch = vec![];
+        if sparse {
+            ch.push(format!("atrim=start={}", f(c.src_in)));
+        }
+        ch.push("asetpts=PTS-STARTPTS".to_string());
         if c.clip.reverse {
             ch.push("areverse".into());
         }

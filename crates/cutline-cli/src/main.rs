@@ -106,8 +106,9 @@ enum Cmd {
     /// Final render, then QA.
     Render {
         project: PathBuf,
-        #[arg(long)]
-        export: Option<String>,
+        /// Only this export; repeat the option (or separate names with commas) for several.
+        #[arg(long, value_delimiter = ',')]
+        export: Vec<String>,
         #[arg(long)]
         draft: bool,
         /// Print the exact ffmpeg commands and filter scripts without running them.

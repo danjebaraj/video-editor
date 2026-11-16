@@ -59,7 +59,7 @@ fn screencast_profile_444_and_zoom_to() {
     let opts = RenderOptions { jobs: 3, ..Default::default() };
 
     let sc = pipeline::load(&project(d.path(), "sc", ", profile: 'screencast', chroma: '444'")).unwrap();
-    let r = render_all(&sc, &opts, None).unwrap().remove(0);
+    let r = render_all(&sc, &opts, &[]).unwrap().remove(0);
     let codec = r.qa.findings.iter().find(|f| f.check == "container_codec").unwrap();
     assert!(codec.ok, "{codec:?}");
     assert_eq!(codec.measured["pix_fmt"], "yuv444p");
@@ -73,7 +73,7 @@ fn screencast_profile_444_and_zoom_to() {
 
     // the same edit without the profile: 4:2:0 High, and the still screen is a QA warning
     let std = pipeline::load(&project(d.path(), "std", "")).unwrap();
-    let r = render_all(&std, &opts, None).unwrap().remove(0);
+    let r = render_all(&std, &opts, &[]).unwrap().remove(0);
     let codec = r.qa.findings.iter().find(|f| f.check == "container_codec").unwrap();
     assert!(codec.ok && codec.measured["pix_fmt"] == "yuv420p", "{codec:?}");
     let freeze = r.qa.findings.iter().find(|f| f.check == "freeze").unwrap();

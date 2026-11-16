@@ -58,7 +58,7 @@ fn unicode_and_space_paths_render_everything() {
     .unwrap();
     let l = pipeline::load(&pp).unwrap();
     assert!(!cutline_core::diag::has_errors(&l.diags), "{:?}", l.diags);
-    let res = cutline_qa::deliver::render_all(&l, &RenderOptions::default(), None).unwrap();
+    let res = cutline_qa::deliver::render_all(&l, &RenderOptions::default(), &[]).unwrap();
     let r = &res[0];
     assert!(r.output.exists());
     assert!(r.output.to_string_lossy().contains("ünicode test"));
@@ -103,7 +103,7 @@ fn multi_export_chapters_thumbnail() {
     )
     .unwrap();
     let l = pipeline::load(&pp).unwrap();
-    let res = cutline_qa::deliver::render_all(&l, &RenderOptions { draft: true, ..Default::default() }, None).unwrap();
+    let res = cutline_qa::deliver::render_all(&l, &RenderOptions { draft: true, ..Default::default() }, &[]).unwrap();
     assert_eq!(res.len(), 2);
     let dims = |p: &std::path::Path| {
         let v = cutline_media::probe(tc, p, None).unwrap().video.unwrap();
@@ -114,7 +114,7 @@ fn multi_export_chapters_thumbnail() {
     assert!(res[1].output.to_string_lossy().contains("vertical"));
     // only one export
     let one =
-        cutline_qa::deliver::render_all(&l, &RenderOptions { draft: true, ..Default::default() }, Some("vertical"))
+        cutline_qa::deliver::render_all(&l, &RenderOptions { draft: true, ..Default::default() }, &["vertical".to_string()])
             .unwrap();
     assert_eq!(one.len(), 1);
     // chapters

@@ -41,6 +41,10 @@ pub struct Settings {
     // Spec
     /// Reading speed used to check voice-over length.
     pub words_per_minute: u32,
+    // Finish
+    /// How videos are finished unless a project keeps its own choices: transitions, cuts on
+    /// the beat, how the music comes in and goes out.
+    pub finish: crate::finish::Finish,
     // Storage
     pub cleanup_older_than_days: u32,
     pub onboarding_done: bool,
@@ -68,6 +72,7 @@ impl Default for Settings {
             eleven_default_credit_cap: 20_000,
             eleven_cache_limit_bytes: 2_000_000_000,
             words_per_minute: 150,
+            finish: crate::finish::Finish::default(),
             cleanup_older_than_days: 30,
             onboarding_done: false,
         }

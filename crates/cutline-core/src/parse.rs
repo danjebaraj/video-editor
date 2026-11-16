@@ -157,7 +157,21 @@ pub fn parse_value(v: &Value) -> Result<Project, Vec<Diagnostic>> {
         for (i, item) in main.iter().enumerate() {
             let base = format!("/main/{i}");
             if item.get("transition").is_some() {
+                let before = errs.len();
                 de_at::<TransitionItem>(item, &base, &mut errs);
+                // a transition written flat (`{transition: "fade", duration: 0.4}`) or with keys
+                // beside it: say what the item must look like, not only which key is unknown
+                let flat = !item.get("transition").map(Value::is_object).unwrap_or(false)
+                    || item.as_object().map(|o| o.len() > 1).unwrap_or(false);
+                if flat {
+                    for e in errs.iter_mut().skip(before) {
+                        if e.hint.is_none() {
+                            *e = e.clone().hint(
+                                "a transition is its own item between two clips, with everything inside `transition`: `{transition: {type: \"fade\", duration: 0.4}}`",
+                            );
+                        }
+                    }
+                }
             } else {
                 check_effect_times(item, &base, &mut errs);
                 de_at::<Clip>(item, &base, &mut errs);
@@ -198,6 +212,21 @@ pub fn parse_value(v: &Value) -> Result<Project, Vec<Diagnostic>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_flat_transition_says_how_to_write_one() {
+        let e = parse_project(
+            "{version: 1, assets: {a: {path: 'a.mp4'}}, main: [{id: 'c', clip: 'a'}, {transition: {type: 'fade'}, duration: 0.4}, {id: 'd', clip: 'a'}]}",
+        )
+        .unwrap_err();
+        assert!(
+            e.iter().any(|d| d
+                .hint
+                .as_deref()
+                .is_some_and(|h| h.contains("{transition: {type: \"fade\", duration: 0.4}}"))),
+            "{e:?}"
+        );
+    }
 
     #[test]
     fn minimal() {

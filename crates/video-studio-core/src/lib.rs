@@ -13,6 +13,7 @@ pub mod capture;
 pub mod claude;
 pub mod eleven;
 pub mod error;
+pub mod finish;
 pub mod ids;
 pub mod logs;
 pub mod media;

@@ -415,6 +415,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     }
     let guide = locate::cutline_guide(Utf8Path::new(&env.cutline.path)).unwrap_or_default();
     let has_key = env.eleven_test_key.is_some() || env.eleven_key_present;
+    let finish = project.finish_or(&env.settings);
     let system = super::prompt::system_prompt(&super::prompt::PromptInput {
         project: &project,
         run_config: &rc,
@@ -427,6 +428,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         eleven_available: has_key,
         default_voice: helper_context.default_voice.as_deref(),
         platforms: &env.platforms,
+        finish: &finish,
     });
     let prompt = super::prompt::user_prompt(request.kind, request.revise.as_ref(), previous.as_ref());
     // What Claude was told, kept with the logs: the instructions are half of any run that went
@@ -478,6 +480,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         "quality": rc.quality,
         "locales": if rc.locales.is_empty() { project.intent.locales.clone() } else { rc.locales.clone() },
         "intent": project.intent,
+        "finish": {"from": if project.finish.is_some() { "project" } else { "settings" }, "summary": finish.summary(), "choices": finish},
         "outputs": outputs,
         "cutline": exports,
         "previous_run": previous.as_ref().map(|p| json!({"id": p.id, "folder": p.folder})),

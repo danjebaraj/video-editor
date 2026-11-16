@@ -71,11 +71,13 @@ struct Project: Codable, Equatable {
     var assistant_folders: [String] = []
     /// Whether production runs may drive and record apps, and which ones.
     var app_capture = AppCapture()
+    /// This project's own finish; nil follows the finish in Settings.
+    var finish: Finish?
     /// Top-level keys this version doesn't know, kept so a newer app's additions survive.
     var extra: [String: JSONValue] = [:]
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case format, version, id, name, created, modified, intent, spec, media, media_roots, brand, models, output_configs, run_configs, runs, assistant_sessions, assistant_folders, app_capture
+        case format, version, id, name, created, modified, intent, spec, media, media_roots, brand, models, output_configs, run_configs, runs, assistant_sessions, assistant_folders, app_capture, finish
     }
 
     init() {}
@@ -100,6 +102,7 @@ struct Project: Codable, Equatable {
         assistant_sessions = try c.decodeIfPresent([AssistantSessionRef].self, forKey: .assistant_sessions) ?? []
         assistant_folders = try c.decodeIfPresent([String].self, forKey: .assistant_folders) ?? []
         app_capture = try c.decodeIfPresent(AppCapture.self, forKey: .app_capture) ?? AppCapture()
+        finish = try c.decodeIfPresent(Finish.self, forKey: .finish)
         let known = Set(CodingKeys.allCases.map(\.rawValue))
         let all = try decoder.container(keyedBy: AnyKey.self)
         for key in all.allKeys where !known.contains(key.stringValue) {
@@ -127,6 +130,7 @@ struct Project: Codable, Equatable {
         try c.encode(assistant_sessions, forKey: .assistant_sessions)
         if !assistant_folders.isEmpty { try c.encode(assistant_folders, forKey: .assistant_folders) }
         if app_capture != AppCapture() { try c.encode(app_capture, forKey: .app_capture) }
+        try c.encodeIfPresent(finish, forKey: .finish)
         var all = encoder.container(keyedBy: AnyKey.self)
         for (k, v) in extra { try all.encode(v, forKey: AnyKey(k)) }
     }
@@ -537,6 +541,49 @@ enum RunStatus {
 
 // MARK: Settings, models, environment
 
+/// How a video is finished: how shots join, whether cuts follow the music's beat, and how the
+/// music comes in and goes out. Settings holds the app-wide default; a project may keep its own.
+struct Finish: Codable, Equatable {
+    /// `smooth`, `cuts` or `lively`.
+    var transitions = "smooth"
+    var transition_s = 0.4
+    var cut_on_beat = true
+    var lead_in_s = 1.2
+    var tail_s = 2.0
+    var music_fade_in_s = 1.0
+    var music_fade_out_s = 2.0
+    var ease_text = true
+    var guide_the_eye = true
+
+    init() {}
+
+    /// Tolerant of files written by an older or newer version: a missing key keeps its default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Finish()
+        transitions = try c.decodeIfPresent(String.self, forKey: .transitions) ?? d.transitions
+        transition_s = try c.decodeIfPresent(Double.self, forKey: .transition_s) ?? d.transition_s
+        cut_on_beat = try c.decodeIfPresent(Bool.self, forKey: .cut_on_beat) ?? d.cut_on_beat
+        lead_in_s = try c.decodeIfPresent(Double.self, forKey: .lead_in_s) ?? d.lead_in_s
+        tail_s = try c.decodeIfPresent(Double.self, forKey: .tail_s) ?? d.tail_s
+        music_fade_in_s = try c.decodeIfPresent(Double.self, forKey: .music_fade_in_s) ?? d.music_fade_in_s
+        music_fade_out_s = try c.decodeIfPresent(Double.self, forKey: .music_fade_out_s) ?? d.music_fade_out_s
+        ease_text = try c.decodeIfPresent(Bool.self, forKey: .ease_text) ?? d.ease_text
+        guide_the_eye = try c.decodeIfPresent(Bool.self, forKey: .guide_the_eye) ?? d.guide_the_eye
+    }
+
+    /// One line describing the choices, for the project inspector.
+    var summary: String {
+        let join = transitions == "cuts" ? "Plain cuts" : transitions == "lively" ? "Lively transitions" : "Smooth transitions"
+        return "\(join), \(cut_on_beat ? "cuts on the beat" : "cuts not tied to the beat"), music in over \(Finish.seconds(music_fade_in_s)) and out over \(Finish.seconds(music_fade_out_s))."
+    }
+
+    static func seconds(_ v: Double) -> String {
+        let s = String(format: "%.1f", v)
+        return (s.hasSuffix(".0") ? String(s.dropLast(2)) : s) + " s"
+    }
+}
+
 struct CoreSettings: Codable, Equatable {
     var default_output_folder = ""
     var parallel_run_limit = 1
@@ -557,6 +604,7 @@ struct CoreSettings: Codable, Equatable {
     var eleven_default_credit_cap: UInt64 = 20_000
     var eleven_cache_limit_bytes: UInt64 = 2_000_000_000
     var words_per_minute = 150
+    var finish = Finish()
     var cleanup_older_than_days = 30
     var onboarding_done = false
 }

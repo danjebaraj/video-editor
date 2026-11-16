@@ -56,8 +56,19 @@ pub struct Project {
     /// Whether production runs may drive and record apps, and which ones.
     #[serde(default, skip_serializing_if = "AppCapture::is_default")]
     pub app_capture: AppCapture,
+    /// This project's own finish (transitions, beat cuts, music fades). Absent: the project
+    /// follows the finish in Settings, including later changes to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish: Option<crate::finish::Finish>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+impl Project {
+    /// The finish in force: the project's own, or the one in Settings.
+    pub fn finish_or(&self, settings: &crate::settings::Settings) -> crate::finish::Finish {
+        self.finish.clone().unwrap_or_else(|| settings.finish.clone()).clamped()
+    }
 }
 
 /// App recording: during a production run Claude Code can open a desktop app or a web app,
@@ -426,6 +437,7 @@ impl Project {
             assistant_sessions: Vec::new(),
             assistant_folders: Vec::new(),
             app_capture: AppCapture::default(),
+            finish: None,
             extra: BTreeMap::new(),
         }
     }
