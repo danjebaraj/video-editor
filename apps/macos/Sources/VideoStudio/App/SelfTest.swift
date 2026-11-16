@@ -555,6 +555,7 @@ enum SelfTest {
         await sleep(0.4)
         await snapshot(NSApp.windows.first { $0.title == "Settings" }, "settings-finish")
         check("the finish defaults are smooth and on the beat", app.settings.finish == Finish() && app.settings.finish.transitions == "smooth" && app.settings.finish.cut_on_beat)
+        check("the finish defaults to an upbeat voice and music", app.settings.finish.energy == "upbeat" && systemPrompt.contains("Upbeat voice and music"), app.settings.finish.energy)
         check("a project follows the Settings finish until it is given its own", doc.project.finish == nil)
         doc.update { $0.finish = app.settings.finish }
         doc.update { $0.finish?.transitions = "cuts" }
