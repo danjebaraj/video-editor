@@ -1,3 +1,12 @@
+---
+id: FEAT-0002
+type: feature
+title: Video Editor UI Spec
+status: proposed
+created: 2026-11-16
+updated: 2026-11-16
+---
+
 * The goal is to create a UI for the use of Claude along with the video editor console application (cutline) to prepare videos.
 * The UI should allow for integration with Claude Code (installed on the local machine).
 * Claude Code is required for this version to work.

@@ -1,3 +1,12 @@
+---
+id: FEAT-0001
+type: feature
+title: "Spec (tentative): business and product-demo features"
+status: proposed
+created: 2026-11-16
+updated: 2026-11-16
+---
+
 # Spec (tentative): business and product-demo features
 
 Status: **approved 2026-11-14**, being built on branch `business-demo-features`.
