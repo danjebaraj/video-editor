@@ -95,7 +95,8 @@ impl Client {
     pub fn tts(&self, voice: &str, text: &str, model: Option<&str>, settings: Option<&Value>) -> Result<Generated> {
         let mut body = json!({
             "model_id": model.unwrap_or(DEFAULT_MODEL),
-            "transcript": text,
+            // ElevenLabs' [audio tags] would be read aloud; Cartesia's own <tags/> stay.
+            "transcript": super::tags::for_cartesia(text),
             "voice": {"id": voice},
             "output_format": {"container": "mp3", "sample_rate": 44100, "bit_rate": 128000},
         });

@@ -347,9 +347,13 @@ pub fn call(method: String, args: String) -> R<String> {
                 .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .collect();
-            out(
-                json!({"summary": core::run::prompt::project_summary(&p, &outputs, &manifest), "read_paths": read_paths}),
-            )
+            let mut summary = core::run::prompt::project_summary(&p, &outputs, &manifest);
+            summary.push_str(&core::run::prompt::assistant_brand_notes(&p));
+            summary.push_str(&core::run::prompt::assistant_voice_notes(
+                settings.voice_provider,
+                p.brand.as_ref().and_then(|b| b.snapshot.voice.model.as_deref()),
+            ));
+            out(json!({"summary": summary, "read_paths": read_paths}))
         }
 
         // Media

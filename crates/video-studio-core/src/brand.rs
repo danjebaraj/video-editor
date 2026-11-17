@@ -130,6 +130,24 @@ pub struct Voice {
     pub settings: Option<Value>,
 }
 
+/// A labelled set of instructions for Claude, such as the context of one product line
+/// ("Bold Reports", "Syncfusion WPF"). A brand holds any number; each project picks the ones
+/// that apply, so every video of that product gets the same context and voice.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InstructionSet {
+    pub id: String,
+    pub label: String,
+    /// Free text, given to Claude verbatim.
+    #[serde(default)]
+    pub text: String,
+}
+
+impl InstructionSet {
+    pub fn new(label: &str) -> Self {
+        InstructionSet { id: ids::new_id("ins"), label: label.to_string(), text: String::new() }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct BrandPreset {
     pub id: String,
@@ -156,9 +174,12 @@ pub struct BrandPreset {
     pub voice: Voice,
     #[serde(default)]
     pub music_mood: String,
-    /// Do's and don'ts in free text, given to Claude verbatim.
+    /// Do's and don'ts in free text, given to Claude verbatim in every project.
     #[serde(default)]
     pub rules: String,
+    /// Labelled instructions a project chooses from (see [`BrandRef::instructions`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instructions: Vec<InstructionSet>,
     #[serde(default)]
     pub modified: String,
 }
@@ -180,6 +201,7 @@ impl BrandPreset {
             voice: Voice::default(),
             music_mood: String::new(),
             rules: String::new(),
+            instructions: Vec::new(),
             modified: timeutil::now_rfc3339(),
         }
     }
@@ -348,11 +370,27 @@ impl BrandPreset {
 pub struct BrandRef {
     pub preset_id: String,
     pub snapshot: BrandPreset,
+    /// IDs of the snapshot's instruction sets this project uses. None are chosen at first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instructions: Vec<String>,
 }
 
 impl BrandRef {
     pub fn of(preset: &BrandPreset) -> Self {
-        BrandRef { preset_id: preset.id.clone(), snapshot: preset.clone() }
+        BrandRef { preset_id: preset.id.clone(), snapshot: preset.clone(), instructions: Vec::new() }
+    }
+
+    /// The chosen instruction sets, in the brand's order. IDs the snapshot no longer has are
+    /// ignored.
+    pub fn chosen_instructions(&self) -> Vec<&InstructionSet> {
+        self.snapshot.instructions.iter().filter(|s| self.instructions.contains(&s.id)).collect()
+    }
+
+    /// The snapshot as a run shows it to Claude: only the chosen instruction sets.
+    pub fn for_run(&self) -> BrandPreset {
+        let mut b = self.snapshot.clone();
+        b.instructions.retain(|s| self.instructions.contains(&s.id));
+        b
     }
 }
 
@@ -393,6 +431,11 @@ pub fn save(library: &Utf8Path, preset: &mut BrandPreset) -> Result<()> {
     }
     if preset.id.trim().is_empty() {
         preset.id = ids::new_id("brd");
+    }
+    for set in &mut preset.instructions {
+        if set.id.trim().is_empty() {
+            set.id = ids::new_id("ins");
+        }
     }
     preset.modified = timeutil::now_rfc3339();
     paths::write_json_atomic(&preset_file(library, &preset.id), preset)

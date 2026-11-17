@@ -69,7 +69,7 @@ Errors: `E_BEAT_REF`.
 | `kind` | auto (`video`, `image`, `audio`, `image_sequence`, `html`, `lottie`, `svg`) | from ffprobe + extension |
 | `role` | — | `dialogue`, `voice`, `music`, `sfx` (audio layers default to `music`) |
 | `transcript` | — | Scribe JSON or cutline transcript JSON for this asset |
-| `script` | — | the text that was spoken (a `.txt`, e.g. the TTS script). Captions, ducking and cues use the script's exact words, timed from the transcript; `[audio tags]` are ignored. What was heard is compared with it: see [Script check](#script-check) (`W_SCRIPT_MISMATCH`) |
+| `script` | — | the text that was spoken (a `.txt`, e.g. the TTS script). Captions, ducking and cues use the script's exact words, timed from the transcript; `[audio tags]` and Cartesia's speech tags (`<break/>`, `<speed/>`, `<volume/>`, `<emotion/>`; `<spell>` keeps its text) are ignored. What was heard is compared with it: see [Script check](#script-check) (`W_SCRIPT_MISMATCH`) |
 | `gaps` | `[]` | pauses to add to a narration: `[{before: "Need more room", add: 0.7}, {after: "cue:room", add: 0.3}]`. See [Narration gaps](#narration-gaps) |
 | `duration` | 3 s | stills / HTML / Lottie / SVG |
 | `alpha` | — | assert alpha exists (`E_ALPHA_NOT_PRESENT` if not) |

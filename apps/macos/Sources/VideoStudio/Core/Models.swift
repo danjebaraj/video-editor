@@ -315,6 +315,18 @@ struct Voice: Codable, Equatable {
     var settings: JSONValue?
 }
 
+/// A labelled set of instructions for Claude, such as one product line's context ("Bold Reports").
+/// A brand holds any number; each project picks the ones that apply.
+struct InstructionSet: Codable, Equatable, Identifiable {
+    var id: String
+    var label: String
+    var text = ""
+
+    static func new(label: String) -> InstructionSet {
+        InstructionSet(id: "ins_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16).lowercased(), label: label)
+    }
+}
+
 struct BrandPreset: Codable, Equatable, Identifiable {
     var id: String
     var name: String
@@ -330,12 +342,22 @@ struct BrandPreset: Codable, Equatable, Identifiable {
     var voice = Voice()
     var music_mood = ""
     var rules = ""
+    /// Absent when the brand has none (the core leaves the key out).
+    var instructions: [InstructionSet]?
     var modified = ""
 }
 
 struct BrandRef: Codable, Equatable {
     var preset_id: String
     var snapshot: BrandPreset
+    /// IDs of the snapshot's instruction sets this project uses.
+    var instructions: [String]?
+
+    /// The chosen sets, in the brand's order; IDs the snapshot no longer has are ignored.
+    var chosenInstructions: [InstructionSet] {
+        let ids = Set(instructions ?? [])
+        return (snapshot.instructions ?? []).filter { ids.contains($0.id) }
+    }
 }
 
 // MARK: Outputs and runs

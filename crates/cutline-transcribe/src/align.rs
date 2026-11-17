@@ -33,12 +33,43 @@ impl AlignStats {
     }
 }
 
+/// Cartesia's inline tags (`<break time="1s"/>`, `<spell>…</spell>`, `<speed ratio="0.9"/>`,
+/// `<volume ratio="1.2"/>`, `<emotion value="calm"/>`): never spoken as written.
+const SPEECH_TAGS: [&str; 5] = ["break", "spell", "speed", "volume", "emotion"];
+
+/// `script` without Cartesia's speech tags; what a `<spell>` tag wraps stays.
+fn without_speech_tags(script: &str) -> String {
+    let mut out = String::with_capacity(script.len());
+    let mut rest = script;
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let Some(end) = tail.find('>') else {
+            rest = tail;
+            break;
+        };
+        let inner = tail[1..end].trim().trim_start_matches('/');
+        let name: String = inner.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+        if SPEECH_TAGS.contains(&name.to_ascii_lowercase().as_str()) {
+            // a tag between two words still separates them
+            out.push(' ');
+            rest = &tail[end + 1..];
+        } else {
+            out.push('<');
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Spoken words of a script: whitespace-separated tokens, without `[audio tags]` such as
-/// ElevenLabs' `[warm]` or `[laughs]`, and without tokens that are only punctuation.
+/// ElevenLabs' `[warm]` or `[laughs]`, without Cartesia's `<break/>`-style tags, and without
+/// tokens that are only punctuation.
 pub fn script_words(script: &str) -> Vec<String> {
     let mut out = String::with_capacity(script.len());
     let mut depth = 0usize;
-    for c in script.chars() {
+    for c in without_speech_tags(script).chars() {
         match c {
             '[' => depth += 1,
             ']' if depth > 0 => depth -= 1,
@@ -235,6 +266,16 @@ mod tests {
         assert_eq!(
             script_words("[warm, upbeat] Meet Glance — a dashboard. [confident] Go!"),
             ["Meet", "Glance", "a", "dashboard.", "Go!"]
+        );
+    }
+
+    #[test]
+    fn script_words_drop_cartesia_tags_but_keep_spelled_text() {
+        assert_eq!(
+            script_words(
+                "Build with <spell>WPF</spell>.<break time=\"500ms\"/>Then <speed ratio=\"0.8\"/>ship it, if a < b."
+            ),
+            ["Build", "with", "WPF", "Then", "ship", "it,", "if", "a", "b."]
         );
     }
 

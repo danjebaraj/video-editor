@@ -340,10 +340,33 @@ final class ProjectDocument: ObservableObject, Identifiable {
         }
     }
 
-    /// Switches the project to a preset: its ID and a snapshot are stored (spec §8).
+    /// Switches the project to a preset: its ID and a snapshot are stored (spec §8). Taking a
+    /// newer copy of the same preset keeps the instruction sets the project chose, where they
+    /// still exist; another preset starts with none chosen.
     func setBrand(_ preset: BrandPreset?) {
-        update { $0.brand = preset.map { BrandRef(preset_id: $0.id, snapshot: $0) } }
+        update { p in
+            let kept = p.brand?.preset_id == preset?.id ? (p.brand?.instructions ?? []) : []
+            p.brand = preset.map { b in
+                let ids = Set((b.instructions ?? []).map(\.id))
+                let chosen = kept.filter { ids.contains($0) }
+                return BrandRef(preset_id: b.id, snapshot: b, instructions: chosen.isEmpty ? nil : chosen)
+            }
+        }
         if case .brandUpdate = banner { banner = nil }
+    }
+
+    /// Whether the project uses one of its brand's instruction sets.
+    func usesInstructions(_ id: String) -> Bool { project.brand?.instructions?.contains(id) == true }
+
+    /// Turns one of the brand's instruction sets on or off for this project.
+    func setInstructions(_ id: String, used: Bool) {
+        update { p in
+            guard var b = p.brand else { return }
+            var ids = (b.instructions ?? []).filter { $0 != id }
+            if used { ids.append(id) }
+            b.instructions = ids.isEmpty ? nil : ids
+            p.brand = b
+        }
     }
 
     /// The dry run model in force: the project's own choice, or the default in Settings.

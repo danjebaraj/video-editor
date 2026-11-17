@@ -92,6 +92,13 @@
         "id": {
           "type": "string"
         },
+        "instructions": {
+          "description": "Labelled instructions a project chooses from (see [`BrandRef::instructions`]).",
+          "items": {
+            "$ref": "#/$defs/InstructionSet"
+          },
+          "type": "array"
+        },
         "intro": {
           "anyOf": [
             {
@@ -133,7 +140,7 @@
         },
         "rules": {
           "default": "",
-          "description": "Do's and don'ts in free text, given to Claude verbatim.",
+          "description": "Do's and don'ts in free text, given to Claude verbatim in every project.",
           "type": "string"
         },
         "voice": {
@@ -159,6 +166,13 @@
     "BrandRef": {
       "description": "The preset a project uses: its library ID and a full copy taken when it was chosen.",
       "properties": {
+        "instructions": {
+          "description": "IDs of the snapshot's instruction sets this project uses. None are chosen at first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "preset_id": {
           "type": "string"
         },
@@ -306,6 +320,27 @@
           "default": {}
         }
       },
+      "type": "object"
+    },
+    "InstructionSet": {
+      "description": "A labelled set of instructions for Claude, such as the context of one product line\n(\"Bold Reports\", \"Syncfusion WPF\"). A brand holds any number; each project picks the ones\nthat apply, so every video of that product gets the same context and voice.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "text": {
+          "default": "",
+          "description": "Free text, given to Claude verbatim.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
       "type": "object"
     },
     "Intent": {

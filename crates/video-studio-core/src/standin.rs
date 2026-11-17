@@ -146,7 +146,8 @@ pub const WORDS_PER_MINUTE: f64 = 150.0;
 /// imports. Longer words take longer and a sentence end is followed by a short pause, which is
 /// close enough to speech for captions and cues to land in plausible places.
 pub fn transcript(script: &str, seconds: f64) -> serde_json::Value {
-    let words: Vec<&str> = script.split_whitespace().filter(|w| !(w.starts_with('[') && w.ends_with(']'))).collect();
+    let spoken = crate::eleven::tags::spoken(script);
+    let words: Vec<&str> = spoken.split_whitespace().collect();
     let weight = |w: &str| w.chars().count() as f64 + 2.0;
     let pause = |w: &str| if w.ends_with(['.', '!', '?', ':']) { 5.0 } else { 0.0 };
     let total: f64 = words.iter().map(|w| weight(w) + pause(w)).sum::<f64>().max(1.0);
@@ -170,7 +171,7 @@ pub fn transcript(script: &str, seconds: f64) -> serde_json::Value {
 /// the dry run can check captions and cue timing. Without `seconds`, the length is what the
 /// words take to speak.
 pub fn create_voice(ctx: &HelperContext, out: &str, script: &str, seconds: Option<f64>) -> Result<String> {
-    let count = script.split_whitespace().count();
+    let count = crate::eleven::tags::spoken(script).split_whitespace().count();
     if count == 0 {
         return Err(Error::other("The voice-over text is empty."));
     }
@@ -257,7 +258,7 @@ mod tests {
         std::env::set_var(FAKE_ENV, "1");
         let line = create_voice(&ctx(dir, Mode::DryRun), "audio/vo-1.mp3", script, None).unwrap();
         std::env::remove_var(FAKE_ENV);
-        assert!(line.contains("audio/vo-1.json") && line.contains("11 words spread over 4.4 s"), "{line}");
+        assert!(line.contains("audio/vo-1.json") && line.contains("10 words spread over 4.0 s"), "{line}");
         assert!(dir.join("audio/vo-1.mp3").is_file());
         let saved: serde_json::Value = crate::paths::read_json(&dir.join("audio/vo-1.json")).unwrap();
         assert_eq!(saved["stand_in"], true);

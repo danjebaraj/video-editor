@@ -147,7 +147,8 @@ fn helper_context(w: &World, url: &str, cap: u64, mode: Mode) -> (Utf8PathBuf, U
 }
 
 /// From a run's log: six passages voiced one request at a time came back at six different
-/// paces. Each request now carries its neighbours' text, which ElevenLabs reads as context.
+/// paces. Each request now carries its neighbours' text, which ElevenLabs reads as context —
+/// on the models that take it (before v3); those that perform audio tags don't.
 #[test]
 fn a_passage_is_voiced_with_its_neighbours_as_context() {
     let w = World::new();
@@ -163,6 +164,8 @@ fn a_passage_is_voiced_with_its_neighbours_as_context() {
     }
     let middle = eleven(&[
         "tts",
+        "--model",
+        "eleven_multilingual_v2",
         "--text-file",
         "vo2.txt",
         "--before-file",
@@ -180,14 +183,25 @@ fn a_passage_is_voiced_with_its_neighbours_as_context() {
         "FAKE-MP3 voice text: Drop one in. [previous: Your app needs a chart.] [next: Start today.]"
     );
     // the neighbours are part of the request: the same text alone is a different take
-    let alone = eleven(&["tts", "--text-file", "vo2.txt", "--out", "vo2-alone.mp3"]);
+    let alone =
+        eleven(&["tts", "--model", "eleven_multilingual_v2", "--text-file", "vo2.txt", "--out", "vo2-alone.mp3"]);
     assert!(stdout(&alone).contains("(12 credits; 24 of 1000"), "{}", stdout(&alone));
     let log = ndjson(&run.join("logs/eleven.ndjson"));
     assert_eq!(log[0]["request"]["before"], "Your app needs a chart.");
     assert_eq!(log[0]["request"]["after"], "Start today.");
     assert!(log[1]["request"].get("before").is_none());
     // another take: same text, voice and settings, a new reading (and a new charge)
-    let retake = eleven(&["tts", "--text-file", "vo2.txt", "--take", "2", "--out", "vo2-take2.mp3"]);
+    let retake = eleven(&[
+        "tts",
+        "--model",
+        "eleven_multilingual_v2",
+        "--text-file",
+        "vo2.txt",
+        "--take",
+        "2",
+        "--out",
+        "vo2-take2.mp3",
+    ]);
     assert!(stdout(&retake).contains("(12 credits; 36 of 1000"), "{}", stdout(&retake));
     assert_eq!(
         std::fs::read_to_string(run.join("audio/vo2-take2.mp3")).unwrap(),
@@ -195,6 +209,32 @@ fn a_passage_is_voiced_with_its_neighbours_as_context() {
     );
     let missing = eleven(&["tts", "--text-file", "vo2.txt", "--before-file", "nope.txt", "--out", "x.mp3"]);
     assert!(stderr(&missing).contains("couldn't read nope.txt"), "{}", stderr(&missing));
+    // the default model (Eleven v4) performs audio tags, so they go out; it takes no neighbours,
+    // and the neighbours' own tags never would
+    std::fs::write(run.join("vo1.txt"), "[curious] Your app needs a chart?").unwrap();
+    std::fs::write(run.join("vo2t.txt"), "[confident] Drop one in. <break time=\"1s\"/>").unwrap();
+    let tagged = eleven(&["tts", "--text-file", "vo2t.txt", "--before-file", "vo1.txt", "--out", "vo2-tagged.mp3"]);
+    assert_eq!(tagged.status.code(), Some(0), "{}", stderr(&tagged));
+    assert_eq!(
+        std::fs::read_to_string(run.join("audio/vo2-tagged.mp3")).unwrap(),
+        "FAKE-MP3 voice text: [confident] Drop one in."
+    );
+    // a model before v3 would read the tags aloud: they are taken out
+    let plain = eleven(&[
+        "tts",
+        "--model",
+        "eleven_multilingual_v2",
+        "--text-file",
+        "vo2t.txt",
+        "--before-file",
+        "vo1.txt",
+        "--out",
+        "vo2-plain.mp3",
+    ]);
+    assert_eq!(
+        std::fs::read_to_string(run.join("audio/vo2-plain.mp3")).unwrap(),
+        "FAKE-MP3 voice text: Drop one in. [previous: Your app needs a chart?]"
+    );
 }
 
 /// Settings › Voice set to Cartesia: the same helper commands reach Cartesia for the voice and
