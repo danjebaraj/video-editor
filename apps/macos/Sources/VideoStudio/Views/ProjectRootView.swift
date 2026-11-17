@@ -44,6 +44,17 @@ struct ProjectRootView: View {
 
     // MARK: Toolbar: [Brand ▾] [Run config ▾] [Validate] [Run ▶] [Stop ■]  status · cost
 
+    /// The brand's name, with the instruction sets the project uses ("Syncfusion · Bold Reports").
+    private var brandTitle: String {
+        guard let b = document.project.brand else { return "No Brand" }
+        let labels = b.chosenInstructions.map(\.label).filter { !$0.isEmpty }
+        switch labels.count {
+        case 0: return b.snapshot.name
+        case 1: return "\(b.snapshot.name) · \(labels[0])"
+        default: return "\(b.snapshot.name) · \(labels[0]) +\(labels.count - 1)"
+        }
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
@@ -55,6 +66,17 @@ struct ProjectRootView: View {
                         if document.project.brand?.preset_id == b.id { Label(b.name, systemImage: "checkmark") } else { Text(b.name) }
                     }
                 }
+                if let sets = document.project.brand?.snapshot.instructions, !sets.isEmpty {
+                    Divider()
+                    Section("Instructions for this project") {
+                        ForEach(sets) { set in
+                            Toggle(set.label.isEmpty ? "Untitled" : set.label, isOn: Binding(
+                                get: { document.usesInstructions(set.id) },
+                                set: { document.setInstructions(set.id, used: $0) }
+                            ))
+                        }
+                    }
+                }
                 if document.brandUpdateAvailable, let name = document.project.brand?.snapshot.name {
                     Divider()
                     Button("Update “\(name)” to Latest") { document.updateBrandToLatest() }
@@ -62,10 +84,10 @@ struct ProjectRootView: View {
                 Divider()
                 Button("Edit Brand Presets…") { AppDelegate.shared.showLibrary(tab: .brands, select: document.project.brand?.preset_id) }
             } label: {
-                Label(document.project.brand?.snapshot.name ?? "No Brand", systemImage: "paintpalette")
+                Label(brandTitle, systemImage: "paintpalette")
                     .labelStyle(.titleAndIcon)
             }
-            .help("Brand preset: logos, colors, fonts, voice and rules given to Claude")
+            .help("Brand preset: logos, colors, fonts, voice, rules and the instructions this project uses, given to Claude")
             .accessibilityLabel("Brand preset")
 
             Menu {

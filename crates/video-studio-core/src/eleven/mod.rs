@@ -8,6 +8,7 @@
 
 pub mod cartesia;
 mod client;
+pub mod tags;
 pub mod voices;
 
 use std::collections::BTreeMap;

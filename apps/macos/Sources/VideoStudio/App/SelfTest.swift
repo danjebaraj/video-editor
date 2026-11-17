@@ -383,6 +383,31 @@ enum SelfTest {
         await snapshot(wc2.window, "brand-banner")
         doc.updateBrandToLatest()
         check("Update to Latest takes the library copy", doc.project.brand?.snapshot.rules.contains("end on the logo") == true && doc.banner == nil && !doc.brandUpdateAvailable)
+        // Labelled instruction sets: the brand holds any number, each project chooses some.
+        var reportsSet = InstructionSet.new(label: "Bold Reports")
+        reportsSet.text = "Audience: report authors and BI developers."
+        var wpfSet = InstructionSet.new(label: "Syncfusion WPF")
+        wpfSet.text = "Desktop developers on .NET."
+        acme.instructions = [reportsSet, wpfSet]
+        await sleep(1.1)
+        acme = (try? Core.run("brand.save", ["brand": Core.arg(acme)])) ?? acme
+        app.reloadBrands()
+        doc.updateBrandToLatest()
+        check("a project starts with none of the brand's instructions chosen", doc.project.brand?.snapshot.instructions?.count == 2 && doc.project.brand?.chosenInstructions.isEmpty == true)
+        doc.setInstructions(reportsSet.id, used: true)
+        check("a project chooses a subset of the brand's instructions", doc.project.brand?.chosenInstructions.map(\.label) == ["Bold Reports"])
+        let briefed: SummaryResult? = try? Core.run("project.summary", ["project": Core.arg(doc.project), "path": doc.fileURL.path, "run_config": doc.selectedRunConfig?.id])
+        check("the chosen instructions, and only those, reach Claude", briefed?.summary.contains("report authors and BI developers") == true && briefed?.summary.contains("Desktop developers") == false, briefed?.summary ?? "no summary")
+        check("the spec assistant is given the brand rules", briefed?.summary.contains("> Do: end on the logo.") == true, briefed?.summary ?? "no summary")
+        acme.instructions?.append(InstructionSet.new(label: "Bold BI"))
+        await sleep(1.1)
+        acme = (try? Core.run("brand.save", ["brand": Core.arg(acme)])) ?? acme
+        app.reloadBrands()
+        doc.updateBrandToLatest()
+        check("updating the brand keeps the project's choice", doc.project.brand?.snapshot.instructions?.count == 3 && doc.project.brand?.chosenInstructions.map(\.label) == ["Bold Reports"])
+        doc.setBrand(globex)
+        check("another brand starts with no instructions chosen", doc.project.brand?.instructions == nil)
+        doc.setBrand(acme)
         let exported = scratch.appendingPathComponent("acme.cutbrand")
         _ = try? Core.raw("brand.export", ["brand": Core.arg(acme), "destination": exported.path])
         check("a preset exports as .cutbrand with its assets", ((try? fm.attributesOfItem(atPath: exported.path))?[.size] as? Int ?? 0) > 200)

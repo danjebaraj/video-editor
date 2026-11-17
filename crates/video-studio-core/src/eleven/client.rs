@@ -178,7 +178,9 @@ impl Client {
         after: Option<&str>,
         take: Option<u32>,
     ) -> Result<Generated> {
-        let model = model.unwrap_or("eleven_multilingual_v2");
+        let model = model.unwrap_or(super::tags::DEFAULT_MODEL);
+        // Tags the model can't perform would be read aloud; Cartesia's are never ElevenLabs'.
+        let text = super::tags::for_eleven(text, model);
         let mut body = json!({"text": text, "model_id": model});
         if let Some(s) = settings.filter(|s| s.is_object()) {
             body["voice_settings"] = s.clone();
@@ -186,12 +188,12 @@ impl Client {
         if let Some(t) = take {
             body["seed"] = json!(t);
         }
-        // The v3 models take no neighbouring text.
-        if !model.starts_with("eleven_v3") {
-            if let Some(b) = before.filter(|b| !b.trim().is_empty()) {
+        // The models that perform audio tags (v3 and later) take no neighbouring text.
+        if !super::tags::eleven_performs_tags(model) {
+            if let Some(b) = before.map(super::tags::spoken).filter(|b| !b.is_empty()) {
                 body["previous_text"] = json!(b);
             }
-            if let Some(a) = after.filter(|a| !a.trim().is_empty()) {
+            if let Some(a) = after.map(super::tags::spoken).filter(|a| !a.is_empty()) {
                 body["next_text"] = json!(a);
             }
         }

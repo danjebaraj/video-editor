@@ -97,6 +97,7 @@ pub fn project_summary(project: &Project, outputs: &[ResolvedOutput], manifest: 
     }
     if let Some(b) = &project.brand {
         s.push_str(&format!("Brand preset: {}\n", b.snapshot.name));
+        s.push_str(&instructions_text(b));
     }
     if !outputs.is_empty() {
         s.push_str("Outputs:\n");
@@ -132,6 +133,37 @@ pub fn project_summary(project: &Project, outputs: &[ResolvedOutput], manifest: 
     s.push_str("Media (refer to items by ID, as `media:<id>`):\n");
     s.push_str(&manifest_summary(manifest));
     s
+}
+
+/// The brand's instruction sets this project chose, verbatim, under their labels.
+fn instructions_text(b: &crate::brand::BrandRef) -> String {
+    let chosen: Vec<_> = b.chosen_instructions().into_iter().filter(|i| !i.text.trim().is_empty()).collect();
+    if chosen.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from(
+        "Brand instructions chosen for this video, verbatim from the brand owner. They give the product context and the voice every video of it shares: follow them in what the video says and how it says it.\n",
+    );
+    for set in chosen {
+        s.push_str(&format!("**{}**\n", set.label.trim()));
+        for line in set.text.trim().lines() {
+            s.push_str(&format!("> {line}\n"));
+        }
+    }
+    s
+}
+
+/// What the spec assistant needs to know about the voice-over: when the voice performs delivery
+/// tags, the `vo` blocks carry them.
+pub fn assistant_voice_notes(provider: crate::eleven::VoiceProvider, brand_model: Option<&str>) -> String {
+    let model = brand_model.map(str::trim).filter(|m| !m.is_empty()).unwrap_or(crate::eleven::tags::DEFAULT_MODEL);
+    if provider != crate::eleven::VoiceProvider::Elevenlabs || !crate::eleven::tags::eleven_performs_tags(model) {
+        return String::new();
+    }
+    format!(
+        "Voice-over: ElevenLabs, model `{model}`, which performs delivery tags. Write them into the `vo` blocks so the read sounds right for a business audience, and keep them when you edit a block. They don't count as words for length, and captions leave them out.\n{}",
+        crate::eleven::tags::ELEVEN_TAG_GUIDE
+    )
 }
 
 fn brand_section(project: &Project) -> String {
@@ -186,13 +218,26 @@ fn brand_section(project: &Project) -> String {
     if !b.lower_third_style.trim().is_empty() || !b.caption_style.trim().is_empty() {
         s.push_str("  The caption and lower-third styles are the brand owner's own words, not cutline names: pick the closest cutline caption style, position and template. That is expected, so don't report the choice as a risk.\n");
     }
-    if !b.rules.trim().is_empty() {
-        s.push_str("Brand rules, verbatim from the brand owner. Follow them exactly:\n");
-        for line in b.rules.trim().lines() {
-            s.push_str(&format!("> {line}\n"));
-        }
+    s.push_str(&rules_text(b));
+    s
+}
+
+/// The brand's rules, verbatim. Every project that uses the brand gets them.
+fn rules_text(b: &crate::brand::BrandPreset) -> String {
+    if b.rules.trim().is_empty() {
+        return String::new();
+    }
+    let mut s = String::from("Brand rules, verbatim from the brand owner. Follow them exactly:\n");
+    for line in b.rules.trim().lines() {
+        s.push_str(&format!("> {line}\n"));
     }
     s
+}
+
+/// What the spec assistant is told about the brand beyond the project summary: its rules, so
+/// the script is written to them from the start. (A run gets them in its Brand section.)
+pub fn assistant_brand_notes(project: &Project) -> String {
+    project.brand.as_ref().map(|b| rules_text(&b.snapshot)).unwrap_or_default()
 }
 
 fn audio_section(input: &PromptInput) -> String {
@@ -205,7 +250,7 @@ fn audio_section(input: &PromptInput) -> String {
             }
         };
         return format!("Audio: this is a dry run, so no audio is generated. Where the edit needs voice-over, music or sound effects, plan each file under audio/ and estimate credits with `video-studio eleven quote …`. Hold each file's place with a stand-in:\n\
-         - Voice-over: write the text to audio/<name>.txt (the `vo` block word for word), then `video-studio standin audio --out audio/<name>.mp3 --text-file audio/<name>.txt`. It writes a quiet sound as long as the words take to speak and a stand-in transcript, audio/<name>.json. Give the asset `role: \"voice\"`, `script: \"audio/<name>.txt\"` and `transcript: \"audio/<name>.json\"`, exactly as production will, and time the edit with cues where you would in production. Captions and cue timing can then be checked; real narration will differ by a second or so per passage, which is expected and not a risk.\n\
+         - Voice-over: write the text to audio/<name>.txt (the `vo` block word for word, with any delivery tags in square brackets it has), then `video-studio standin audio --out audio/<name>.mp3 --text-file audio/<name>.txt`. It writes a quiet sound as long as the words take to speak and a stand-in transcript, audio/<name>.json. Give the asset `role: \"voice\"`, `script: \"audio/<name>.txt\"` and `transcript: \"audio/<name>.json\"`, exactly as production will, and time the edit with cues where you would in production. Captions and cue timing can then be checked; real narration will differ by a second or so per passage, which is expected and not a risk.\n\
          - Music and sound effects: `video-studio standin audio --out audio/<name>.mp3 --seconds <n>`.\n\
          {voice}\n");
     }
@@ -220,6 +265,12 @@ fn audio_section(input: &PromptInput) -> String {
             None => "No default voice is set: pick one with `video-studio eleven voices --search <words>` that fits the tone, and say which in summary.md.".to_string(),
         },
     };
+    let tagged = !cartesia && crate::eleven::tags::eleven_performs_tags(&eleven_model(input));
+    let neighbours = if cartesia || tagged {
+        "- Every passage is voiced on its own: `--before-file` and `--after-file` have no effect with this voice model, so give every passage complete sentences and keep its delivery in the same register as the others.\n"
+    } else {
+        "- Give each passage its neighbours: `--before-file` is the text file of the passage spoken just before it, `--after-file` the one just after (the first passage has only an after, the last only a before). The voice then carries its pace and tone across them. They cost nothing extra.\n"
+    };
     format!(
         "Audio: generate voice-over, music and sound effects with the app's helper. It is the only way to reach ElevenLabs.\n\
          - `video-studio eleven tts --voice <id> --text-file <file> --out <name>.mp3 [--before-file <file>] [--after-file <file>] [--take <n>] [--model <id>] [--settings '<json>']`\n\
@@ -227,17 +278,49 @@ fn audio_section(input: &PromptInput) -> String {
          - `video-studio eleven sfx --prompt \"<brief>\" --length <seconds> --out <name>.mp3`\n\
          - `video-studio eleven scribe --in <audio> --out <name>.json` (word timings; import with `cutline transcribe`)\n\
          - `video-studio eleven voices [--search <words>] [--gender female|male|any] [--prefer tried|latest]` (the account's voices, best first for the preferences in Settings) and `video-studio eleven quote <tts|music|sfx> …` (estimate, costs nothing)\n\
-         Outputs land in audio/. Write voice-over text to a file under audio/ or work/ first, one file per scene or passage, and voice the `vo` blocks of the spec word for word.\n\
+         Outputs land in audio/. Write voice-over text to a file under audio/ or work/ first, one file per scene or passage, and voice the words of the spec's `vo` blocks exactly as written. Delivery tags (`[warmly]`, `<break time=\"1s\"/>`) are not words: cutline leaves them out of captions and the script check, so the file with tags is also the asset's `script`.\n\
          The passages must sound like one reading, not several:\n\
          - Use the same voice, model and `--settings` for every passage of a video.\n\
-         - Give each passage its neighbours: `--before-file` is the text file of the passage spoken just before it, `--after-file` the one just after (the first passage has only an after, the last only a before). The voice then carries its pace and tone across them. They cost nothing extra.\n\
+         {neighbours}\
          - When a take is wrong (a long pause, a rushed or dragging read, a mispronounced word), ask for another with `--take 2`, then `--take 3`: same text, same settings, a new reading. Do not change the settings for one passage; if the settings are wrong, change them for all and voice every passage again.\n\
          - After transcribing, compare the passages: `cutline validate` reports one spoken much faster or slower than the rest (`W_VOICE_PACE`). The render brings every voice file to the same loudness, so do not correct their levels with `gain_db`.\n\
          {voice}\n\
+         {delivery}\
          {provider}\
          Budget: this run may spend at most {} ElevenLabs credits. Every call is quoted first; a call that would pass the cap fails with a message telling you how much is left. Identical requests are served from a cache at no cost, so never change text just to regenerate.\n",
         rc.eleven_credit_cap,
+        delivery = if cartesia { String::new() } else { eleven_delivery(input) },
         provider = cartesia_note(input)
+    )
+}
+
+/// The ElevenLabs model the run's voice-over uses: the brand's, or the helper's default.
+fn eleven_model(input: &PromptInput) -> String {
+    input
+        .project
+        .brand
+        .as_ref()
+        .and_then(|b| b.snapshot.voice.model.clone())
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| crate::eleven::tags::DEFAULT_MODEL.to_string())
+}
+
+/// How ElevenLabs voice-over text carries delivery tags, for the model in force.
+fn eleven_delivery(input: &PromptInput) -> String {
+    let model = eleven_model(input);
+    let from_brand = model != crate::eleven::tags::DEFAULT_MODEL;
+    let whose = if from_brand { "the brand's voice model" } else { "the default voice model" };
+    if !crate::eleven::tags::eleven_performs_tags(&model) {
+        return format!(
+            "The voice model is `{model}` ({whose}). It reads delivery tags in square brackets aloud, so the helper removes them before the text goes out: leave the spec's tags in the text files, but add none. The brand preset can name `{}` or `eleven_v3` instead to have them performed.\n",
+            crate::eleven::tags::DEFAULT_MODEL
+        );
+    }
+    format!(
+        "The voice model is `{model}` ({whose}); pass no other `--model` unless the spec names one. It performs delivery tags, and every passage should use them.\n{}\
+         The spec's `vo` blocks may already carry tags: keep them as they are, and add tags following this guide where a passage has none or needs another. Never add, drop or change words to fit a tag.\n",
+        crate::eleven::tags::ELEVEN_TAG_GUIDE
     )
 }
 
@@ -260,11 +343,13 @@ fn cartesia_note(input: &PromptInput) -> String {
     let mut s = format!(
         "The voice-over of this run is spoken by Cartesia, not ElevenLabs (Settings › ElevenLabs › Voice-over by). The commands stay the same: in this run `video-studio eleven tts` and `video-studio eleven voices` reach Cartesia, and voice IDs are Cartesia's. What differs:\n\
          - `--settings` takes Cartesia's own: `{{\"speed\": 0.6 to 1.5, \"emotion\": \"<one word, e.g. calm, content, excited>\", \"volume\": 0.5 to 2}}`. {settings}, in place of any ElevenLabs settings (stability, similarity_boost, style) the Finish section gives; the brand's are ElevenLabs' too and only their speed is used.\n\
-         - `--model` is a Cartesia model (default `{model}`). Delivery tags in square brackets are read aloud: write none.\n\
+         - `--model` is a Cartesia model (default `{model}`).\n\
+         {tags}\
          - `--before-file` and `--after-file` have no effect, so give every passage complete sentences. `--take <n>` still gives another reading.\n\
          - A character costs one credit, counted against the same cap.\n\
          - Music, sound effects and transcripts (`eleven music`, `sfx`, `scribe`) are still ElevenLabs.\n",
-        model = crate::eleven::cartesia::DEFAULT_MODEL
+        model = crate::eleven::cartesia::DEFAULT_MODEL,
+        tags = crate::eleven::tags::CARTESIA_TAG_GUIDE
     );
     if !input.eleven_available {
         s.push_str("No ElevenLabs key is configured, so `eleven music`, `eleven sfx` and `eleven scribe` will fail: take word timings from `cutline transcribe` instead, use music and sound effects only from the media manifest, and say in summary.md what the video lacks for it.\n");
@@ -547,6 +632,95 @@ mod tests {
             },
         ];
         (p, rc, outs, ex, manifest, platforms)
+    }
+
+    fn production(p: &Project, provider: crate::eleven::VoiceProvider) -> String {
+        let (_, rc, outs, ex, manifest, platforms) = fixture();
+        system_prompt(&PromptInput {
+            project: p,
+            run_config: &rc,
+            kind: RunKind::Production,
+            folder: "/runs/r1".into(),
+            outputs: &outs,
+            exports: &ex,
+            manifest: &manifest,
+            cutline_guide: "",
+            eleven_available: true,
+            default_voice: Some("voice-abc"),
+            voice_provider: provider,
+            cartesia_available: true,
+            voice_choosing: None,
+            platforms: &platforms,
+            finish: &crate::finish::Finish::default(),
+        })
+    }
+
+    #[test]
+    fn delivery_tags_follow_the_voice_model() {
+        use crate::eleven::VoiceProvider;
+        let (mut p, ..) = fixture();
+        let s = production(&p, VoiceProvider::Elevenlabs);
+        for needle in [
+            "model is `eleven_v4` (the default voice model)",
+            "`[warmly]`",
+            "`[confident]`",
+            "`[reassuring]`",
+            "open every passage with one tag",
+            "have no effect with this voice model",
+        ] {
+            assert!(s.contains(needle), "missing {needle:?}");
+        }
+        assert!(!s.contains("Give each passage its neighbours") && !s.contains("<spell>"));
+
+        p.brand.as_mut().unwrap().snapshot.voice.model = Some("eleven_multilingual_v2".into());
+        let old = production(&p, VoiceProvider::Elevenlabs);
+        assert!(
+            old.contains("reads delivery tags in square brackets aloud")
+                && old.contains("Give each passage its neighbours")
+        );
+        assert!(!old.contains("`[reassuring]`"));
+
+        let cartesia = production(&p, VoiceProvider::Cartesia);
+        assert!(cartesia.contains("<spell>WPF</spell>") && cartesia.contains("the helper removes them"));
+        assert!(!cartesia.contains("`[reassuring]`") && !cartesia.contains("Give each passage its neighbours"));
+
+        assert!(assistant_voice_notes(VoiceProvider::Elevenlabs, None).contains("`[confident]`"));
+        assert!(assistant_voice_notes(VoiceProvider::Elevenlabs, Some("eleven_flash_v2_5")).is_empty());
+        assert!(assistant_voice_notes(VoiceProvider::Cartesia, None).is_empty());
+        assert_eq!(
+            assistant_brand_notes(&p),
+            "Brand rules, verbatim from the brand owner. Follow them exactly:\n> Do: lead with the product.\n> Don't: use stock music.\n"
+        );
+        p.brand = None;
+        assert!(assistant_brand_notes(&p).is_empty());
+    }
+
+    #[test]
+    fn only_the_chosen_instruction_sets_reach_claude() {
+        use crate::brand::InstructionSet;
+        let (mut p, rc, outs, _, manifest, _) = fixture();
+        let _ = rc;
+        let b = p.brand.as_mut().unwrap();
+        let mut reports = InstructionSet::new("Bold Reports");
+        reports.text =
+            "Audience: report authors and BI developers.\nSay \"Bold Reports\", never \"BoldReports\".".into();
+        let mut wpf = InstructionSet::new("Syncfusion WPF");
+        wpf.text = "Desktop developers on .NET.".into();
+        let empty = InstructionSet::new("Empty");
+        b.instructions = vec![reports.id.clone(), empty.id.clone(), "ins_gone".into()];
+        b.snapshot.instructions = vec![wpf, reports, empty];
+        let summary = project_summary(&p, &outs, &manifest);
+        assert!(summary.contains("Brand instructions chosen for this video"));
+        assert!(
+            summary.contains("**Bold Reports**\n> Audience: report authors and BI developers.\n> Say \"Bold Reports\"")
+        );
+        assert!(!summary.contains("Desktop developers") && !summary.contains("**Empty**"));
+        let run = p.brand.as_ref().unwrap().for_run();
+        assert_eq!(run.instructions.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Bold Reports", "Empty"]);
+        assert!(production(&p, crate::eleven::VoiceProvider::Elevenlabs).contains("**Bold Reports**"));
+
+        p.brand.as_mut().unwrap().instructions.clear();
+        assert!(!project_summary(&p, &outs, &manifest).contains("Brand instructions"));
     }
 
     #[test]

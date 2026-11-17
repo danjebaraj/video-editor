@@ -172,7 +172,10 @@ struct BrandEditor: View {
                     TextField("Voice ID", text: $brand.voice.voice_id)
                     TextField("Cartesia voice ID", text: Binding(get: { brand.voice.cartesia_voice_id ?? "" }, set: { brand.voice.cartesia_voice_id = $0.isEmpty ? nil : $0 }), prompt: Text("Used when Settings has Cartesia speak"))
                     TextField("Voice name", text: Binding(get: { brand.voice.name ?? "" }, set: { brand.voice.name = $0.isEmpty ? nil : $0 }), prompt: Text("For your reference"))
-                    TextField("Model", text: Binding(get: { brand.voice.model ?? "" }, set: { brand.voice.model = $0.isEmpty ? nil : $0 }), prompt: Text("eleven_multilingual_v2"))
+                    TextField("Model", text: Binding(get: { brand.voice.model ?? "" }, set: { brand.voice.model = $0.isEmpty ? nil : $0 }), prompt: Text("eleven_v4"))
+                    if let m = brand.voice.model, !m.isEmpty, !Self.performsTags(m) {
+                        Text("This model reads delivery tags such as [warmly] aloud, so runs leave them out. Eleven v3 and later (eleven_v4 is the default) perform them.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                     TextField("Settings (JSON)", text: $voiceSettings, prompt: Text("{\"stability\": 0.4, \"similarity_boost\": 0.8}"))
                         .font(.system(.body, design: .monospaced))
                         .onChange(of: voiceSettings) {
@@ -187,6 +190,30 @@ struct BrandEditor: View {
                     Text("Do's and don'ts in your own words. Claude is given them verbatim.").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $brand.rules).font(.body).frame(minHeight: 110).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
                         .accessibilityLabel("Brand rules")
+                }
+                InspectorSection(title: "Instructions") {
+                    Text("Labelled context for one product line or audience, such as “Bold Reports” or “Syncfusion WPF”. Each project chooses the ones it uses from the brand menu in its toolbar; Claude is given those verbatim when writing the spec and making the video. Rules above apply to every project.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    ForEach(instructions) { $set in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                TextField("Label", text: $set.label, prompt: Text("Bold Reports"))
+                                    .accessibilityLabel("Instructions label")
+                                Button(role: .destructive) {
+                                    guard Prompt.confirm("Delete the instructions “\(set.label)”?", message: "Projects that already use them keep them in their snapshot until they update the brand.", ok: "Delete", destructive: true) else { return }
+                                    instructions.wrappedValue.removeAll { $0.id == set.id }
+                                } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless)
+                                .help("Delete these instructions")
+                                .accessibilityLabel("Delete instructions “\(set.label)”")
+                            }
+                            TextEditor(text: $set.text).font(.body).frame(minHeight: 90).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+                                .accessibilityLabel("Instructions for \(set.label)")
+                        }
+                        .padding(.bottom, 6)
+                    }
+                    Button("Add Instructions") { instructions.wrappedValue.append(.new(label: "")) }
+                        .help("Add a labelled set of instructions projects can choose")
                 }
                 HStack {
                     Button("Export…") { export() }.help("Save as a .cutbrand file (the preset and its assets) to share between machines")
@@ -221,6 +248,17 @@ struct BrandEditor: View {
         .onDisappear {
             if let w = saveWork, !w.isCancelled { w.perform() }
         }
+    }
+
+    /// Eleven v3 and later perform `[audio tags]` (the core's `eleven_performs_tags`).
+    static func performsTags(_ model: String) -> Bool {
+        guard model.hasPrefix("eleven_v"), let n = Int(model.dropFirst("eleven_v".count).prefix { $0.isNumber }) else { return false }
+        return n >= 3
+    }
+
+    /// The brand's instruction sets; an empty list is stored as none.
+    private var instructions: Binding<[InstructionSet]> {
+        Binding(get: { brand.instructions ?? [] }, set: { brand.instructions = $0.isEmpty ? nil : $0 })
     }
 
     private func export() {

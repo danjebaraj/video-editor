@@ -377,8 +377,9 @@ pub fn voice_overs(spec: &str) -> Vec<VoiceOver> {
     out
 }
 
+/// Spoken words in voice-over text: delivery tags (`[warmly]`, `<break time="1s"/>`) don't count.
 pub fn word_count(text: &str) -> usize {
-    text.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count()
+    crate::eleven::tags::spoken(text).split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count()
 }
 
 /// Seconds needed to speak `words` at `wpm`.
