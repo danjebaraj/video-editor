@@ -471,9 +471,12 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         working_dir: folder.clone(),
         env: child_env,
         model: model.clone(),
+        // The run config's effort, else the project's (Project › Models), else Settings.
         effort: rc
             .effort
             .clone()
+            .filter(|e| !e.is_empty())
+            .or_else(|| project.models.effort.clone().filter(|e| !e.is_empty()))
             .or_else(|| Some(env.settings.effort.clone()).filter(|e| !e.is_empty()))
             .filter(|e| env.claude.effort_levels.contains(e)),
         tools,
