@@ -112,7 +112,7 @@ struct ProjectRootView: View {
             } label: {
                 Label("Validate", systemImage: "checkmark.shield")
             }
-            .help("Check the project before a run (⌘B)")
+            .help("Check the project before a run (⇧⌘V)")
             .disabled(document.isValidating || runs.isRunning)
 
             if runs.isRunning {

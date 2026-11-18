@@ -20,7 +20,7 @@ struct ValidationView: View {
                 }
                 Spacer()
                 if document.isValidating { ProgressView().controlSize(.small) }
-                Button("Validate") { Task { await document.validate() } }.disabled(document.isValidating).help("Run the static checks (⌘B)")
+                Button("Validate") { Task { await document.validate() } }.disabled(document.isValidating).help("Run the static checks (⇧⌘V)")
                 Menu {
                     Button("Dry Run…") { document.runs.requestDryRun() }.disabled(!app.claudeAvailable || document.runs.isRunning)
                 } label: { Image(systemName: "ellipsis.circle") }

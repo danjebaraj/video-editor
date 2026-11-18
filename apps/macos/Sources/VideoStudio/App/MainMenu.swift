@@ -28,7 +28,7 @@ enum MainMenu {
             item("About Syncfusion Video Studio", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
             sep(),
             item("Settings…", #selector(AppDelegate.showSettingsWindow(_:)), ",", target: app),
-            item("App Library", #selector(AppDelegate.showLibraryWindow(_:)), "b", [.command, .shift], target: app),
+            item("App Library", #selector(AppDelegate.showLibraryWindow(_:)), "l", [.command, .shift], target: app),
             sep(),
             item("Hide Syncfusion Video Studio", #selector(NSApplication.hide(_:)), "h"),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
@@ -77,19 +77,20 @@ enum MainMenu {
         ])
 
         let fmt = add("Format", [])
-        for (title, command, key, mods) in [
-            ("Bold", "bold", "b", NSEvent.ModifierFlags.command), ("Italic", "italic", "i", .command), ("Strikethrough", "strikethrough", "x", [.command, .shift]), ("Inline Code", "code", "e", .command),
-            ("Link", "link", "k", .command),
-        ] as [(String, String, String, NSEvent.ModifierFlags)] {
-            let i = item(title, #selector(W.formatCommand(_:)), key, mods)
-            i.representedObject = command
-            fmt.addItem(i)
-        }
-        fmt.addItem(sep())
-        for (title, command) in [("Heading 1", "h1"), ("Heading 2", "h2"), ("Heading 3", "h3"), ("Bulleted List", "bullet"), ("Numbered List", "numbered"), ("Task List", "task"), ("Quote", "quote"), ("Code Block", "codeBlock"), ("Table", "table"), ("Horizontal Rule", "rule")] {
-            let i = item(title, #selector(W.formatCommand(_:)))
-            i.representedObject = command
-            fmt.addItem(i)
+        // Format commands carry their own shortcuts (FormatCommand.shortcut), so the menu and the
+        // editor agree. Toggle Task (⌘Return) stays out of the menu: as a menu shortcut it would
+        // take ⌘Return from the Claude message box, where it sends.
+        let groups: [[FormatCommand]] = [
+            [.bold, .italic, .strikethrough, .inlineCode, .link],
+            [.heading1, .heading2, .heading3, .heading4, .heading5, .heading6, .paragraph],
+            [.bulletList, .numberedList, .taskList, .blockquote, .codeBlock, .table, .formatTable, .horizontalRule],
+            [.indent, .outdent, .moveLineUp, .moveLineDown],
+        ]
+        for (n, group) in groups.enumerated() {
+            if n > 0 { fmt.addItem(sep()) }
+            for cmd in group {
+                fmt.addItem(cmd.menuItem())
+            }
         }
         fmt.addItem(sep())
         for (title, command) in [("Scene", "scene"), ("Voice-over", "vo"), ("Shot", "shot"), ("Music Brief", "music"), ("Call to Action", "cta")] {
@@ -98,7 +99,8 @@ enum MainMenu {
             fmt.addItem(i)
         }
         fmt.addItem(sep())
-        fmt.addItem(item("Insert Island", #selector(W.insertIsland(_:))))
+        let (islandKey, islandMods) = FormatCommand.island.shortcut ?? ("", [])
+        fmt.addItem(item("Insert Island", #selector(W.insertIsland(_:)), islandKey, islandMods))
 
         _ = add("View", [
             item("Show Preview", #selector(W.togglePreview(_:)), "/"),
@@ -119,8 +121,8 @@ enum MainMenu {
         ])
 
         _ = add("Project", [
-            item("Validate", #selector(W.validateProject(_:)), "b"),
-            item("Dry Run", #selector(W.dryRun(_:)), "b", [.command, .shift]),
+            item("Validate", #selector(W.validateProject(_:)), "v", [.command, .shift]),
+            item("Dry Run", #selector(W.dryRun(_:)), "r", [.command, .option]),
             sep(),
             item("Run", #selector(W.runProject(_:)), "r"),
             item("Stop", #selector(W.stopRun(_:)), "."),

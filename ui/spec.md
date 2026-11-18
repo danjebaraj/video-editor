@@ -254,7 +254,7 @@ New / open project ─▶ Write spec ◀─▶ Claude assist (edits, questions)
 
 ## 11. Pre-submission validation
 
-Validation runs on demand (⌘B, or the Validate button) and automatically before every production run. Results show in a **Validation report** with three severities: **Blocker**, **Warning** and **Info**. Each item links to the place to fix it. A run can't start with blockers, and warnings can be acknowledged per run.
+Validation runs on demand (⇧⌘V, or the Validate button) and automatically before every production run. Results show in a **Validation report** with three severities: **Blocker**, **Warning** and **Info**. Each item links to the place to fix it. A run can't start with blockers, and warnings can be acknowledged per run.
 
 ### 11.1 Static checks (no model calls)
 - **Environment**:
@@ -457,7 +457,7 @@ JSON, UTF-8, LF line endings, keys in a stable order (so diffs are readable), an
 
 - **Sidebar**: Outline (spec headings and scenes), Media (grouped by kind, with status badges, thumbnails and duration), Runs (history with status chips).
 - **Inspector tabs**: Claude (assistant chat, questions, review), Project (intent, models), Outputs (output and run configs), Validation (report), Run (live progress, results, logs).
-- **App library window** (⇧⌘B): brand presets and output config presets.
+- **App library window** (⇧⌘L): brand presets and output config presets.
 - **Visual design**:
   - Native macOS controls, SF Symbols, system fonts, and system accent color with an optional brand-tinted header.
   - Full light and dark mode.
@@ -624,10 +624,10 @@ apps/windows/
   | Action | macOS | Windows |
   |---|---|---|
   | Toggle source/preview | ⌘/ | Ctrl+/ |
-  | Validate | ⌘B | Ctrl+Shift+B |
+  | Validate | ⇧⌘V | Ctrl+Shift+B |
   | Run | ⌘R | F5 |
   | Stop | ⌘. | Shift+F5 |
-  | App Library | ⇧⌘B | Ctrl+Shift+L |
+  | App Library | ⇧⌘L | Ctrl+Shift+L |
   | Send to Claude | ⌘↩ | Ctrl+Enter |
   | Settings | ⌘, | Ctrl+, |
 

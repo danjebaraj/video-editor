@@ -85,7 +85,11 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             return !doc.assistant.isRunning && AppState.shared.claudeAvailable
         case #selector(revealRunFolder(_:)), #selector(exportLogs(_:)), #selector(copyIssueReport(_:)):
             return selectedRunFolder != nil
-        case #selector(formatCommand(_:)), #selector(insertSpecBlock(_:)), #selector(insertIsland(_:)):
+        case #selector(formatCommand(_:)), #selector(performFormatCommand(_:)):
+            // Only while the spec has focus: these carry plain shortcuts (⌘1, ⌘[, ⌥⌘↑…) that
+            // would otherwise edit the spec while you type in the Claude box or a field.
+            return !doc.showPreview && doc.editor.textView.isEditable && window?.firstResponder === doc.editor.textView
+        case #selector(insertSpecBlock(_:)), #selector(insertIsland(_:)):
             return !doc.showPreview && doc.editor.textView.isEditable
         case #selector(showSidebarTab(_:)):
             item.state = (item.representedObject as? String) == doc.sidebarTab.rawValue ? .on : .off

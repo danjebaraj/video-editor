@@ -11,7 +11,7 @@ final class LibraryWindowState: ObservableObject {
     @Published var selectedPresetID: String?
 }
 
-/// The app library window (⇧⌘B): brand presets and output config presets (spec §8, §9.1).
+/// The app library window (⇧⌘L): brand presets and output config presets (spec §8, §9.1).
 struct LibraryView: View {
     @ObservedObject var state: LibraryWindowState
 
