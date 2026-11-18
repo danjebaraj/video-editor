@@ -363,6 +363,12 @@ struct ElevenSettings: View {
                 }
                 if let r = app.keyStatus.remaining {
                     Label("The key works. \(r) of \(app.keyStatus.limit ?? 0) credits remain\(app.keyStatus.tier.map { " (\($0))" } ?? "").", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                } else if app.keyStatus.works, let missing = app.keyStatus.creditsUnavailable {
+                    // ElevenLabs accepted the key; it is limited and can't read the account's credits.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("The key works.", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                        Text("Its credits can't be shown: the key lacks the \(missing) permission (User › Read). Add it in ElevenLabs › API keys to see credits and have runs check them.").font(.caption).foregroundStyle(.secondary)
+                    }
                 } else if let e = app.keyStatus.error {
                     Label(e, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
                 }

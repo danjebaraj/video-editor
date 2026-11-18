@@ -873,6 +873,7 @@ The `video-studio` command-line tool reads the same settings and projects; see [
 | "Claude Code isn't signed in" | Run `claude` in Terminal and sign in, then click *Re-check* (Settings › Claude) |
 | "cutline is missing required tools" | Settings › cutline › *Install Dependencies* (takes a few minutes), or `cutline deps install --all` |
 | The run is blocked by the ElevenLabs key or credits | Settings › ElevenLabs: save and *Test* the key; raise the run's credit cap in Outputs › Limits |
+| **Test** says "ElevenLabs returned 401 … missing the permission user_read" | The key is valid but limited to some permissions, and can't read the account's credits. Voice-over and music still work if the key has those permissions. To see credits, edit the key at elevenlabs.io › API keys and allow **User › Read**. |
 | Media shows *Missing* | File › *Relink Media…*; add search folders for where your media lives |
 | The voice-over is too long for a scene | Ask Claude to *Tighten the script to the target length*, or lengthen the scene's Duration |
 | App recording fails, or nothing is recorded | Check the Project tab's permission rows; allow Screen Recording and Accessibility, then *Re-check* |

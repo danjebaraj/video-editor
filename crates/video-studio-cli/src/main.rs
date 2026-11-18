@@ -1050,7 +1050,10 @@ fn cmd_secret(action: &str, provider: &str, as_json: bool) -> i32 {
             json!({"present": masked.is_some(), "masked": masked})
         }),
         "test" => match (secrets.get(key_name), provider) {
-            (Ok(Some(k)), VoiceProvider::Elevenlabs) if !k.is_empty() => video_studio_core::eleven::test_key(&k, base.as_deref()).map(|s| json!({"present": true, "ok": true, "tier": s.tier, "used": s.character_count, "limit": s.character_limit, "remaining": s.remaining()})),
+            (Ok(Some(k)), VoiceProvider::Elevenlabs) if !k.is_empty() => video_studio_core::eleven::test_key(&k, base.as_deref()).map(|t| match t {
+                video_studio_core::eleven::KeyTest::Credits(s) => json!({"present": true, "ok": true, "tier": s.tier, "used": s.character_count, "limit": s.character_limit, "remaining": s.remaining()}),
+                video_studio_core::eleven::KeyTest::NoCredits { missing } => json!({"present": true, "ok": true, "credits_unavailable": missing}),
+            }),
             (Ok(Some(k)), VoiceProvider::Cartesia) if !k.is_empty() => {
                 let base = std::env::var("VIDEO_STUDIO_CARTESIA_BASE_URL").ok().filter(|s| !s.is_empty());
                 video_studio_core::eleven::cartesia::Client::new(&k, base.as_deref()).test().map(|_| json!({"present": true, "ok": true}))
@@ -1074,6 +1077,10 @@ fn cmd_secret(action: &str, provider: &str, as_json: bool) -> i32 {
                             .unwrap_or_else(|| format!("No {label} key is stored."))
                     ),
                     "test" if provider == VoiceProvider::Cartesia => println!("The key works."),
+                    "test" if v["credits_unavailable"].is_string() => println!(
+                        "The key works. Its credits can't be read: it lacks the {} permission (User › Read).",
+                        v["credits_unavailable"].as_str().unwrap_or("user_read")
+                    ),
                     "test" => println!(
                         "The key works. {} of {} credits remain ({}).",
                         v["remaining"],

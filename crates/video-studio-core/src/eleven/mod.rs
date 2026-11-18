@@ -508,9 +508,26 @@ pub fn cache_dir(library: &Utf8Path) -> Utf8PathBuf {
     crate::paths::cache_root(library).join("eleven")
 }
 
+/// What Settings › ElevenLabs › Test learns about a key.
+#[derive(Debug, Clone, PartialEq)]
+pub enum KeyTest {
+    /// The account's credits.
+    Credits(Subscription),
+    /// ElevenLabs accepted the key, but it is limited to some permissions and can't read the
+    /// account's credits. `missing` names the permission (`user_read`). Runs still work: a missing
+    /// permission for a task shows up when the task is asked for.
+    NoCredits { missing: String },
+}
+
 /// Settings › ElevenLabs › Test: checks the key against the API and returns the remaining credits.
-pub fn test_key(key: &str, base_url: Option<&str>) -> Result<Subscription> {
-    Client::new(key, base_url).subscription()
+pub fn test_key(key: &str, base_url: Option<&str>) -> Result<KeyTest> {
+    match Client::new(key, base_url).subscription() {
+        Ok(s) => Ok(KeyTest::Credits(s)),
+        Err(e) => match Client::missing_permission(&e) {
+            Some(missing) => Ok(KeyTest::NoCredits { missing }),
+            None => Err(e),
+        },
+    }
 }
 
 #[cfg(test)]

@@ -197,6 +197,8 @@ enum Helper {
         var remaining: UInt64?
         var limit: UInt64?
         var tier: String?
+        /// A key limited to some permissions works but can't read credits: the permission it lacks.
+        var creditsUnavailable: String?
         /// The key was accepted by the last Test (Cartesia reports no credits).
         var works = false
         var error: String?
@@ -224,6 +226,7 @@ enum Helper {
             s.remaining = (j["remaining"] as? NSNumber)?.uint64Value
             s.limit = (j["limit"] as? NSNumber)?.uint64Value
             s.tier = j["tier"] as? String
+            s.creditsUnavailable = j["credits_unavailable"] as? String
         } else {
             s.error = (j["error"] as? String) ?? o.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         }

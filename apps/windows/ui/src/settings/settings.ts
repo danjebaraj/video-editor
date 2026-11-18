@@ -125,7 +125,9 @@ export async function mount(root: HTMLElement) {
               pane.emit();
               try {
                 const r = await request<any>('secret.test');
-                keyTest = `The key works. ${r.remaining} of ${r.limit} credits remain (${r.tier}).`;
+                keyTest = r.credits_unavailable
+                  ? `The key works. Its credits can't be shown: the key lacks the ${r.credits_unavailable} permission (User › Read).`
+                  : `The key works. ${r.remaining} of ${r.limit} credits remain (${r.tier}).`;
               } catch (e) {
                 keyTest = errorText(e);
               }

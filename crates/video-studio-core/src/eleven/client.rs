@@ -104,6 +104,19 @@ impl Client {
         Error::Http(format!("ElevenLabs returned {status}{hint}: {}", message.trim()))
     }
 
+    /// A key limited to some permissions gets a 401 naming the one a request lacks ("The API key you
+    /// used is missing the permission user_read to execute this operation."). ElevenLabs recognised
+    /// the key, so it isn't invalid. Returns the permission's name.
+    pub fn missing_permission(error: &Error) -> Option<String> {
+        let Error::Http(message) = error else { return None };
+        if !message.contains("returned 401") {
+            return None;
+        }
+        let rest = message.split("missing the permission ").nth(1)?;
+        let name = rest.split_whitespace().next()?.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
+        (!name.is_empty()).then(|| name.to_string())
+    }
+
     fn finish(mut resp: ureq::http::Response<ureq::Body>) -> Result<Generated> {
         let status = resp.status().as_u16();
         let header = |resp: &ureq::http::Response<ureq::Body>, name: &str| {
@@ -269,5 +282,17 @@ mod tests {
         assert!(Client::fail(500, b"<html>oops</html>").to_string().contains("oops"));
         assert_eq!(urlencode("a b/ç"), "a%20b%2F%C3%A7");
         assert_eq!(Subscription { tier: "pro".into(), character_count: 400, character_limit: 1000 }.remaining(), 600);
+    }
+
+    #[test]
+    fn a_key_without_a_permission_is_not_an_invalid_key() {
+        let scoped = Client::fail(
+            401,
+            br#"{"detail":{"status":"missing_permissions","message":"The API key you used is missing the permission user_read to execute this operation."}}"#,
+        );
+        assert_eq!(Client::missing_permission(&scoped).as_deref(), Some("user_read"));
+        let invalid = Client::fail(401, br#"{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}"#);
+        assert_eq!(Client::missing_permission(&invalid), None);
+        assert_eq!(Client::missing_permission(&Client::fail(429, b"slow down")), None);
     }
 }
