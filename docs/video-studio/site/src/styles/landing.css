@@ -1,0 +1,94 @@
+/* Landing and download pages. The brand colours come from the app icon: a deep navy and an
+   orange play button. */
+:root {
+	--vs-navy: #1f2a44;
+	--vs-navy-2: #2c3a5c;
+	--vs-orange: #f26b21;
+	--vs-orange-hover: #d95a14;
+	--vs-on-orange: #ffffff;
+	--vs-hero-wash: radial-gradient(1200px 520px at 50% -120px, color-mix(in oklch, var(--vs-orange) 14%, transparent), transparent 70%);
+	--vs-panel: #ffffff;
+	--vs-panel-line: oklch(0.93 0 0);
+	--vs-panel-muted: oklch(0.975 0 0);
+}
+[data-mode="dark"] {
+	--vs-hero-wash: radial-gradient(1200px 520px at 50% -120px, color-mix(in oklch, var(--vs-orange) 20%, transparent), transparent 70%);
+	--vs-panel: oklch(0.2 0.01 260);
+	--vs-panel-line: oklch(0.3 0.01 260);
+	--vs-panel-muted: oklch(0.24 0.01 260);
+}
+
+.vs-btn-download {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	border-radius: 0.625rem;
+	background: var(--vs-orange);
+	color: var(--vs-on-orange);
+	font-weight: 600;
+	text-decoration: none;
+	box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 4px 14px -4px color-mix(in oklch, var(--vs-orange) 60%, transparent);
+	transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.vs-btn-download:hover { background: var(--vs-orange-hover); color: var(--vs-on-orange); }
+.vs-btn-download:active { transform: translateY(1px); }
+.vs-btn-download:focus-visible { outline: 2px solid var(--vs-orange); outline-offset: 2px; }
+
+.vs-hero { background: var(--vs-hero-wash); }
+
+/* A drawing of the app window, made of plain boxes. */
+.vs-window {
+	border-radius: 14px;
+	border: 1px solid var(--vs-panel-line);
+	background: var(--vs-panel);
+	box-shadow: 0 30px 80px -30px rgb(15 23 42 / 0.35), 0 8px 24px -12px rgb(15 23 42 / 0.2);
+	overflow: hidden;
+	text-align: start;
+}
+.vs-window-bar {
+	display: flex; align-items: center; gap: 6px;
+	height: 38px; padding: 0 14px;
+	border-bottom: 1px solid var(--vs-panel-line);
+	background: var(--vs-panel-muted);
+}
+.vs-dot { width: 11px; height: 11px; border-radius: 50%; }
+.vs-window-grid { display: grid; grid-template-columns: 170px 1fr 230px; min-height: 340px; }
+.vs-pane { min-width: 0; padding: 14px; font-size: 12px; line-height: 1.55; }
+.vs-pane + .vs-pane { border-inline-start: 1px solid var(--vs-panel-line); }
+.vs-pane-side { background: var(--vs-panel-muted); }
+.vs-label { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted-foreground, #6b7280); font-weight: 600; margin-bottom: 6px; }
+.vs-row { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; color: var(--color-foreground); }
+.vs-row.is-active { background: color-mix(in oklch, var(--vs-orange) 14%, transparent); }
+.vs-code { font-family: "JetBrains Mono Variable", ui-monospace, monospace; font-size: 11.5px; white-space: pre; overflow: hidden; }
+.vs-code .h { color: var(--vs-orange); font-weight: 700; }
+.vs-code .k { font-weight: 700; }
+.vs-code .m { color: #2d9cdb; }
+.vs-code .f { opacity: 0.55; }
+.vs-stage { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.vs-stage .bar { flex: 1; height: 5px; border-radius: 3px; background: var(--vs-panel-line); overflow: hidden; }
+.vs-stage .bar > i { display: block; height: 100%; background: var(--vs-orange); border-radius: 3px; }
+.vs-check { width: 14px; height: 14px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 9px; color: #fff; background: #16a34a; flex: none; }
+.vs-wait { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--vs-panel-line); flex: none; }
+.vs-run { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--vs-orange); border-top-color: transparent; flex: none; animation: vs-spin 1s linear infinite; }
+@keyframes vs-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .vs-run { animation: none; } }
+
+.vs-feature-icon {
+	width: 40px; height: 40px; border-radius: 10px;
+	display: grid; place-items: center;
+	background: color-mix(in oklch, var(--vs-orange) 12%, transparent);
+	color: var(--vs-orange);
+}
+.vs-step-num {
+	width: 30px; height: 30px; border-radius: 50%;
+	display: grid; place-items: center;
+	background: var(--vs-navy); color: #fff; font-weight: 700; font-size: 13px;
+}
+[data-mode="dark"] .vs-step-num { background: var(--vs-orange); }
+.vs-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-card); font-size: 13px; font-weight: 500; }
+.vs-cta-band { background: linear-gradient(135deg, var(--vs-navy), var(--vs-navy-2)); color: #fff; }
+
+@media (max-width: 860px) {
+	.vs-window-grid { grid-template-columns: 1fr; }
+	.vs-pane-side, .vs-pane-inspector { display: none; }
+}

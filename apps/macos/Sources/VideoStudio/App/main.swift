@@ -2,6 +2,7 @@ import AppKit
 
 #if DEBUG
 SelfTest.prepareEnvironment()
+DocShots.prepareEnvironment()
 #endif
 
 MainActor.assumeIsolated {

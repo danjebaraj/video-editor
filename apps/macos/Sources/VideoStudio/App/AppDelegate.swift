@@ -46,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SelfTest.run()
             return
         }
+        if ProcessInfo.processInfo.environment["VS_DOCSHOTS"] != nil {
+            DocShots.run()
+            return
+        }
         #endif
         if !pendingOpens.isEmpty {
             pendingOpens.forEach { open($0) }

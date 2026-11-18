@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "video-studio-docs",
+  "compatibility_date": "2026-11-17",
+  // The site is static; the Worker only answers /releases/* (downloads from R2).
+  "main": "./worker/index.ts",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/releases/*"]
+  },
+  "r2_buckets": [
+    { "binding": "RELEASES", "bucket_name": "video-studio-releases" }
+  ]
+}

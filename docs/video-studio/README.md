@@ -2,6 +2,8 @@
 
 A desktop app and a command-line tool for preparing videos with Claude Code and cutline. You describe the video in a Markdown spec, refine it with Claude, attach media by reference, choose a brand preset and outputs, validate, then submit a run in which Claude Code drives `cutline` to render the outputs.
 
+**Using the app:** see the [User Guide](USER_GUIDE.md), which covers the workflow, writing specs, brand and output presets, runs and every setting. This README is about building and the CLI.
+
 The specification is `ui/spec.md`. Decisions made while building it are in `docs/decisions.md` (2026-11-14, Syncfusion Video Studio).
 
 ## Parts
@@ -29,15 +31,45 @@ cargo build --release -p video-studio-cli     # the CLI alone
 apps/macos/build.sh                           # the app (Release)
 apps/macos/build.sh debug                     # Debug, with the self test and test doubles
 apps/macos/build.sh install                   # Release, copied to /Applications
+apps/macos/build.sh signing                   # fill in Signing.local.xcconfig from your certificates
+apps/macos/build.sh distribute                # Developer ID, notarized and stapled zip in build/dist/
+apps/macos/build.sh docshots                  # retake the screenshots in USER_GUIDE.md (images/)
 ```
 
 `build.sh` builds the core, generates the Swift bindings into `apps/macos/Generated/`, generates the Xcode project and builds the app. The bundle carries the `video-studio` helper in `Contents/Helpers/`.
+
+### User guide screenshots
+
+The pictures in [USER_GUIDE.md](USER_GUIDE.md) (`images/`) are taken from the real app, not drawn. After a change to the UI, `apps/macos/build.sh docshots` retakes them all: it builds the Debug app, makes sample media for a made-up product ("Acme Diagrams") in `/Users/Shared/Demo`, and runs the app in a screenshot mode (`Sources/VideoStudio/App/DocShots.swift`) that builds a polished demo project, talks to the scripted Claude, runs the real cutline, and captures each window with ScreenCaptureKit. The app opens and closes its windows on screen for about a minute. Allow Screen Recording for the app you run it from (Terminal, say) or the pictures fall back to a plainer drawing without sheets or video. It uses its own library and a stand-in API key, and restores your recent projects. Then `npm run deploy` in `site/` publishes them with the guide.
 
 ### Signing (macOS)
 
 By default the app is signed ad hoc, which needs no certificate. macOS ties the recording permissions to the signature, and an ad-hoc signature changes with every build, so the permissions must be allowed again after each one.
 
-To keep them across builds, sign with a certificate on the Mac: copy `apps/macos/Signing.local.xcconfig.example` to `apps/macos/Signing.local.xcconfig` and set `CODE_SIGN_IDENTITY` and `DEVELOPMENT_TEAM` (`security find-identity -v -p codesigning` lists the certificates). The file is not in source control, so each machine uses its own. The app and its helpers are signed with it in every `build.sh` mode and when building from Xcode.
+To keep them across builds, sign with your Apple developer certificates:
+
+1. In Xcode → Settings → Accounts, add your Apple ID. Then select the team → **Manage Certificates…** → **+** → **Apple Development**. To share the app with others, also add **Developer ID Application** (only the team's Account Holder can create it; anyone else imports a `.p12` exported for them).
+2. Run `apps/macos/build.sh signing`. It reads the certificates from the keychain and writes `apps/macos/Signing.local.xcconfig` (not in source control, so each machine uses its own; the previous file is kept as `.bak`). Everyday builds use the Apple Development certificate, or the Developer ID one if that is the only one. `DEVELOPMENT_TEAM` comes from the certificate. To edit the file by hand, start from `Signing.local.xcconfig.example`.
+3. Run `apps/macos/build.sh` or `install` as before. The app, `MarkdownCore` and the helpers are signed with the certificate in every `build.sh` mode and when building from Xcode.
+
+#### Distributing (Developer ID + notarization)
+
+`apps/macos/build.sh distribute` builds Release into `build/DD-dist`:
+
+- Signs with `VS_DISTRIBUTION_IDENTITY`, with the hardened runtime and secure timestamps (helpers included) and without `get-task-allow`. The app's only entitlement is `com.apple.security.automation.apple-events` (`Resources/VideoStudio.entitlements`), which lets production runs operate other apps.
+- Verifies the signature, then submits it to Apple's notary service with the `notarytool` keychain profile `VS_NOTARY_PROFILE` (default `videostudio-notary`).
+- Staples the ticket, checks it with Gatekeeper, and writes `apps/macos/build/dist/Syncfusion-Video-Studio-<version>.zip`.
+
+Create the notary profile once. It asks for an app-specific password (account.apple.com → Sign-In and Security → App-Specific Passwords) and keeps it in the keychain:
+
+```bash
+xcrun notarytool store-credentials videostudio-notary --apple-id <your Apple ID> --team-id <Team ID>
+```
+
+Without the profile, `distribute` stops after signing and says so. If Apple rejects the submission, it prints the notary log.
+
+The distributed app needs macOS 26 and an Apple silicon Mac: the Rust core is built for the building Mac's architecture only (`ONLY_ACTIVE_ARCH`).
+
 
 ## The app
 
