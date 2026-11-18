@@ -98,7 +98,7 @@ extension EditorController {
             insertTable(rows: 1, columns: 2)
             return
         }
-        if ["scene", "vo", "shot", "music", "cta"].contains(cmd.id) {
+        if ["scene", "record", "vo", "shot", "music", "cta"].contains(cmd.id) {
             insertSpecBlock(cmd.id)
             return
         }

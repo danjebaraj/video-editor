@@ -24,6 +24,7 @@ public enum SlashCommandCatalog {
     public static let all: [SlashCommand] = [
         // Structured blocks of a video spec, first because they are what a spec is made of.
         SlashCommand("scene", "Scene", aliases: ["section"], symbol: "film"),
+        SlashCommand("record", "Recorded app scene", aliases: ["recording", "capture", "screen"], symbol: "record.circle"),
         SlashCommand("vo", "Voice-over", aliases: ["voiceover", "narration", "script"], symbol: "waveform"),
         SlashCommand("shot", "Shot", aliases: ["clip"], symbol: "camera"),
         SlashCommand("music", "Music brief", aliases: ["soundtrack"], symbol: "music.note"),

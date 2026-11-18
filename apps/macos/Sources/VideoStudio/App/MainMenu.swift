@@ -93,7 +93,7 @@ enum MainMenu {
             }
         }
         fmt.addItem(sep())
-        for (title, command) in [("Scene", "scene"), ("Voice-over", "vo"), ("Shot", "shot"), ("Music Brief", "music"), ("Call to Action", "cta")] {
+        for (title, command) in [("Scene", "scene"), ("Recorded App Scene", "record"), ("Voice-over", "vo"), ("Shot", "shot"), ("Music Brief", "music"), ("Call to Action", "cta")] {
             let i = item("Insert \(title)", #selector(W.insertSpecBlock(_:)))
             i.representedObject = command
             fmt.addItem(i)
