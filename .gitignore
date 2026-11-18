@@ -13,3 +13,4 @@
 /apps/macos/VideoStudio.xcodeproj/
 # This machine's code signing certificate (see apps/macos/Signing.xcconfig)
 /apps/macos/Signing.local.xcconfig
+/apps/macos/Signing.local.xcconfig.bak

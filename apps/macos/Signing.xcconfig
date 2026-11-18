@@ -4,7 +4,7 @@
 // Accessibility permissions to the signature, and an ad-hoc signature changes with every build, so
 // those permissions must be allowed again after each one.
 //
-// To keep permissions across builds, sign with a certificate of your own: copy
+// To keep permissions across builds, sign with a certificate of your own: run `./build.sh signing`, or copy
 // Signing.local.xcconfig.example to Signing.local.xcconfig and fill it in. That file is not in
 // source control, so each machine can use its own certificate.
 CODE_SIGN_STYLE = Manual

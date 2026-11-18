@@ -1,10 +1,20 @@
 // Copy to Signing.local.xcconfig (not in source control) and fill in.
 //
-// List this Mac's certificates with:
+// Add your certificates once, in Xcode → Settings → Accounts → (your Apple ID) → Manage
+// Certificates → + → "Apple Development" (and "Developer ID Application" to share the app).
+// Then list this Mac's certificates with:
 //   security find-identity -v -p codesigning
 //
-// CODE_SIGN_IDENTITY takes the certificate's name ("Developer ID Application: Your Name (TEAMID)")
-// or the 40-character hash printed before it. DEVELOPMENT_TEAM is the ID in the parentheses of a
-// Developer ID certificate.
-CODE_SIGN_IDENTITY = Developer ID Application: Your Name (TEAMID)
+// Everyday builds (./build.sh, ./build.sh debug, ./build.sh install) are signed with
+// CODE_SIGN_IDENTITY. It takes the certificate's name or the 40-character hash printed before it.
+// DEVELOPMENT_TEAM is your 10-character Team ID (developer.apple.com → Membership details). For an
+// Apple Development certificate the ID in parentheses is a personal ID, not the Team ID.
+CODE_SIGN_IDENTITY = Apple Development: Your Name (PERSONALID)
 DEVELOPMENT_TEAM = TEAMID
+
+// `./build.sh distribute` signs with this Developer ID certificate, turns on the hardened
+// runtime, notarizes with this notarytool keychain profile and staples the ticket. Create the
+// profile once (it asks for an app-specific password from account.apple.com):
+//   xcrun notarytool store-credentials videostudio-notary --apple-id you@example.com --team-id TEAMID
+VS_DISTRIBUTION_IDENTITY = Developer ID Application: Your Name (TEAMID)
+VS_NOTARY_PROFILE = videostudio-notary
