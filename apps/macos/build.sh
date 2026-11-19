@@ -9,6 +9,11 @@
 #   ./build.sh signing    Fill in Signing.local.xcconfig from this Mac's Apple certificates
 #   ./build.sh distribute Release build signed with Developer ID, hardened runtime, notarized and
 #                         stapled → build/dist/Syncfusion-Video-Studio-<version>.zip
+#
+# Every build except distribute, docshots and signing first builds the latest cutline into
+# <repo>/bin and links it as ~/.local/bin/cutline (scripts/build-and-release.sh), then checks
+# that the app will use that cutline, and stops with the fix if something else would win
+# (Settings › cutline, or another cutline earlier on PATH). VS_SKIP_CUTLINE=1 skips both.
 setopt pipefail
 cd "${0:A:h}"
 
@@ -24,16 +29,45 @@ build() { # $1 = configuration, then extra build settings (NAME=value) for xcode
     | grep -E "error:|warning: unre|\*\* BUILD" | sort -u | head -80
   [[ -d "$DD/Build/Products/$config/$APP_NAME" ]]
 }
+REPO="${0:A:h:h:h}"
+build_cutline() { # the latest cutline in <repo>/bin, linked as ~/.local/bin/cutline
+  [[ -n $VS_SKIP_CUTLINE ]] && { echo "Skipping the cutline build (VS_SKIP_CUTLINE)"; return 0; }
+  echo "› Building the latest cutline"
+  "$REPO/scripts/build-and-release.sh" || { echo "✘ the cutline build failed" >&2; return 1; }
+}
+check_cutline() { # $1 = configuration. The app must pick the cutline just built.
+  [[ -n $VS_SKIP_CUTLINE ]] && return 0
+  local profile=debug; [[ $1 == Release ]] && profile=release
+  local vs="$REPO/target/$profile/video-studio" want got
+  want="${$(realpath "$REPO/bin/cutline"):-$REPO/bin/cutline}"
+  got=$("$vs" cutline --json | plutil -extract cutline.path raw -o - - 2>/dev/null)
+  if [[ $got == "$want" ]]; then
+    echo "✔ the app uses $want"
+    return 0
+  fi
+  echo "✘ the app would use ${got:-no cutline} instead of the one just built ($want)." >&2
+  local custom=$("$vs" cutline --json | plutil -extract settings_path raw -o - - 2>/dev/null)
+  if [[ -n $custom ]]; then
+    echo "  Settings › cutline is set to $custom: clear that field (or set it to $want)." >&2
+  elif [[ -n $got ]]; then
+    echo "  $got comes first on your PATH: remove it, or put ~/.local/bin before it." >&2
+  fi
+  return 1
+}
 setting() { # value of NAME in Signing.local.xcconfig
   [[ -f Signing.local.xcconfig ]] && sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p" Signing.local.xcconfig | tail -1
 }
 
 case "$1" in
   debug)
-    build Debug
+    build_cutline || exit 1
+    build Debug || exit 1
+    check_cutline Debug
     ;;
   selftest)
+    build_cutline || exit 1
     build Debug || exit 1
+    check_cutline Debug || exit 1
     scratch="$(mktemp -d)/vs-selftest"
     mkdir -p "$scratch"
     VS_SELFTEST="$scratch" "build/DD/Build/Products/Debug/$APP_NAME/Contents/MacOS/Syncfusion Video Studio"
@@ -42,7 +76,9 @@ case "$1" in
     exit $code
     ;;
   install)
+    build_cutline || exit 1
     build Release || exit 1
+    check_cutline Release || exit 1
     src="build/DD/Build/Products/Release/$APP_NAME"
     dest="/Applications/$APP_NAME"
     if pgrep -xq "Syncfusion Video Studio"; then
@@ -110,6 +146,8 @@ case "$1" in
     echo "✔ notarized and stapled: $PWD/$zip"
     ;;
   *)
-    build Release
+    build_cutline || exit 1
+    build Release || exit 1
+    check_cutline Release
     ;;
 esac

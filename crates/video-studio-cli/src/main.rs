@@ -163,12 +163,49 @@ enum Command {
     },
     /// Print the JSON Schema of the .cutproj project file
     Schema,
+    /// Show which cutline the app uses (Settings › cutline, PATH, then the repo), and whether
+    /// it has `cutline still` for HEIC/HEIF photos. Exits 1 when none is found.
+    Cutline {
+        #[arg(long)]
+        json: bool,
+    },
     /// Pre-tool permission hook for Claude Code (reads the tool call on stdin)
     #[command(hide = true)]
     Hook {
         #[arg(long)]
         policy: Utf8PathBuf,
     },
+}
+
+fn cmd_cutline(json: bool) -> i32 {
+    let settings = video_studio_core::settings::Settings::load(&library());
+    let found = video_studio_core::claude::locate::find_cutline(&settings.cutline_path, &settings.cutline_repo);
+    if json {
+        let v = serde_json::json!({
+            "cutline": found,
+            "settings_path": settings.cutline_path,
+            "settings_repo": settings.cutline_repo,
+        });
+        println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+    } else {
+        match &found {
+            Some(c) => println!(
+                "{} ({}){}",
+                c.path,
+                c.version,
+                if c.still { "" } else { " — an older build without `cutline still`" }
+            ),
+            None => println!("cutline wasn't found"),
+        }
+        if !settings.cutline_path.trim().is_empty() {
+            println!("Settings › cutline path: {}", settings.cutline_path.trim());
+        }
+    }
+    if found.is_some() {
+        0
+    } else {
+        1
+    }
 }
 
 fn library() -> Utf8PathBuf {
@@ -270,6 +307,7 @@ fn main() {
             println!("{}", serde_json::to_string_pretty(&project::json_schema()).unwrap_or_default());
             0
         }
+        Command::Cutline { json } => cmd_cutline(json),
         Command::Hook { policy } => cmd_hook(&policy),
     };
     std::process::exit(code);

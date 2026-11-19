@@ -166,10 +166,19 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     });
     let spec_path = spec_file(&dir);
     paths::write_atomic(&spec_path, request.spec.as_bytes())?;
+    // Only a cutline with `still` can make copies; an older build is named in the prompt so
+    // Claude tells the user to update it instead of trying commands that can't work (BUG-0002).
+    let (cutline, old_cutline) = match &request.cutline {
+        Some(c) if crate::claude::locate::has_still(c) => (Some(c.clone()), None),
+        Some(c) => (None, Some(c.clone())),
+        None => (None, None),
+    };
     // Photos Claude can't open get JPEG copies inside the session folder, which it already reads
     let mut media = request.media.clone();
-    if let Some(cutline) = &request.cutline {
+    if let Some(cutline) = &cutline {
         crate::viewable::ensure_viewable_copies(&mut media, &dir, cutline);
+        // the one folder `cutline still` may write to, so Claude never looks for another
+        std::fs::create_dir_all(dir.join(crate::viewable::CLAUDE_COPIES_DIR))?;
     }
     let project_summary = format!("{}{}", request.project_summary, crate::run::prompt::viewable_list(&media));
     let read_paths: Vec<Utf8PathBuf> = request.read_paths.iter().filter(|p| p.exists()).cloned().collect();
@@ -185,10 +194,10 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         read_paths: policy_reads,
         write_files: Some(vec![spec_path.clone()]),
         // only `cutline still`, for JPEG copies of HEIC/HEIF photos outside the media list
-        cutline: request.cutline.clone(),
+        cutline: cutline.clone(),
         helper: None,
         capture: false,
-        path_dirs: request.cutline.iter().filter_map(|c| c.parent().map(Utf8Path::to_path_buf)).collect(),
+        path_dirs: cutline.iter().filter_map(|c| c.parent().map(Utf8Path::to_path_buf)).collect(),
         web_access: request.web_access,
         log: None,
     };
@@ -206,7 +215,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     if request.web_access {
         tools.extend(["WebSearch".to_string(), "WebFetch".to_string()]);
     }
-    if request.cutline.is_some() {
+    if cutline.is_some() {
         tools.push("Bash".to_string());
     }
     let options = ClaudeOptions {
@@ -227,7 +236,11 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
             &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
             &reference_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
             request.web_access,
-            request.cutline.as_deref(),
+            match (&cutline, &old_cutline) {
+                (Some(c), _) => crate::run::prompt::HeicTool::Still(c),
+                (None, Some(c)) => crate::run::prompt::HeicTool::Outdated(c),
+                (None, None) => crate::run::prompt::HeicTool::None,
+            },
         ),
         settings,
         add_dirs: read_paths

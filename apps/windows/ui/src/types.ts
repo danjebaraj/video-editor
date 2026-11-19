@@ -78,7 +78,7 @@ export interface ResolvedOutput {
 }
 
 export interface ClaudeInfo { path: string; version: string; version_text: string; effort_levels: string[]; supported: boolean; git_bash?: string }
-export interface CutlineInfo { path: string; version: string }
+export interface CutlineInfo { path: string; version: string; still?: boolean }
 export interface DoctorSummary { ok: boolean; missing_required: string[]; missing_optional: string[] }
 export interface Environment {
   claude: ClaudeInfo | null;

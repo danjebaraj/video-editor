@@ -208,6 +208,9 @@ impl Policy {
         }
         let segments = match split_commands(command) {
             Ok(s) => s,
+            Err(why) if self.mode == Mode::Assistant => {
+                return Decision::Deny(format!("{why} {}", self.still_usage()))
+            }
             Err(why) => return Decision::Deny(format!("{why} Run cutline (or `video-studio eleven` / `video-studio capture`) as a plain command, one per call, with no pipes, redirections or substitutions.")),
         };
         if segments.is_empty() {
@@ -269,9 +272,12 @@ impl Policy {
     fn check_command(&self, argv: &[String]) -> Result<(), String> {
         let arg0 = &argv[0];
         let only = if self.mode == Mode::Assistant {
-            "The spec assistant can only run `cutline still`, to make a JPEG copy of a HEIC/HEIF photo."
+            format!(
+                "The spec assistant can only run `cutline still`, to make a JPEG copy of a HEIC/HEIF photo. {}",
+                self.still_usage()
+            )
         } else {
-            "Only cutline, `video-studio eleven` and `video-studio capture` can be run here."
+            "Only cutline, `video-studio eleven` and `video-studio capture` can be run here.".to_string()
         };
         let Some(exe) = self.resolve_executable(arg0) else {
             return Err(format!("`{arg0}` isn't an allowed command. {only}"));
@@ -318,8 +324,12 @@ impl Policy {
         if self.mode == Mode::DryRun && CUTLINE_DRY_RUN_DENIED.contains(&sub) {
             return Err(format!("`cutline {sub}` isn't available in a dry run: a dry run validates and reviews, it never renders finals. Use `cutline validate`, `cutline expand`, `cutline cues` and `cutline review`."));
         }
-        // Output paths must stay in the run folder.
         let rest = &args[i + 1..];
+        // The assistant's own, stricter check first: its message names the exact command.
+        if self.mode == Mode::Assistant {
+            self.check_still(rest)?;
+        }
+        // Output paths must stay in the run folder.
         let mut k = 0;
         while k < rest.len() {
             let a = rest[k].as_str();
@@ -341,6 +351,17 @@ impl Policy {
             self.check_still(rest)?;
         }
         Ok(())
+    }
+
+    /// The one command the spec assistant may run, written out the way it must be typed, for
+    /// denial messages: Claude copies it instead of guessing again (BUG-0002).
+    fn still_usage(&self) -> String {
+        let cutline = self.cutline.as_ref().map(|c| shell_quote(c.as_str())).unwrap_or_else(|| "cutline".into());
+        let copies = self.work_dir.join(crate::viewable::CLAUDE_COPIES_DIR);
+        format!(
+            "Run exactly this, one photo per command, with the photo's full path and a plain file name filled in and no variables, `$(…)`, `~`, pipes, `&&` or other folders: {cutline} still '<photo>' --out {}",
+            shell_quote(copies.join("<name>.jpg").as_str())
+        )
     }
 
     /// `cutline still <photo> --out <file>`: the photo must be one Claude may read; the spec
@@ -377,8 +398,9 @@ impl Policy {
             let ok = out.map(|o| self.resolve(o)).is_some_and(|o| paths::is_inside(&o, &copies) && o != copies);
             if !ok {
                 return Err(format!(
-                    "`cutline still` must write its copy into {}/ in your working folder, with --out.",
-                    crate::viewable::CLAUDE_COPIES_DIR
+                    "`cutline still` must write its copy into {}/ in your working folder, with --out. {}",
+                    crate::viewable::CLAUDE_COPIES_DIR,
+                    self.still_usage()
                 ));
             }
         }
@@ -1050,6 +1072,34 @@ mod tests {
         let mut none = f.policy.clone();
         none.cutline = None;
         assert!(denied(bash(&none, &ok)).contains("Shell commands aren't available"));
+    }
+
+    /// BUG-0002: the two commands Claude tried (a variable for a temporary folder, then a copy
+    /// outside photo-copies/) are denied with the exact command to run instead.
+    #[test]
+    fn assistant_still_denials_spell_out_the_command() {
+        let f = fx(Mode::Assistant);
+        let p = &f.policy;
+        let cutline = shell_quote(p.cutline.as_ref().unwrap().as_str());
+        let photo = f.media.join("IMG_7206.HEIC");
+        std::fs::write(&photo, b"x").unwrap();
+        let usage =
+            format!("{cutline} still '<photo>' --out {}", shell_quote(f.run.join("photo-copies/<name>.jpg").as_str()));
+        let tmp_var = format!("{cutline} still '{photo}' --out \"$TMPDIR/heic/IMG_7206.jpg\"");
+        let why = denied(bash(p, &tmp_var));
+        assert!(why.contains("variable") && why.contains(&usage), "{why}");
+        assert!(!why.contains("video-studio eleven"), "{why}");
+        let tmp = format!("{cutline} still '{photo}' --out /tmp/heic/IMG_7206.jpg");
+        let why = denied(bash(p, &tmp));
+        assert!(why.contains("photo-copies/ in your working folder") && why.contains(&usage), "{why}");
+        let why = denied(bash(p, "sips -s format jpeg x.heic --out /tmp/x.jpg"));
+        assert!(why.contains("isn't an allowed command") && why.contains(&usage), "{why}");
+        // the suggested form, filled in, is allowed
+        let filled = format!(
+            "{cutline} still '{photo}' --out {}",
+            shell_quote(f.run.join("photo-copies/IMG_7206.jpg").as_str())
+        );
+        assert_eq!(bash(p, &filled), Decision::Allow, "{filled}");
     }
 
     #[test]

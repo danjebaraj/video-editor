@@ -369,6 +369,44 @@ pub fn estimate_claude_cost(
     (mid * 0.6, mid * 2.5)
 }
 
+/// `cutline doctor`'s findings: required tools missing block a run; optional ones are info.
+fn doctor_issues(c: &mut Ctx, env: &dyn EnvProbe, info: &CutlineInfo) {
+    match env.doctor(info) {
+        None => c.add(
+            "cutline_doctor",
+            None,
+            Severity::Blocker,
+            "environment",
+            "`cutline doctor` didn't run".into(),
+            Some(format!("Run `{} doctor` in Terminal to see why.", info.path)),
+            FixLink::target("settings", "cutline"),
+        ),
+        Some(d) => {
+            if !d.ok {
+                let what = if d.missing_required.is_empty() {
+                    "see Settings › cutline for the report".to_string()
+                } else {
+                    d.missing_required.join(", ")
+                };
+                c.add("cutline_doctor", None, Severity::Blocker, "environment", "cutline is missing required tools".into(), Some(format!("Missing: {what}. Use Install Dependencies in Settings › cutline (`cutline deps install --all`).")), FixLink::target("settings", "cutline"));
+            } else if !d.missing_optional.is_empty() {
+                c.add(
+                    "cutline_optional",
+                    None,
+                    Severity::Info,
+                    "environment",
+                    "Some optional cutline tools aren't installed".into(),
+                    Some(format!(
+                        "Not installed: {}. They are only needed for HTML graphics, captions from speech or reframing.",
+                        d.missing_optional.join(", ")
+                    )),
+                    FixLink::target("settings", "cutline"),
+                );
+            }
+        }
+    }
+}
+
 fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
     let env = input.env;
     match env.claude() {
@@ -430,29 +468,19 @@ fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, ne
             Some("Set the cutline path in Settings › cutline, or put `cutline` on your PATH.".into()),
             FixLink::target("settings", "cutline"),
         ),
-        Some(info) => match env.doctor(&info) {
-            None => c.add(
-                "cutline_doctor",
+        Some(info) if !info.still => {
+            c.add(
+                "cutline_outdated",
                 None,
-                Severity::Blocker,
+                Severity::Warning,
                 "environment",
-                "`cutline doctor` didn't run".into(),
-                Some(format!("Run `{} doctor` in Terminal to see why.", info.path)),
+                "cutline is an older build that can't convert HEIC/HEIF photos".into(),
+                Some(format!("{} has no `cutline still`, so Claude can't look at iPhone photos. Update it (rebuild or reinstall), or point Settings › cutline at a newer build.", info.path)),
                 FixLink::target("settings", "cutline"),
-            ),
-            Some(d) => {
-                if !d.ok {
-                    let what = if d.missing_required.is_empty() {
-                        "see Settings › cutline for the report".to_string()
-                    } else {
-                        d.missing_required.join(", ")
-                    };
-                    c.add("cutline_doctor", None, Severity::Blocker, "environment", "cutline is missing required tools".into(), Some(format!("Missing: {what}. Use Install Dependencies in Settings › cutline (`cutline deps install --all`).")), FixLink::target("settings", "cutline"));
-                } else if !d.missing_optional.is_empty() {
-                    c.add("cutline_optional", None, Severity::Info, "environment", "Some optional cutline tools aren't installed".into(), Some(format!("Not installed: {}. They are only needed for HTML graphics, captions from speech or reframing.", d.missing_optional.join(", "))), FixLink::target("settings", "cutline"));
-                }
-            }
-        },
+            );
+            doctor_issues(c, env, &info);
+        }
+        Some(info) => doctor_issues(c, env, &info),
     }
     if needs_audio {
         let cartesia = input.settings.voice_provider == crate::eleven::VoiceProvider::Cartesia
@@ -1406,7 +1434,7 @@ impl Default for FakeEnv {
                 git_bash: Some("bash".into()),
             }),
             signed_in: Some(true),
-            cutline: Some(CutlineInfo { path: "/bin/cutline".into(), version: "0.1.0".into() }),
+            cutline: Some(CutlineInfo { path: "/bin/cutline".into(), version: "0.1.0".into(), still: true }),
             doctor: Some(DoctorSummary { ok: true, ..Default::default() }),
             free: Some(500_000_000_000),
             writable: true,
@@ -1714,6 +1742,16 @@ mod tests {
         f.env = FakeEnv::default();
         f.env.cutline = None;
         assert!(has(&f.run(), "cutline_missing", Severity::Blocker));
+        // BUG-0002: an old build without `cutline still` is a warning, and doctor still runs
+        f.env = FakeEnv::default();
+        f.env.cutline.as_mut().unwrap().still = false;
+        let r = f.run();
+        assert!(has(&r, "cutline_outdated", Severity::Warning));
+        assert!(!has(&r, "cutline_doctor", Severity::Blocker));
+        f.env.doctor = None;
+        assert!(has(&f.run(), "cutline_doctor", Severity::Blocker));
+        f.env = FakeEnv::default();
+        assert!(!has(&f.run(), "cutline_outdated", Severity::Warning));
         f.env = FakeEnv::default();
         f.env.doctor =
             Some(DoctorSummary { ok: false, missing_required: vec!["filter xfade".into()], ..Default::default() });

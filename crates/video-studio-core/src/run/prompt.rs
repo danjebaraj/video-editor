@@ -19,6 +19,8 @@ pub struct PromptInput<'a> {
     pub exports: &'a Value,
     pub manifest: &'a [ManifestEntry],
     pub cutline_guide: &'a str,
+    /// Whether the cutline has `cutline still` (BUG-0002); older builds can't convert HEIC/HEIF.
+    pub cutline_still: bool,
     pub eleven_available: bool,
     /// Who speaks the voice-over (Settings › Voice), and whether Cartesia's key is stored.
     pub voice_provider: crate::eleven::VoiceProvider,
@@ -416,7 +418,11 @@ pub fn system_prompt(input: &PromptInput) -> String {
 {}         - outputs.json — the deliverables for this run and the matching cutline `target` and `exports`.\n\
          - run.json — the resolved run settings.\n\n",
         input.folder,
-        crate::viewable::on_demand_note("cutline"),
+        if input.cutline_still {
+            crate::viewable::on_demand_note("cutline", crate::viewable::CLAUDE_COPIES_DIR)
+        } else {
+            "Other HEIC/HEIF photos can't be opened in this run: this cutline is an older build without `cutline still`. Don't try other ways to convert them; if the spec needs one, say so in your report.".to_string()
+        },
         if p.brand.is_some() { "         - brand/default.json — the brand as a cutline brand file; brand-preset.json — the brand preset as the user entered it.\n".trim_start() } else { "" }
     ));
     s.push_str("## What you must do\n");
@@ -558,6 +564,16 @@ pub fn viewable_list(manifest: &[ManifestEntry]) -> String {
     }
 }
 
+/// What the spec assistant can use to open a HEIC/HEIF photo outside the media list.
+#[derive(Debug, Clone, Copy)]
+pub enum HeicTool<'a> {
+    /// A cutline with `cutline still`: the only shell command the assistant may run.
+    Still(&'a Utf8Path),
+    /// A cutline from before `still` existed (BUG-0002): no shell; Claude asks for an update.
+    Outdated(&'a Utf8Path),
+    None,
+}
+
 /// The spec assistant's system prompt (spec §4.3).
 pub fn assistant_system_prompt(
     folder: &Utf8Path,
@@ -565,7 +581,7 @@ pub fn assistant_system_prompt(
     read_paths: &[String],
     reference_paths: &[String],
     web_access: bool,
-    cutline: Option<&Utf8Path>,
+    heic: HeicTool<'_>,
 ) -> String {
     let mut extra = if read_paths.is_empty() {
         String::new()
@@ -579,13 +595,26 @@ pub fn assistant_system_prompt(
         ));
     }
     const PREVIEWS: &str = crate::viewable::PREVIEWS_DIR;
-    let (shell, heic_more) = match cutline {
-        Some(c) => (
+    let no_shell = "You can't run shell commands or edit other files; such attempts are denied automatically.";
+    let (shell, heic_more) = match heic {
+        HeicTool::Still(c) => (
             "You can't edit other files, and the only shell command you may run is `cutline still` as described next; anything else is denied automatically.".to_string(),
-            format!(" {}", crate::viewable::on_demand_note(&crate::claude::broker::shell_quote(c.as_str()))),
+            format!(
+                " {}",
+                crate::viewable::on_demand_note(
+                    &crate::claude::broker::shell_quote(c.as_str()),
+                    folder.join(crate::viewable::CLAUDE_COPIES_DIR).as_ref()
+                )
+            ),
         ),
-        None => (
-            "You can't run shell commands or edit other files; such attempts are denied automatically.".to_string(),
+        HeicTool::Outdated(c) => (
+            no_shell.to_string(),
+            format!(
+                " Other HEIC/HEIF files can't be opened in this session: the installed cutline ({c}) is an older build without the `still` command that converts them. Don't try other ways to convert or open them. If the user wants such photos, tell them once to update cutline (Settings › cutline shows which one is used) and start a new message, or to add the photos as media, or to describe them in words."
+            ),
+        ),
+        HeicTool::None => (
+            no_shell.to_string(),
             " Other HEIC/HEIF files can't be opened in this session: ask the user to add them as media, or describe them in words.".to_string(),
         ),
     };
@@ -689,6 +718,7 @@ mod tests {
             exports: &ex,
             manifest: &manifest,
             cutline_guide: "",
+            cutline_still: true,
             eleven_available: true,
             default_voice: Some("voice-abc"),
             voice_provider: provider,
@@ -767,6 +797,35 @@ mod tests {
         assert!(!project_summary(&p, &outs, &manifest).contains("Brand instructions"));
     }
 
+    /// BUG-0002: a run offers `cutline still` only when this cutline has it.
+    #[test]
+    fn run_prompt_heic_depends_on_cutline_still() {
+        let (p, rc, outs, ex, manifest, platforms) = fixture();
+        let make = |still: bool| {
+            system_prompt(&PromptInput {
+                project: &p,
+                run_config: &rc,
+                kind: RunKind::Production,
+                folder: "/runs/r1".into(),
+                outputs: &outs,
+                exports: &ex,
+                manifest: &manifest,
+                cutline_guide: "",
+                cutline_still: still,
+                eleven_available: true,
+                default_voice: None,
+                voice_provider: Default::default(),
+                cartesia_available: false,
+                voice_choosing: None,
+                platforms: &platforms,
+                finish: &crate::finish::Finish::default(),
+            })
+        };
+        assert!(make(true).contains("`cutline still '<photo>' --out 'photo-copies/<name>.jpg'"));
+        let old = make(false);
+        assert!(!old.contains("cutline still '<photo>'") && old.contains("older build without `cutline still`"));
+    }
+
     #[test]
     fn production_prompt_carries_everything_the_spec_lists() {
         let (p, rc, outs, ex, manifest, platforms) = fixture();
@@ -779,6 +838,7 @@ mod tests {
             exports: &ex,
             manifest: &manifest,
             cutline_guide: "GUIDE TEXT",
+            cutline_still: true,
             eleven_available: true,
             default_voice: Some("voice-abc"),
             voice_provider: Default::default(),
@@ -832,6 +892,7 @@ mod tests {
             exports: &ex,
             manifest: &manifest,
             cutline_guide: "",
+            cutline_still: true,
             eleven_available: false,
             default_voice: None,
             voice_provider: Default::default(),
@@ -857,6 +918,7 @@ mod tests {
             exports: &ex,
             manifest: &manifest,
             cutline_guide: "",
+            cutline_still: true,
             eleven_available: true,
             default_voice: None,
             voice_provider: Default::default(),
@@ -883,6 +945,7 @@ mod tests {
             exports: &ex,
             manifest: &manifest,
             cutline_guide: "",
+            cutline_still: true,
             eleven_available: true,
             default_voice: None,
             voice_provider: Default::default(),
@@ -926,6 +989,7 @@ mod tests {
                     exports: &ex,
                     manifest: &manifest,
                     cutline_guide: "",
+                    cutline_still: true,
                     eleven_available: true,
                     default_voice: None,
                     voice_provider: Default::default(),
@@ -963,7 +1027,7 @@ mod tests {
             &["/footage".to_string()],
             &["/briefs".to_string()],
             false,
-            None,
+            HeicTool::None,
         );
         assert!(
             s.contains("Edit only spec.md")
@@ -979,7 +1043,7 @@ mod tests {
             s.contains("App recording: on.") && s.contains("- **Record:**") && s.contains("cutline is not involved")
         );
         assert!(s.contains("can't run shell commands") && !s.contains("cutline still"));
-        assert!(assistant_system_prompt("/s".into(), "", &[], &[], true, None).contains("Web search"));
+        assert!(assistant_system_prompt("/s".into(), "", &[], &[], true, HeicTool::None).contains("Web search"));
     }
 
     /// BUG-0001: HEIC photos outside the media list (a media or reference folder) can be opened
@@ -992,13 +1056,32 @@ mod tests {
             &["/Users/me/Downloads".to_string()],
             &[],
             false,
-            Some(Utf8Path::new("/Applications/Video Studio.app/cutline")),
+            HeicTool::Still(Utf8Path::new("/Applications/Video Studio.app/cutline")),
         );
         assert!(s.contains("only shell command you may run is `cutline still`"), "{s}");
+        // BUG-0002: the exact command with the absolute copies folder, and no shell tricks
         assert!(
-            s.contains("`'/Applications/Video Studio.app/cutline' still '<photo>' --out photo-copies/<name>.jpg --max-side 1568`"),
+            s.contains("`'/Applications/Video Studio.app/cutline' still '<photo>' --out '/s/photo-copies/<name>.jpg' --max-side 1568`"),
             "{s}"
         );
-        assert!(s.contains("don't try Read on it"));
+        assert!(s.contains("don't try Read on it") && s.contains("no variables") && s.contains("temporary folders"));
+    }
+
+    /// BUG-0002: with a cutline that has no `still`, there is no shell and Claude is told why,
+    /// so it asks for an update instead of trying commands that can't work.
+    #[test]
+    fn assistant_prompt_outdated_cutline() {
+        let s = assistant_system_prompt(
+            "/s".into(),
+            "",
+            &["/Users/me/Downloads".to_string()],
+            &[],
+            false,
+            HeicTool::Outdated(Utf8Path::new("/usr/local/bin/cutline")),
+        );
+        assert!(s.contains("can't run shell commands"), "{s}");
+        assert!(!s.contains("only shell command you may run"), "{s}");
+        assert!(s.contains("(/usr/local/bin/cutline) is an older build without the `still` command"), "{s}");
+        assert!(s.contains("update cutline"));
     }
 }

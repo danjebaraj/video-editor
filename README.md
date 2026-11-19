@@ -90,6 +90,10 @@ pulling changes to keep both current.
 `scripts/build-and-release.sh` does the same and then links `~/.local/bin/cutline` to
 `bin/cutline` (or `$CUTLINE_LINK_DIR/cutline`), so `cutline` on your PATH is always the latest
 local build; it refuses to replace a real file there.
+Building the macOS app (`apps/macos/build.sh`, `scripts/install-video-studio-app.sh`) runs
+`build-and-release.sh` first, then checks with `video-studio cutline` that the app will use
+`bin/cutline`. If Settings › cutline or another cutline earlier on PATH would win instead, the
+build stops and says what to change. Set `VS_SKIP_CUTLINE=1` to skip both steps.
 
 Requires Rust ≥ 1.80. External tools are managed by `cutline deps` (pinned in
 `tools.lock.json`); a system ffmpeg ≥ 6 works as a fallback. `scripts/release.sh` builds a

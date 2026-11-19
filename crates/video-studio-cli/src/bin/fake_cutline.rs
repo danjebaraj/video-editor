@@ -89,6 +89,10 @@ fn main() {
                 "audio": if image { serde_json::Value::Null } else { json!({"codec": "aac", "sample_rate": 48000, "channels": 2}) }})
             );
         }
+        "still" if args.iter().any(|a| a == "--help" || a == "-h") => {
+            // the app checks for `still` this way (BUG-0002)
+            println!("Usage: cutline still <INPUT> --out <OUT>");
+        }
         "still" => {
             let (Some(f), Some(out)) = (file, args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)))
             else {

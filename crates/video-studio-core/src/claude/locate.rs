@@ -336,10 +336,16 @@ pub fn min_version_text() -> String {
 pub struct CutlineInfo {
     pub path: String,
     pub version: String,
+    /// Whether this cutline has `cutline still`, which makes JPEG copies of HEIC/HEIF photos.
+    /// Builds from before FEAT-0004 report the same version but lack it (BUG-0002).
+    #[serde(default)]
+    pub still: bool,
 }
 
 /// Finds cutline: the path from Settings, PATH, then `bin/cutline` in the configured repo.
-/// `VIDEO_STUDIO_CUTLINE` overrides everything.
+/// `VIDEO_STUDIO_CUTLINE` overrides everything. Of the working candidates, the first one that
+/// has `cutline still` wins; when none has it, the first working one is returned with
+/// `still: false`, so an old copy earlier on the list doesn't hide a current build (BUG-0002).
 pub fn find_cutline(custom_path: &str, repo: &str) -> Option<CutlineInfo> {
     let forced = std::env::var("VIDEO_STUDIO_CUTLINE").ok().filter(|s| !s.is_empty());
     let common: &[&str] = if cfg!(windows) {
@@ -357,15 +363,26 @@ pub fn find_cutline(custom_path: &str, repo: &str) -> Option<CutlineInfo> {
         list.push(repo.join(format!("bin/cutline{exe}")));
         list.push(repo.join(format!("target/release/cutline{exe}")));
     }
+    let mut first: Option<CutlineInfo> = None;
     for c in list {
         if !is_executable(&c) {
             continue;
         }
         let Some((0, out, _)) = run_with_env(&c, &["--version"], None, Duration::from_secs(15)) else { continue };
         let version = out.split_whitespace().last().unwrap_or("").to_string();
-        return Some(CutlineInfo { path: paths::canonical_or_normal(&c).to_string(), version });
+        let still = has_still(&c);
+        let info = CutlineInfo { path: paths::canonical_or_normal(&c).to_string(), version, still };
+        if still {
+            return Some(info);
+        }
+        first.get_or_insert(info);
     }
-    None
+    first
+}
+
+/// Whether `cutline still --help` succeeds (clap rejects an unknown subcommand with exit 2).
+pub fn has_still(cutline: &Utf8Path) -> bool {
+    matches!(run_with_env(cutline, &["still", "--help"], None, Duration::from_secs(15)), Some((0, _, _)))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -441,6 +458,35 @@ pub fn cutline_guide(cutline: &Utf8Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BUG-0002: an old cutline (no `still`) set in Settings doesn't hide a current build in the
+    /// repo; when it is the only one, it is reported with `still: false`.
+    #[cfg(unix)]
+    #[test]
+    fn find_cutline_prefers_one_with_still() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(t.path().to_path_buf()).unwrap();
+        let script = |path: &Utf8Path, still: bool| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let body = if still {
+                "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cutline 0.1.0'; exit 0; fi\nexit 0\n"
+            } else {
+                "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cutline 0.1.0'; exit 0; fi\necho \"error: unrecognized subcommand '$1'\" >&2; exit 2\n"
+            };
+            std::fs::write(path, body).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let old = root.join("old/cutline");
+        script(&old, false);
+        let repo = root.join("repo");
+        script(&repo.join("bin/cutline"), true);
+        assert!(!has_still(&old) && has_still(&repo.join("bin/cutline")));
+        let found = find_cutline(old.as_str(), repo.as_str()).unwrap();
+        assert!(found.still, "{found:?}");
+        assert_ne!(found.path, paths::canonical_or_normal(&old).to_string());
+        assert_eq!(found.version, "0.1.0");
+    }
 
     #[test]
     fn versions() {

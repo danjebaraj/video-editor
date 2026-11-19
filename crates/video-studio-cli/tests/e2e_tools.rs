@@ -716,7 +716,7 @@ fn run_env(w: &World, script: &Utf8Path) -> RunEnv {
         platforms: Platforms::bundled(),
         models: ModelList::bundled(),
         claude: fake_claude_info(),
-        cutline: CutlineInfo { path: FAKE_CUTLINE.into(), version: "0.1.0-fake".into() },
+        cutline: CutlineInfo { path: FAKE_CUTLINE.into(), version: "0.1.0-fake".into(), still: true },
         helper: VIDEO_STUDIO.into(),
         cutline_home: None,
         cutline_doctor: None,

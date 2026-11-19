@@ -463,6 +463,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         exports: &exports,
         manifest: &manifest_entries,
         cutline_guide: &guide,
+        cutline_still: env.cutline.still,
         eleven_available: has_key,
         voice_provider: provider,
         cartesia_available: has_cartesia_key,

@@ -26,12 +26,17 @@ pub fn needs_copy(path: &Utf8Path) -> bool {
 }
 
 /// The prompt line that tells Claude how to open any other HEIC/HEIF it finds: `cutline` is the
-/// command as Claude should type it.
-pub fn on_demand_note(cutline: &str) -> String {
+/// command as Claude should type it, `copies` the folder the copy must go to (relative to the
+/// working folder or absolute).
+pub fn on_demand_note(cutline: &str, copies: &str) -> String {
     format!(
-        "For a HEIC/HEIF photo that isn't in that list (one you find in a media or reference folder), don't try Read on it: make a JPEG copy first with `{cutline} still '<photo>' --out {CLAUDE_COPIES_DIR}/<name>.jpg --max-side {MAX_SIDE}` (one photo per command, run in your working folder), then Read the copy. Refer to the original photo, never the copy, in what you write."
+        "For a HEIC/HEIF photo that isn't in that list (one you find in a media or reference folder), don't try Read on it: make a JPEG copy first with exactly `{cutline} still '<photo>' --out '{copies}/<name>.jpg' --max-side {MAX_SIDE}`, with the photo's full path and a plain file name filled in, then Read the copy. Run one photo per command, written out literally: no variables, `$(…)`, `~`, pipes, `&&`, `mkdir` or temporary folders; the copy must go into {copies}/, which already exists. Refer to the original photo, never the copy, in what you write."
     )
 }
+
+/// Why a copy can't be made with a cutline from before `cutline still` (BUG-0002).
+pub const OUTDATED: &str =
+    "this cutline is an older build that can't convert HEIC/HEIF photos; update cutline (Settings › cutline)";
 
 /// One JPEG of `src` at `out` (longest side `MAX_SIDE`), or why there is none: the last
 /// non-empty line cutline wrote to stderr (without its `error: ` prefix), or `timed out`.
@@ -48,6 +53,7 @@ pub fn make_copy(src: &Utf8Path, out: &Utf8Path, cutline: &Utf8Path) -> Result<(
     ]);
     match crate::platform::run_capture(&mut cmd, TIMEOUT) {
         Ok((0, _, _)) if out.is_file() => Ok(()),
+        Ok((_, _, err)) if err.contains("unrecognized subcommand 'still'") => Err(OUTDATED.into()),
         Ok((code, _, err)) => {
             let line = err.lines().rev().map(str::trim).find(|l| !l.is_empty());
             Err(line
