@@ -14,6 +14,9 @@ edit, and cutline validates, previews, reviews and renders it. Every command acc
    `chrome`, `tools`).
 2. **Understand the footage.**
    - `cutline probe <file>...` — duration, fps (VFR flag), rotation, color, alpha, loudness (`--loudness`).
+   - `cutline still <photo> --out x.jpg [--max-side 1568]` — an upright JPEG/PNG of any image. HEIC/HEIF
+     (iPhone photos) can't be opened with Read; look at such a copy instead, but keep the original
+     `.heic` as the asset: cutline decodes it itself (cached), and `E_IMAGE_DECODE` means it can't.
    - `cutline transcribe <file>` for spoken footage (or `--import-scribe vo.scribe.json` for an
      ElevenLabs Scribe export; no API calls are ever made). Read the transcript to find the story:
      the **hook** (strongest line, first 1–3 s), the key beats, and the **CTA**.
@@ -265,6 +268,7 @@ Segments are cached: changing captions, text or music does not re-render clips.
 |---|---|
 | `E_TIME_OUT_OF_RANGE` | in/out beyond the media; check `cutline probe` duration or use `"end"` |
 | `E_TRANSITION_TOO_LONG` | shorten the transition or lengthen a neighbour |
+| `E_IMAGE_DECODE` | a HEIC/HEIF photo can't be decoded (damaged, or ffmpeg older than 7.1; see `cutline doctor`): ask for the photo as a JPEG |
 | `E_UNKNOWN_ASSET` / `E_UNKNOWN_ANCHOR` | typo in an asset or clip id |
 | `E_UNKNOWN_FIELD` | the hint lists allowed fields |
 | `E_EFFECT_OUT_OF_RANGE` | effect `at` is clip-relative (seconds from the clip's start on the timeline); `src_at` / `src_start` are seconds in the asset, inside the part the clip plays |

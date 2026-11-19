@@ -231,6 +231,7 @@ fn a_passage_is_voiced_with_its_neighbours_as_context() {
         "--out",
         "vo2-plain.mp3",
     ]);
+    assert_eq!(plain.status.code(), Some(0), "{}", stderr(&plain));
     assert_eq!(
         std::fs::read_to_string(run.join("audio/vo2-plain.mp3")).unwrap(),
         "FAKE-MP3 voice text: Drop one in. [previous: Your app needs a chart?]"
@@ -579,6 +580,8 @@ fn assistant_edits_arrive_as_hunks_and_accepted_hunks_reach_the_spec() {
         project_summary: "Project: Launch teaser".into(),
         helper: Some(VIDEO_STUDIO.into()),
         extra_env,
+        media: Vec::new(),
+        cutline: None,
     };
     let sink = Arc::new(Collect::default());
     let handle = assistant::start(&request, &fake_claude_info(), sink.clone()).unwrap();
@@ -687,6 +690,8 @@ fn assistant_can_be_stopped() {
         project_summary: String::new(),
         helper: None,
         extra_env,
+        media: Vec::new(),
+        cutline: None,
     };
     let sink = Arc::new(Collect::default());
     let handle = assistant::start(&request, &fake_claude_info(), sink.clone()).unwrap();
@@ -869,4 +874,183 @@ fn the_committed_project_schema_is_current() {
     assert_eq!(printed.trim(), committed.trim(), "run `video-studio schema > schema/cutproj.schema.json`");
     let v: Value = serde_json::from_str(committed).unwrap();
     assert!(v["properties"]["media"].is_object() && v["properties"]["run_configs"].is_object());
+}
+
+// MARK: HEIC/HEIF photos (FEAT-0004)
+
+/// Calls the fake cutline's `still` logged in `dir` (its `.fake-still-calls`).
+fn still_calls(dir: &Utf8Path) -> usize {
+    std::fs::read_to_string(dir.join(".fake-still-calls")).map(|s| s.lines().count()).unwrap_or(0)
+}
+
+fn photo_entry(id: &str, path: Option<&Utf8Path>) -> video_studio_core::run::prepare::ManifestEntry {
+    serde_json::from_value(
+        json!({"id": id, "kind": "image", "path": path, "status": if path.is_some() { "ok" } else { "missing" }}),
+    )
+    .unwrap()
+}
+
+#[test]
+fn heic_photos_get_viewable_copies_that_are_reused() {
+    use video_studio_core::viewable;
+    let w = World::new();
+    let media = w.root.join("photos");
+    std::fs::create_dir_all(&media).unwrap();
+    let (heic, jpg, broken) = (media.join("IMG_1.HEIC"), media.join("shot.jpg"), media.join("bad.heif"));
+    std::fs::write(&heic, b"heic bytes").unwrap();
+    std::fs::write(&jpg, b"jpeg bytes").unwrap();
+    std::fs::write(&broken, b"BROKEN heif").unwrap();
+    let out = w.root.join("run");
+    let cutline = Utf8Path::new(FAKE_CUTLINE);
+    let mut entries = vec![
+        photo_entry("m-heic", Some(&heic)),
+        photo_entry("m-jpg", Some(&jpg)),
+        photo_entry("m-gone", None),
+        photo_entry("m-bad", Some(&broken)),
+    ];
+    assert!(!viewable::ensure_viewable_copies(&mut entries, &out, cutline), "one photo failed");
+    let previews = out.join(viewable::PREVIEWS_DIR);
+    let copy = previews.join("m-heic.jpg");
+    assert_eq!(entries[0].viewable_path.as_deref().map(Utf8Path::new), Some(copy.as_path()));
+    let img = image::open(&copy).expect("a JPEG");
+    assert_eq!(img.width().max(img.height()), viewable::MAX_SIDE);
+    assert_eq!(
+        (entries[1].viewable_path.as_ref(), entries[1].viewable_error.as_ref()),
+        (None, None),
+        "a JPEG needs none"
+    );
+    assert_eq!(
+        (entries[2].viewable_path.as_ref(), entries[2].viewable_error.as_ref()),
+        (None, None),
+        "missing: neither"
+    );
+    assert_eq!(entries[3].viewable_path, None);
+    assert_eq!(entries[3].viewable_error.as_deref(), Some("E_IMAGE_DECODE: bad file"));
+    // the manifest JSON carries the fields only when present
+    let j = serde_json::to_value(&entries).unwrap();
+    assert!(j[1].get("viewable_path").is_none() && j[1].get("viewable_error").is_none());
+    // the media list Claude reads
+    let summary = video_studio_core::run::prompt::manifest_summary(&entries);
+    let line = |id: &str| summary.lines().find(|l| l.contains(&format!("`{id}`"))).unwrap().to_string();
+    assert!(line("m-heic").ends_with("— view: media-previews/m-heic.jpg"), "{summary}");
+    assert!(line("m-bad").ends_with("— can't be viewed: E_IMAGE_DECODE: bad file"), "{summary}");
+    assert!(!line("m-jpg").contains("view"), "{summary}");
+    assert_eq!(still_calls(&previews), 2);
+
+    // again with nothing changed: the copy is reused (the broken one is tried again)
+    let mut again = entries.clone();
+    viewable::ensure_viewable_copies(&mut again, &out, cutline);
+    assert_eq!(still_calls(&previews), 3);
+    assert_eq!(again[0].viewable_path, entries[0].viewable_path);
+    // a changed photo is converted again; a photo that left the list loses its copy
+    std::fs::write(&heic, b"heic bytes, edited").unwrap();
+    viewable::ensure_viewable_copies(&mut again[..1], &out, cutline);
+    assert_eq!(still_calls(&previews), 4);
+    let mut none: Vec<video_studio_core::run::prepare::ManifestEntry> = vec![];
+    viewable::ensure_viewable_copies(&mut none, &out, cutline);
+    assert!(!copy.exists(), "copies of media no longer listed are deleted");
+    assert!(heic.exists() && std::fs::read(&heic).unwrap() == b"heic bytes, edited", "the original is untouched");
+}
+
+#[test]
+fn a_run_lists_viewable_copies_in_its_manifest_and_prompt() {
+    let w = World::new();
+    let photo = w.root.join("footage/IMG_2.heic");
+    std::fs::write(&photo, b"heic bytes").unwrap();
+    let still = w.root.join("footage/still.jpg");
+    std::fs::write(&still, b"jpeg bytes").unwrap();
+    let gone = w.root.join("footage/gone.heic");
+    std::fs::write(&gone, b"soon gone").unwrap();
+    w.edit_project(|p| {
+        for f in [&photo, &still, &gone] {
+            video_studio_core::media::add_media(p, Some(&w.project), f, &NoFileRefs).unwrap();
+        }
+    });
+    std::fs::remove_file(&gone).unwrap();
+    let p = w.load_project();
+    let id_of = |name: &str| {
+        p.media.iter().find(|m| m.paths.absolute.as_deref().is_some_and(|a| a.ends_with(name))).unwrap().id.clone()
+    };
+    let (heic_id, jpg_id, gone_id) = (id_of("IMG_2.heic"), id_of("still.jpg"), id_of("gone.heic"));
+    let env = run_env(&w, &w.script);
+    let request = RunRequest {
+        project_path: w.project.clone(),
+        run_config: "rc_social".into(),
+        kind: RunKind::DryRun,
+        model: None,
+        output: None,
+        revise: None,
+        assume_answers: false,
+        question_timeout_s: None,
+        validation: None,
+    };
+    let prepared = video_studio_core::run::prepare::prepare(&request, &env).unwrap();
+    let manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(prepared.folder.join("media-manifest.json")).unwrap()).unwrap();
+    let entry = |id: &str| manifest.as_array().unwrap().iter().find(|e| e["id"] == id).unwrap().clone();
+    let copy = prepared.folder.join(format!("media-previews/{heic_id}.jpg"));
+    assert!(copy.is_file());
+    assert_eq!(entry(&heic_id)["viewable_path"].as_str().map(Utf8Path::new), Some(copy.as_path()));
+    for id in [&jpg_id, &gone_id] {
+        assert!(entry(id).get("viewable_path").is_none() && entry(id).get("viewable_error").is_none(), "{id}");
+    }
+    let system = &prepared.options.system_prompt_append;
+    assert!(system.contains(&format!("— view: media-previews/{heic_id}.jpg")), "{system}");
+    assert!(system.contains("HEIC and HEIF photos can't be opened with Read"));
+    assert_eq!(std::fs::read(&photo).unwrap(), b"heic bytes", "the photo is never modified");
+}
+
+#[test]
+fn the_assistant_gets_viewable_copies_in_its_session_folder() {
+    let w = World::new();
+    w.set_script(json!([{"result": {"text": "Done.", "cost": 0.0}}]));
+    let photo = w.root.join("footage/IMG_3.HEIC");
+    std::fs::write(&photo, b"heic bytes").unwrap();
+    let session = w.root.join("assistant/s3");
+    let mut extra_env = BTreeMap::new();
+    extra_env.insert("FAKE_CLAUDE_SCRIPT".to_string(), w.script.to_string());
+    let request = AssistantRequest {
+        session_dir: session.clone(),
+        spec: SPEC.into(),
+        prompt: "What does each photo show?".into(),
+        model: "sonnet".into(),
+        effort: None,
+        web_access: false,
+        resume: None,
+        read_paths: vec![w.root.join("footage")],
+        reference_paths: vec![],
+        project_summary: "Project: Launch teaser".into(),
+        helper: None,
+        extra_env,
+        media: vec![photo_entry("m-photo", Some(&photo))],
+        cutline: Some(FAKE_CUTLINE.into()),
+    };
+    let sink = Arc::new(Collect::default());
+    let handle = assistant::start(&request, &fake_claude_info(), sink.clone()).unwrap();
+    handle.wait();
+    assert!(session.join("media-previews/m-photo.jpg").is_file(), "the copy sits in the session folder");
+    let list = video_studio_core::run::prompt::viewable_list(&[{
+        let mut e = photo_entry("m-photo", Some(&photo));
+        e.viewable_path = Some(session.join("media-previews/m-photo.jpg").to_string());
+        e
+    }]);
+    assert!(list.contains("`m-photo` — view: media-previews/m-photo.jpg"), "{list}");
+}
+
+#[test]
+fn the_windows_media_host_keeps_one_jpeg_per_version_of_a_photo() {
+    use video_studio_core::viewable;
+    let w = World::new();
+    let photo = w.root.join("IMG_4.heic");
+    std::fs::write(&photo, b"heic bytes").unwrap();
+    let cache = w.root.join("cache/heic");
+    let cutline = Utf8Path::new(FAKE_CUTLINE);
+    let a = viewable::cached_copy(&photo, &cache, cutline).unwrap();
+    assert!(a.is_file() && a.extension() == Some("jpg"));
+    assert_eq!(viewable::cached_copy(&photo, &cache, cutline).unwrap(), a);
+    assert_eq!(still_calls(&cache), 1, "the second request is served from the cache");
+    let broken = w.root.join("bad.heic");
+    std::fs::write(&broken, b"BROKEN").unwrap();
+    assert_eq!(viewable::cached_copy(&broken, &cache, cutline).unwrap_err(), "E_IMAGE_DECODE: bad file");
+    assert!(!std::fs::read_dir(&cache).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains(".tmp.")));
 }

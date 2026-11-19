@@ -2,8 +2,8 @@
 id: FEAT-0001
 type: feature
 title: "Spec (tentative): business and product-demo features"
-status: proposed
-implementation: none
+status: partial
+implementation: partial
 approved: yes
 approved-on: 2026-11-19
 created: 2026-11-16
@@ -12,7 +12,7 @@ updated: 2026-11-19
 
 # Spec (tentative): business and product-demo features
 
-Status: **approved 2026-11-14**, being built on branch `business-demo-features`.
+Status: **approved 2026-11-14**, built on branch `business-demo-features` and merged into `main` (see the checklist and log at the end).
 
 ## 1. Why
 
@@ -241,3 +241,72 @@ the original non-goals), a GUI, uploading to any platform, interactive (clickabl
 4. F11 OCR is an optional dependency with a setting to choose the engine: macOS Vision by
    default on macOS, Tesseract elsewhere.
 5. F5 delivers MP4 and WebM (no GIF or WebP).
+
+## Requirements checklist
+
+Each line names the test that proves it (all under `crates/`).
+
+### F1. Annotation layers
+- [x] `highlight` (outline, fill, underline), `spotlight`, `arrow`, `keys`, `cursor` layers with standard timing and `rect` in frame fractions — `cutline-render/tests/annotations.rs`
+- [x] Several spotlights share one dim layer; `cursor` draws eased motion with click ripples — `annotations.rs` (`cursor_arrow_and_keys_draw_where_expected`)
+- [x] Annotations follow a clip's `zoom_to` / `punch_in`; a transformed rect stays within 2 px — `annotations.rs` (`annotations_follow_the_clip_zoom`)
+- [x] `E_RECT_OUT_OF_FRAME` for bad rects — `annotations.rs` (`annotation_rects_must_be_inside_the_frame`)
+- [x] `review/annotations/*.jpg` set — `cutline-qa` review pack
+- [ ] Golden frames per type on both targets — deviation: pixel and layout assertions instead of golden images (PROGRESS.md)
+
+### F2. Screen frames and backgrounds
+- [x] `frame` with `browser`, `window`, `phone`, `tablet`, `none`; `url`, `background` (brand, colour, gradient, asset), `padding`, `radius`, `shadow`, `theme`; chrome drawn by cutline — `cutline-render/tests/frames.rs`, `cutline-core` frame unit tests
+- [x] `zoom_to` rects stay relative to the recording — `frames.rs` (`zoom_to_rects_are_relative_to_the_recording`)
+- [x] Project-level `default_frame` for `screencast` projects; framed 16:9 in vertical targets — `frames.rs`, `cutline-core` frame unit tests
+- [x] Golden frames per style and theme — layout assertions per style (`frames.rs`)
+- [x] Text sharpness after framing no worse than a plain `fit_pad` at the same scale (edge-contrast measure) — `frames.rs` (`framing_keeps_text_as_sharp_as_fit_pad_at_the_same_scale`, added 2026-11-19)
+
+### F3. Brand kit applied, business preset
+- [x] Logo watermark at `watermark_position` with `watermark: {opacity, scale, from, to}`; inside the safe zone — `cutline-render/tests/brand_kit.rs`
+- [x] `intro`/`outro` bumpers with a default fade; `brand_bumpers: false` opts out; cues and anchors shift correctly — `brand_kit.rs`
+- [x] `cutline init --style business` and the `business` guide section — `cutline-cli` (`init`), `docs/CLAUDE_GUIDE.md`
+
+### F4. Business templates
+- [x] `title_card`, `section_card` (sets a chapter), `feature_list` with `reveal`, `stat`, `testimonial`, `compare`, `logo_wall`, `cta_link` (with QR) — `cutline-render/tests/cards.rs`
+- [x] Auto-fit and safe-zone tests; review's text-over-detail check covers them — `cards.rs` (`every_card_stays_inside_the_safe_zone_on_wide_and_vertical_frames`)
+- [ ] An HTML variant of each template where motion matters — deviation: the cards are drawn in Rust with built-in motion (fades, builds, count-up) instead of HTML variants (PROGRESS.md)
+
+### F5. Delivery for business channels
+- [x] `portrait_4x5` target; export `format` (mp4, webm), `audio`, `loop`, `max_bytes`, `range`, `captions` (burn, sidecar, none); `.vtt` and poster JPEG — `cutline-qa/tests/delivery.rs`
+- [x] Each format probes correctly; `max_bytes` is never exceeded and a miss is a QA error — `delivery.rs`
+- [x] `muted` QA check for autoplay exports — `delivery.rs` (`silent_export_without_captions_is_flagged_and_bad_exports_are_errors`)
+
+### F6. Browser recordings as assets
+- [x] `.demo.json5` assets recorded with cutline's Chrome, cached by script content, re-recorded by `cutline record` — `cutline-html/tests/demo.rs`, `cutline-render/tests/browser.rs`
+- [x] Events sidecar (cursor path, clicks, keys, step rects with times and names); the cursor is drawn by F1 from it — `demo.rs`
+- [x] Named steps usable in the edit (`zoom_to: {step}`, `highlight` by step, `step:` times) — `browser.rs`
+- [x] Recording limited to the script's `allow` origins — `cutline-html/src/demo.rs` unit test `only_listed_origins_load`
+- [x] Credentials typed from environment variables (`$NAME`) never reach the cache or the sidecar — `demo.rs` (`credentials_from_the_environment_stay_out_of_the_cache_and_sidecar`, added 2026-11-19)
+- [x] Records identically twice at settled points; step rects within 2 px of the DOM; `E_DEMO_STEP_FAILED` names the step — `demo.rs`, `browser.rs`
+
+### F7. Auto directives for demos
+- [x] `zoom_on_clicks` (close clicks merged; pans at one scale), `cursor`, `fast_forward_idle` with a speed badge, all shown by `cutline expand` — `cutline-render/tests/demo_auto.rs`
+
+### F8–F9. Variants and locales
+- [x] `variants` with `include`, `max_duration`, `exports`; `only`/`except`; `--variant`; per-variant VO — `cutline-render/tests/variants_locales.rs`
+- [x] `locales` with per-locale assets, `@key` strings and cue phrases; F6 scripts take a `locale` — `variants_locales.rs`
+
+### F10. Presenter bubble
+- [x] `presenter` layer in a circle or rounded rect, face-centred with YuNet, layouts over time, lined up with the screen recording by `src_in` — `cutline-render/tests/presenter.rs`
+- [ ] `side_by_side` lays the screen out beside the camera — deviation: the camera covers the right third and the screen is not re-laid-out (PROGRESS.md)
+
+### F11. Demo QA
+- [x] Legibility, private details (OCR: macOS Vision or Tesseract, optional) and pacing checks in review — `cutline-qa/tests/demo_qa.rs`
+
+### Every feature
+- [x] Docs (`PROJECT_FORMAT.md`, `CLAUDE_GUIDE.md`) and schema for each feature
+- [x] A `selftest --full` case — `full/business_demo` (title card, framed recording, spotlight, watermark, silent size-capped WebM; added 2026-11-19); F6–F11 are covered by the test suites above, which need Chrome, a camera recording or OCR
+
+## Implementation log
+
+### 2026-11-19
+- Implemented: confirmed the `business-demo-features` branch is fully merged into `main` (0 commits ahead); wrote this checklist from the tests; added the F2 sharpness test, the F6 credentials test and the `full/business_demo` selftest case.
+- Not done: golden images for F1 (pixel assertions instead), HTML variants of the F4 cards, a re-laid-out screen for F10 `side_by_side` — each a deliberate deviation recorded in PROGRESS.md; they need a decision before this item can be `done`.
+- Files: `crates/cutline-render/tests/frames.rs`, `crates/cutline-html/tests/demo.rs`, `crates/cutline-qa/src/suite_full.rs`
+- Commit/PR: 7b862e6
+

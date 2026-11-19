@@ -113,6 +113,10 @@ name: string
  * via the `definition` "BrandRef".
  */
 export interface BrandRef {
+/**
+ * IDs of the snapshot's instruction sets this project uses. None are chosen at first.
+ */
+instructions?: string[]
 preset_id: string
 snapshot: BrandPreset
 }
@@ -126,6 +130,10 @@ colors?: Palette
 description?: string
 fonts?: Fonts
 id: string
+/**
+ * Labelled instructions a project chooses from (see [`BrandRef::instructions`]).
+ */
+instructions?: InstructionSet[]
 intro?: (AssetRef | null)
 logos?: Logos
 lower_third_style?: string
@@ -134,7 +142,7 @@ music_mood?: string
 name: string
 outro?: (AssetRef | null)
 /**
- * Do's and don'ts in free text, given to Claude verbatim.
+ * Do's and don'ts in free text, given to Claude verbatim in every project.
  */
 rules?: string
 voice?: Voice
@@ -187,6 +195,22 @@ export interface FontRef1 {
 family?: (string | null)
 file?: (AssetRef | null)
 }
+/**
+ * A labelled set of instructions for Claude, such as the context of one product line
+ * ("Bold Reports", "Syncfusion WPF"). A brand holds any number; each project picks the ones
+ * that apply, so every video of that product gets the same context and voice.
+ * 
+ * This interface was referenced by `Project`'s JSON-Schema
+ * via the `definition` "InstructionSet".
+ */
+export interface InstructionSet {
+id: string
+label: string
+/**
+ * Free text, given to Claude verbatim.
+ */
+text?: string
+}
 export interface Logos {
 /**
  * For dark backgrounds.
@@ -201,6 +225,10 @@ light?: (AssetRef | null)
 primary?: (AssetRef | null)
 }
 export interface Voice {
+/**
+ * Cartesia voice ID, used when Settings › Voice has Cartesia speak the voice-over.
+ */
+cartesia_voice_id?: string
 model?: (string | null)
 name?: (string | null)
 /**
@@ -578,6 +606,10 @@ text: string
  * via the `definition` "Voice".
  */
 export interface Voice1 {
+/**
+ * Cartesia voice ID, used when Settings › Voice has Cartesia speak the voice-over.
+ */
+cartesia_voice_id?: string
 model?: (string | null)
 name?: (string | null)
 /**

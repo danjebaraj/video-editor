@@ -334,7 +334,7 @@ export class ProjectDocument {
 
   setBrand(b: BrandPreset | null) {
     this.update((p) => {
-      p.brand = b ? { preset_id: b.id, snapshot: structuredClone(b) } : null;
+      p.brand = b ? { preset_id: b.id, snapshot: structuredClone(b), instructions: [] } : null;
     });
   }
 

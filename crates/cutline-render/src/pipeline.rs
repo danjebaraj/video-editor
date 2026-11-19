@@ -204,7 +204,7 @@ pub fn load_with(path: &Path, sel: &crate::select::Selection) -> Result<Loaded, 
         }
         if media.is_none() {
             let cache = Cache::new(crate::cutline_dir(&dir).join("cache").join("probe"));
-            media = Some(probe_project(tc, &project, &dir, &cache).map_err(LoadError::Tool)?);
+            media = Some(probe_project(tc, &project, &dir, &cache).map_err(probe_error)?);
         }
         let m = media.as_ref().unwrap();
         let (timeline, mut diags) = resolve(&project, m, &context(&dir));
@@ -258,6 +258,20 @@ pub fn load_with(path: &Path, sel: &crate::select::Selection) -> Result<Loaded, 
         "the voice layer is anchored to a clip whose position depends on cues from this voice layer, so it never settles",
     )
     .hint("anchor the voice layer to an earlier clip (one not fitted to its cues), or give it a numeric `start`")]))
+}
+
+/// A photo that can't be decoded is a problem with the project (`E_IMAGE_DECODE` at the
+/// asset), not with the tools.
+fn probe_error(e: anyhow::Error) -> LoadError {
+    match e.downcast_ref::<cutline_media::assets::AssetDecodeError>() {
+        Some(d) => LoadError::Invalid(vec![Diagnostic::error(
+            "E_IMAGE_DECODE",
+            format!("/assets/{}", cutline_core::diag::ptr_token(&d.id)),
+            format!("can't decode {}: {}", d.path.display(), d.reason),
+        )
+        .hint(cutline_media::still::DECODE_HINT)]),
+        None => LoadError::Tool(e),
+    }
 }
 
 /// Plain-color assets: `path: "color:#101014"` or `"color:brand"` (the brand background)

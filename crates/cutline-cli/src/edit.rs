@@ -357,6 +357,19 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
     if a.dry_run {
         let mut text = String::new();
         let mut plans = vec![];
+        // HEIC/HEIF photos are decoded once, before any segment reads them
+        let ff = tc.ffmpeg.to_string_lossy().to_string();
+        let mut stills = vec![];
+        for m in l.media.assets.values() {
+            let Some(src) = &m.source else { continue };
+            let mut cmd = vec![ff.clone(), "-hide_banner".into(), "-nostdin".into(), "-y".into()];
+            cmd.extend(cutline_media::still::decode_args(src, &m.path, m.facts.alpha));
+            let line = cmd.iter().map(|a| shell_word(a)).collect::<Vec<_>>().join(" ");
+            text.push_str(&format!("# decode still {} → {}\n{line}\n\n", m.id, m.path.display()));
+            stills.push(
+                json!({"asset": m.id, "source": src, "still": m.path, "cached": m.path.exists(), "command": line}),
+            );
+        }
         for (name, e) in pipeline::exports(&l.project) {
             if !a.export.is_empty() && !a.export.contains(&pipeline::export_name(&e)) {
                 continue;
@@ -370,7 +383,7 @@ pub fn render(path: &Path, a: RenderArgs) -> CmdResult {
                 "audio": cutline_render::audio_plan::jobs_for_display(&plan.audio).iter().map(|j| json!({"command": j.display(&tc.ffmpeg.to_string_lossy()), "scripts": j.scripts})).collect::<Vec<_>>(),
             }));
         }
-        return Ok(Output::ok(json!({"dry_run": true, "plans": plans}), text));
+        return Ok(Output::ok(json!({"dry_run": true, "stills": stills, "plans": plans}), text));
     }
     let results = cutline_qa::deliver::render_all(&l, &opts, &a.export).map_err(classify)?;
     let mut human = vec![];
@@ -780,4 +793,13 @@ pub fn thumbnail(path: &Path, at: &str, text: Option<&str>, template: &str, out:
     }
     let p = cutline_qa::publish::thumbnail(&l, &pr, t, text, template, &out).map_err(classify)?;
     Ok(Output::ok(json!({"ok": true, "thumbnail": p}), format!("thumbnail: {}", p.display())))
+}
+
+/// A command-line word as a shell would need it.
+fn shell_word(a: &str) -> String {
+    if !a.is_empty() && a.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:=+,@%".contains(c)) {
+        a.to_string()
+    } else {
+        format!("'{}'", a.replace('\'', "'\\''"))
+    }
 }

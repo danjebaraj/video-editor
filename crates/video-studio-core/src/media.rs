@@ -218,7 +218,7 @@ pub fn kind_for_path(path: &Utf8Path) -> MediaKind {
             MediaKind::Video
         }
         Some("wav" | "mp3" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "aif" | "aiff" | "wma") => MediaKind::Audio,
-        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "heic" | "svg" | "psd") => {
+        Some("png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "heic" | "heif" | "svg" | "psd") => {
             MediaKind::Image
         }
         Some("ttf" | "otf" | "ttc" | "woff" | "woff2") => MediaKind::Font,
@@ -934,6 +934,8 @@ mod tests {
         assert_eq!(kind_for_path("x.tape".into()), MediaKind::Tape);
         assert_eq!(kind_for_path("scribe.json".into()), MediaKind::Transcript);
         assert_eq!(kind_for_path("Inter.TTF".into()), MediaKind::Font);
+        assert_eq!(kind_for_path("IMG_0001.HEIC".into()), MediaKind::Image);
+        assert_eq!(kind_for_path("photo.heif".into()), MediaKind::Image);
         assert_eq!(kind_for_path("notes.txt".into()), MediaKind::Other);
     }
 

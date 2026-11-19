@@ -23,6 +23,7 @@ pub fn run_all(r: &mut Runner) {
     r.run("full/loudness_accuracy", check_loudness);
     r.run("full/av_sync", check_av_sync);
     r.run("full/punch_in_smoothness", check_punch_in);
+    r.run("full/business_demo", check_business_demo);
     r.run("full/performance", check_performance);
 }
 
@@ -320,6 +321,75 @@ fn check_alpha(d: &Path) -> Result<Outcome> {
         err <= 4.0,
         json!({"composited": inside, "expected": want, "max_error": err}),
         json!({"max_error": 4.0}),
+    ))
+}
+
+/// Business and product-demo features together (FEAT-0001 F1–F5): a title card on a brand
+/// colour, a recording in a browser frame, a spotlight, the brand logo as a watermark, and a
+/// silent WebM under a size cap.
+fn check_business_demo(d: &Path) -> Result<Outcome> {
+    use cutline_testkit::analyze::mean_rgb;
+    let tc = cutline_deps::toolchain()?;
+    let mut c = tc.ffmpeg_cmd();
+    c.args(["-f", "lavfi", "-i", "color=c=white:s=640x400:d=3:r=30,drawbox=x=480:y=40:w=120:h=80:c=red:t=fill"])
+        .args(["-pix_fmt", "yuv420p"])
+        .arg(d.join("screen.mp4"));
+    gen::run(c)?;
+    std::fs::create_dir_all(d.join("brand"))?;
+    gen::still(tc, &d.join("brand/logo.png"), 64, 32, "0x00FF00")?;
+    std::fs::write(
+        d.join("brand/default.json"),
+        r#"{"logo": "logo.png", "watermark": {"opacity": 1.0, "scale": 0.1}, "watermark_position": "top_right"}"#,
+    )?;
+    let pp = d.join("p.json5");
+    std::fs::write(
+        &pp,
+        "{version: 1, name: 'demo', target: 'custom', width: 640, height: 360, fps: 30,
+          assets: {plain: {path: 'color:#101014'}, screen: {path: 'screen.mp4'}}, audio: {voice_chain: 'raw'},
+          main: [{id: 't', clip: 'plain', duration: 1.5},
+                 {id: 's', clip: 'screen', duration: 2.5, frame: {style: 'browser', url: 'app.example.com', background: '#0000FF', shadow: 0}}],
+          layers: [{type: 'text', template: 'title_card', anchor: 't', duration: 1.5, text: 'Glance', subtitle: 'Every metric on one screen'},
+                   {type: 'spotlight', rect: {x: 0.3, y: 0.3, w: 0.4, h: 0.4}, start: 2.6, end: 4.0, dim: 0.6}],
+          exports: [{name: 'web', format: 'webm', audio: false, max_bytes: '400KB'}]}",
+    )?;
+    let l = pipeline::load(&pp).map_err(|e| anyhow::anyhow!("{e}"))?;
+    anyhow::ensure!(!cutline_core::diag::has_errors(&l.diags), "invalid project: {:?}", l.diags);
+    let res = crate::deliver::render_all(&l, &RenderOptions::default(), &[])?;
+    let r = res.first().context("no export")?;
+    let size = std::fs::metadata(&r.output)?.len();
+    let probe = cutline_media::probe(tc, &r.output, None)?;
+    let f = read_frames(tc, &r.output, &[20, 60, 100])?;
+    // title card: light text on the brand colour in the middle of the frame
+    let bright = |img: &image::RgbImage, x0: u32, y0: u32, w: u32, h: u32| {
+        (y0..y0 + h)
+            .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
+            .filter(|(x, y)| img.get_pixel(*x, *y).0.iter().all(|v| *v > 200))
+            .count()
+    };
+    let title_text = bright(&f[0], 120, 100, 400, 160);
+    // the recording sits in the frame on the blue background, with the logo top right
+    let bg_before = mean_rgb(&f[1], 4, 340, 12, 12);
+    let logo = (440..636).flat_map(|x| (0..60).map(move |y| (x, y))).filter(|(x, y)| {
+        let p = f[1].get_pixel(*x, *y).0;
+        p[1] > 200 && p[0] < 80 && p[2] < 80
+    });
+    let logo_px = logo.count();
+    // the spotlight dims the background outside its rect
+    let bg_spot = mean_rgb(&f[2], 4, 340, 12, 12);
+    let webm = probe.format.contains("webm") || probe.format.contains("matroska");
+    let ok = r.qa.ok
+        && webm
+        && probe.audio.is_none()
+        && size <= 400_000
+        && title_text > 200
+        && bg_before[2] > 200.0
+        && logo_px > 300
+        && bg_spot[2] < bg_before[2] * 0.6;
+    Ok(Outcome::check(
+        ok,
+        json!({"qa_ok": r.qa.ok, "format": probe.format, "audio": probe.audio.is_some(), "bytes": size,
+               "title_text_px": title_text, "background_before": bg_before, "logo_px": logo_px, "background_spotlit": bg_spot}),
+        json!({"bytes_max": 400_000, "title_text_px_min": 200, "logo_px_min": 300, "spotlight_dim_max": 0.6}),
     ))
 }
 

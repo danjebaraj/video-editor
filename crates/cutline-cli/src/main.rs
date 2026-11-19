@@ -4,6 +4,7 @@ mod deps_cmd;
 mod doctor;
 mod edit;
 mod out;
+mod still_cmd;
 
 use clap::{Parser, Subcommand};
 use out::*;
@@ -44,6 +45,18 @@ enum Cmd {
         /// Also measure loudness (decodes the audio).
         #[arg(long)]
         loudness: bool,
+    },
+    /// One upright picture of an image (HEIC/HEIF included) as JPEG or PNG, by `--out`'s extension.
+    Still {
+        input: PathBuf,
+        #[arg(long, short)]
+        out: PathBuf,
+        /// Scale down so the longest side is at most this many pixels (never scales up).
+        #[arg(long)]
+        max_side: Option<u32>,
+        /// JPEG quality, 1–100.
+        #[arg(long, default_value_t = 85)]
+        quality: u8,
     },
     /// Word-level transcript JSON (cached). Uses whisper.cpp, or imports an ElevenLabs Scribe JSON.
     Transcribe {
@@ -350,6 +363,7 @@ fn dispatch(cli: Cli) -> CmdResult {
         Cmd::Transcribe { file, model, fast, lang, import_scribe, out } => {
             transcribe(&file, model, fast, lang, import_scribe, out)
         }
+        Cmd::Still { input, out, max_side, quality } => still_cmd::run(&input, &out, max_side, quality),
         Cmd::Validate { project } => edit::validate(&project),
         Cmd::Schema => edit::schema(),
         Cmd::Init { dir, dir_flag, target, style, assets, name } => {

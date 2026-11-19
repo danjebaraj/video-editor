@@ -44,6 +44,13 @@ pub struct AssistantRequest {
     /// Intent, brand, outputs and the media list (see `run::prompt::project_summary`).
     #[serde(default)]
     pub project_summary: String,
+    /// The media list (`project.summary`'s `media`); HEIC/HEIF photos in it get JPEG copies in
+    /// the session folder before Claude starts.
+    #[serde(default)]
+    pub media: Vec<crate::run::prepare::ManifestEntry>,
+    /// cutline, which makes those copies. Without it no copies are made.
+    #[serde(default)]
+    pub cutline: Option<Utf8PathBuf>,
     /// The `video-studio` binary, for the pre-tool hook. Without it only the stdio broker runs.
     #[serde(default)]
     pub helper: Option<Utf8PathBuf>,
@@ -159,6 +166,12 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     });
     let spec_path = spec_file(&dir);
     paths::write_atomic(&spec_path, request.spec.as_bytes())?;
+    // Photos Claude can't open get JPEG copies inside the session folder, which it already reads
+    let mut media = request.media.clone();
+    if let Some(cutline) = &request.cutline {
+        crate::viewable::ensure_viewable_copies(&mut media, &dir, cutline);
+    }
+    let project_summary = format!("{}{}", request.project_summary, crate::run::prompt::viewable_list(&media));
     let read_paths: Vec<Utf8PathBuf> = request.read_paths.iter().filter(|p| p.exists()).cloned().collect();
     let reference_paths: Vec<Utf8PathBuf> =
         request.reference_paths.iter().filter(|p| p.is_absolute() && p.exists()).cloned().collect();
@@ -206,7 +219,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         resume_session: request.resume.clone(),
         system_prompt_append: crate::run::prompt::assistant_system_prompt(
             &dir,
-            &request.project_summary,
+            &project_summary,
             &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
             &reference_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
             request.web_access,

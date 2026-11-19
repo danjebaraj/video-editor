@@ -142,6 +142,12 @@ pub struct ManifestEntry {
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// A JPEG copy Claude can open, for a photo it can't (HEIC/HEIF; see `viewable`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewable_path: Option<String>,
+    /// Why no viewable copy could be made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewable_error: Option<String>,
 }
 
 pub fn manifest(project: &Project, resolutions: &[Resolution]) -> Vec<ManifestEntry> {
@@ -163,6 +169,8 @@ pub fn manifest(project: &Project, resolutions: &[Resolution]) -> Vec<ManifestEn
                 probe,
                 notes: m.notes.clone(),
                 tags: m.tags.clone(),
+                viewable_path: None,
+                viewable_error: None,
             }
         })
         .collect()
@@ -282,7 +290,9 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         media::resolve_all(&project, Some(&request.project_path), &env.settings.media_roots, env.file_refs.as_ref());
     // Probe data is a cache in the project; fill what is missing so the manifest is complete.
     media::probe_all(&mut project, &resolutions, Utf8Path::new(&env.cutline.path));
-    let manifest_entries = manifest(&project, &resolutions);
+    let mut manifest_entries = manifest(&project, &resolutions);
+    // HEIC/HEIF photos get JPEG copies Claude can open; a failed copy never stops the run
+    crate::viewable::ensure_viewable_copies(&mut manifest_entries, &folder, Utf8Path::new(&env.cutline.path));
     paths::write_json_atomic(&folder.join("media-manifest.json"), &manifest_entries)?;
     paths::write_atomic(&folder.join("spec.md"), project.spec.replace("\r\n", "\n").as_bytes())?;
     let brand = project.brand.as_ref().map(|b| &b.snapshot);

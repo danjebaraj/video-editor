@@ -40,7 +40,7 @@ pub fn compute_for(l: &Loaded, p: &Project, tl: &Timeline, draft: bool, stills: 
         luts_dir: Some(cutline_deps::paths::assets_dir().join("luts")),
         ..Default::default()
     };
-    extras.watermark = watermark(p, tl, &brand, &mut extras.warnings);
+    extras.watermark = watermark(p, tl, &brand, &l.dir, &mut extras.warnings);
     text_layers(p, tl, &brand, &mut extras)?;
     html_layers(l, p, tl, &brand, &mut extras, draft, stills)?;
     captions(l, p, tl, &brand, &mut extras)?;
@@ -106,19 +106,39 @@ fn watermark(
     p: &Project,
     tl: &Timeline,
     brand: &Brand,
+    dir: &std::path::Path,
     warnings: &mut Vec<cutline_core::Diagnostic>,
 ) -> Option<crate::WatermarkSpec> {
     if p.watermark == Some(false) {
         return None;
     }
-    let path = brand.file(&brand.logo)?;
+    let mut path = brand.file(&brand.logo)?;
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if path.exists() && matches!(ext.as_str(), "heic" | "heif") {
+        // a HEIC logo is drawn from its decoded still, like a HEIC asset
+        let cache = cutline_media::cache::Cache::new(crate::cutline_dir(dir).join("cache").join("still"));
+        match cutline_deps::toolchain().and_then(|tc| cutline_media::still::decode_still(tc, &path, &cache)) {
+            Ok(still) => path = still,
+            Err(e) => {
+                warnings.push(
+                    cutline_core::Diagnostic::warning(
+                        "W_BRAND_LOGO",
+                        "/brand",
+                        format!("brand logo {} can't be decoded ({e:#}); no watermark drawn", path.display()),
+                    )
+                    .hint(cutline_media::still::DECODE_HINT),
+                );
+                return None;
+            }
+        }
+    }
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     if !path.exists() || !["png", "jpg", "jpeg", "webp"].contains(&ext.as_str()) {
         warnings.push(
             cutline_core::Diagnostic::warning(
                 "W_BRAND_LOGO",
                 "/brand",
-                format!("brand logo {} is missing or not a PNG/JPEG/WebP; no watermark drawn", path.display()),
+                format!("brand logo {} is missing or not a PNG/JPEG/WebP/HEIC; no watermark drawn", path.display()),
             )
             .hint("use a PNG with transparency; set `watermark: false` in the project to silence this"),
         );

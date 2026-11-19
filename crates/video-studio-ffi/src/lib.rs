@@ -353,7 +353,7 @@ pub fn call(method: String, args: String) -> R<String> {
                 settings.voice_provider,
                 p.brand.as_ref().and_then(|b| b.snapshot.voice.model.as_deref()),
             ));
-            out(json!({"summary": summary, "read_paths": read_paths}))
+            out(json!({"summary": summary, "read_paths": read_paths, "media": manifest}))
         }
 
         // Media
@@ -716,8 +716,16 @@ impl AssistantTurn {
 /// with the path from Settings.
 #[uniffi::export]
 pub fn start_assistant(request_json: String, listener: Box<dyn EventListener>) -> R<Arc<AssistantTurn>> {
-    let request: AssistantRequest = serde_json::from_str(&request_json).map_err(|e| bad(format!("request: {e}")))?;
+    let mut request: AssistantRequest =
+        serde_json::from_str(&request_json).map_err(|e| bad(format!("request: {e}")))?;
     let settings = Settings::load(&library());
+    // cutline makes the viewable copies of HEIC/HEIF photos in the media list
+    if request.cutline.is_none()
+        && request.media.iter().any(|m| m.path.as_deref().is_some_and(|p| core::viewable::needs_copy(Utf8Path::new(p))))
+    {
+        request.cutline =
+            locate::find_cutline(&settings.cutline_path, &settings.cutline_repo).map(|c| Utf8PathBuf::from(c.path));
+    }
     let claude = locate::find_claude(&settings.claude_path).ok_or_else(|| CoreError::Failed {
         code: "environment".into(),
         message: "Claude Code isn't installed.".into(),
