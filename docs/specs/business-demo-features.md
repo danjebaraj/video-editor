@@ -3,8 +3,11 @@ id: FEAT-0001
 type: feature
 title: "Spec (tentative): business and product-demo features"
 status: proposed
+implementation: none
+approved: yes
+approved-on: 2026-11-19
 created: 2026-11-16
-updated: 2026-11-16
+updated: 2026-11-19
 ---
 
 # Spec (tentative): business and product-demo features
