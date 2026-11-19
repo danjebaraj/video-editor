@@ -3,6 +3,8 @@ id: FEAT-0002
 type: feature
 title: Video Editor UI Spec
 status: proposed
+implementation: none
+approved: no
 created: 2026-11-16
 updated: 2026-11-16
 ---

@@ -3,6 +3,8 @@ id: FEAT-0003
 type: feature
 title: port to windows
 status: proposed
+implementation: none
+approved: no
 created: 2026-11-16
 updated: 2026-11-16
 ---
