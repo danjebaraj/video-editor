@@ -115,4 +115,5 @@ After this item:
 - Not done: R5 Windows `media_server.rs` is written (HEIC served as cached JPEGs, placeholder with the reason in the sidebar) but not built or tested on Windows; the two manual checks with real iPhone photos.
 - Notes: HEIF is read by ffmpeg's `mov` demuxer (there is no `heif` demuxer), so doctor checks `mov` + `hevc` + ffmpeg ≥ 7.1. Tile grids are composed in ffmpeg's own filter graph, so the decode uses `-pix_fmt` instead of `-vf`. The fixtures are synthetic test cards written by macOS ImageIO in the iPhone layout. The assistant gets the media list in `AssistantRequest.media` (from `project.summary`) and lists the copies after the project summary.
 - Files: `crates/cutline-media/src/{probe,still,assets}.rs`, `crates/cutline-cli/src/{still_cmd,doctor,edit}.rs`, `crates/video-studio-core/src/{viewable,assistant}.rs`, `crates/video-studio-core/src/run/{prepare,prompt}.rs`, `apps/windows/src/media_server.rs`
+- Commit/PR: 7b862e6
 

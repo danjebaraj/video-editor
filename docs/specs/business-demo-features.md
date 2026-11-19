@@ -308,4 +308,5 @@ Each line names the test that proves it (all under `crates/`).
 - Implemented: confirmed the `business-demo-features` branch is fully merged into `main` (0 commits ahead); wrote this checklist from the tests; added the F2 sharpness test, the F6 credentials test and the `full/business_demo` selftest case.
 - Not done: golden images for F1 (pixel assertions instead), HTML variants of the F4 cards, a re-laid-out screen for F10 `side_by_side` — each a deliberate deviation recorded in PROGRESS.md; they need a decision before this item can be `done`.
 - Files: `crates/cutline-render/tests/frames.rs`, `crates/cutline-html/tests/demo.rs`, `crates/cutline-qa/src/suite_full.rs`
+- Commit/PR: 7b862e6
 
