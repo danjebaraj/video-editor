@@ -184,10 +184,11 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         work_dir: dir.clone(),
         read_paths: policy_reads,
         write_files: Some(vec![spec_path.clone()]),
-        cutline: None,
+        // only `cutline still`, for JPEG copies of HEIC/HEIF photos outside the media list
+        cutline: request.cutline.clone(),
         helper: None,
         capture: false,
-        path_dirs: Vec::new(),
+        path_dirs: request.cutline.iter().filter_map(|c| c.parent().map(Utf8Path::to_path_buf)).collect(),
         web_access: request.web_access,
         log: None,
     };
@@ -204,6 +205,9 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         ["Read", "Edit", "Write", "Glob", "Grep", "AskUserQuestion"].iter().map(|s| s.to_string()).collect();
     if request.web_access {
         tools.extend(["WebSearch".to_string(), "WebFetch".to_string()]);
+    }
+    if request.cutline.is_some() {
+        tools.push("Bash".to_string());
     }
     let options = ClaudeOptions {
         executable: Utf8PathBuf::from(&claude.path),
@@ -223,6 +227,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
             &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
             &reference_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
             request.web_access,
+            request.cutline.as_deref(),
         ),
         settings,
         add_dirs: read_paths

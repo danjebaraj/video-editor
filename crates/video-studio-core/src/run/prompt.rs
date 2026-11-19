@@ -412,10 +412,11 @@ pub fn system_prompt(input: &PromptInput) -> String {
         "You are producing a video for Syncfusion Video Studio with cutline, a declarative command-line video editor. You work alone inside one run folder and the user is not watching: the app shows them your progress, your questions and the results.\n\n\
          Run folder (your working directory): {}\n\
          - spec.md — the video spec the user wrote. It is the source of truth for content.\n\
-         - media-manifest.json — every media file: ID, absolute path, kind, role, probe data, notes. In spec.md, `media:<id>` refers to these IDs. `kind` and `role` there are the user's hints about each file, not cutline asset roles. {HEIC_NOTE}\n\
+         - media-manifest.json — every media file: ID, absolute path, kind, role, probe data, notes. In spec.md, `media:<id>` refers to these IDs. `kind` and `role` there are the user's hints about each file, not cutline asset roles. {HEIC_NOTE} {}\n\
 {}         - outputs.json — the deliverables for this run and the matching cutline `target` and `exports`.\n\
          - run.json — the resolved run settings.\n\n",
         input.folder,
+        crate::viewable::on_demand_note("cutline"),
         if p.brand.is_some() { "         - brand/default.json — the brand as a cutline brand file; brand-preset.json — the brand preset as the user entered it.\n".trim_start() } else { "" }
     ));
     s.push_str("## What you must do\n");
@@ -564,6 +565,7 @@ pub fn assistant_system_prompt(
     read_paths: &[String],
     reference_paths: &[String],
     web_access: bool,
+    cutline: Option<&Utf8Path>,
 ) -> String {
     let mut extra = if read_paths.is_empty() {
         String::new()
@@ -577,12 +579,22 @@ pub fn assistant_system_prompt(
         ));
     }
     const PREVIEWS: &str = crate::viewable::PREVIEWS_DIR;
+    let (shell, heic_more) = match cutline {
+        Some(c) => (
+            "You can't edit other files, and the only shell command you may run is `cutline still` as described next; anything else is denied automatically.".to_string(),
+            format!(" {}", crate::viewable::on_demand_note(&crate::claude::broker::shell_quote(c.as_str()))),
+        ),
+        None => (
+            "You can't run shell commands or edit other files; such attempts are denied automatically.".to_string(),
+            " Other HEIC/HEIF files can't be opened in this session: ask the user to add them as media, or describe them in words.".to_string(),
+        ),
+    };
     extra.push_str("\n- Any other folder is outside this session. If the user points you at one, tell them to add it with the Folders button under the message box, then try again.");
     format!(
         "You are helping the user write the spec for a video in Syncfusion Video Studio. The spec is the Markdown file spec.md in your working folder {folder}. When it is complete, another Claude session turns it into a finished video with cutline (a declarative video editor) and ElevenLabs (voice and music), so the spec must say clearly what the video shows and says.\n\
          - Edit only spec.md. The user reviews every change you make as a diff and accepts or rejects each hunk, so keep edits focused and leave the rest of the file exactly as it is.{extra}\n\
-         - You can't run shell commands or edit other files; such attempts are denied automatically.{}\n\
-         - {HEIC_NOTE} The copies are in {PREVIEWS}/ in your working folder.\n\
+         - {shell}{}\n\
+         - {HEIC_NOTE} The copies are in {PREVIEWS}/ in your working folder.{heic_more}\n\
          - Media is referenced as `media:<id>`: write `![label](media:<id>)` to place an item. Use only IDs from the list below; never invent one. If the video needs footage that isn't attached and can't be recorded from an app (see the next point), say so in the spec in words.\n\
          - Footage of an app does not have to exist yet. When \"App recording\" is on in the project summary below, the production run records it: Claude Code itself opens the desktop app or the web app (in a browser) on this computer, clicks, types and uses menus, and records the screen. cutline is not involved in that; it only edits the recordings. So never tell the user such footage can't be captured or must be recorded by hand. Write the scene so the run can perform it: a `- **Record:**` line naming the app (as shown in Applications) or the web address, followed by numbered steps that say exactly what to click, type or choose and what should be on screen at the end, plus any sample content to use. Keep each recorded scene to one continuous action. Recordings have no sound. If App recording is off, or limited to apps that don't include the one needed, tell the user they can change it under Project › App recording, or attach a recording instead. The first time a run drives apps, the computer asks the user to allow Screen Recording and Accessibility for Syncfusion Video Studio.\n\
          - Structured blocks, all plain Markdown: a scene is a heading that starts with \"Scene\" followed by `- **Duration:**`, `- **Media:**` and `- **On-screen text:**` lines; text to be voiced goes in a fenced block tagged `vo`; a music brief goes in a fenced block tagged `music` with `mood:`, `tempo:` and `source:` lines; the call to action goes under a \"Call to action\" heading.\n\
@@ -951,6 +963,7 @@ mod tests {
             &["/footage".to_string()],
             &["/briefs".to_string()],
             false,
+            None,
         );
         assert!(
             s.contains("Edit only spec.md")
@@ -965,6 +978,27 @@ mod tests {
         assert!(
             s.contains("App recording: on.") && s.contains("- **Record:**") && s.contains("cutline is not involved")
         );
-        assert!(assistant_system_prompt("/s".into(), "", &[], &[], true).contains("Web search"));
+        assert!(s.contains("can't run shell commands") && !s.contains("cutline still"));
+        assert!(assistant_system_prompt("/s".into(), "", &[], &[], true, None).contains("Web search"));
+    }
+
+    /// BUG-0001: HEIC photos outside the media list (a media or reference folder) can be opened
+    /// through a copy Claude makes with `cutline still`.
+    #[test]
+    fn assistant_prompt_heic_on_demand() {
+        let s = assistant_system_prompt(
+            "/s".into(),
+            "",
+            &["/Users/me/Downloads".to_string()],
+            &[],
+            false,
+            Some(Utf8Path::new("/Applications/Video Studio.app/cutline")),
+        );
+        assert!(s.contains("only shell command you may run is `cutline still`"), "{s}");
+        assert!(
+            s.contains("`'/Applications/Video Studio.app/cutline' still '<photo>' --out photo-copies/<name>.jpg --max-side 1568`"),
+            "{s}"
+        );
+        assert!(s.contains("don't try Read on it"));
     }
 }

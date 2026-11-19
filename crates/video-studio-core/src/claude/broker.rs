@@ -61,7 +61,7 @@ pub struct Policy {
 
 /// cutline subcommands a run may use. `deps`, `cache` and `selftest` change or exercise the
 /// installation and are never needed to make a video.
-const CUTLINE_ALLOWED: [&str; 18] = [
+const CUTLINE_ALLOWED: [&str; 19] = [
     "validate",
     "schema",
     "init",
@@ -80,6 +80,7 @@ const CUTLINE_ALLOWED: [&str; 18] = [
     "transcribe",
     "doctor",
     "record",
+    "still",
 ];
 /// Not available in a dry run: final renders and anything that records or renders deliverables.
 const CUTLINE_DRY_RUN_DENIED: [&str; 3] = ["render", "thumbnail", "record"];
@@ -196,7 +197,7 @@ impl Policy {
     }
 
     fn decide_bash(&self, input: &Value) -> Decision {
-        if self.mode == Mode::Assistant {
+        if self.mode == Mode::Assistant && self.cutline.is_none() {
             return Decision::Deny("Shell commands aren't available in the spec assistant.".into());
         }
         let Some(command) = input["command"].as_str() else {
@@ -267,7 +268,11 @@ impl Policy {
 
     fn check_command(&self, argv: &[String]) -> Result<(), String> {
         let arg0 = &argv[0];
-        let only = "Only cutline, `video-studio eleven` and `video-studio capture` can be run here.";
+        let only = if self.mode == Mode::Assistant {
+            "The spec assistant can only run `cutline still`, to make a JPEG copy of a HEIC/HEIF photo."
+        } else {
+            "Only cutline, `video-studio eleven` and `video-studio capture` can be run here."
+        };
         let Some(exe) = self.resolve_executable(arg0) else {
             return Err(format!("`{arg0}` isn't an allowed command. {only}"));
         };
@@ -279,7 +284,7 @@ impl Policy {
         if is_cutline || (is_helper && called_as == "cutline") {
             return self.check_cutline(&argv[1..]);
         }
-        if is_helper {
+        if is_helper && self.mode != Mode::Assistant {
             return self.check_helper(&argv[1..]);
         }
         Err(format!("`{arg0}` isn't an allowed command. {only}"))
@@ -304,6 +309,9 @@ impl Policy {
             // `cutline --help` / `--version`
             return Ok(());
         };
+        if self.mode == Mode::Assistant && sub != "still" {
+            return Err(format!("`cutline {sub}` isn't available in the spec assistant; only `cutline still` is, to make a JPEG copy of a HEIC/HEIF photo."));
+        }
         if !CUTLINE_ALLOWED.contains(&sub) {
             return Err(format!("`cutline {sub}` isn't available during a run."));
         }
@@ -328,6 +336,51 @@ impl Policy {
                 }
             }
             k += 1;
+        }
+        if sub == "still" {
+            self.check_still(rest)?;
+        }
+        Ok(())
+    }
+
+    /// `cutline still <photo> --out <file>`: the photo must be one Claude may read; the spec
+    /// assistant writes its copies only to `photo-copies/` in its folder.
+    fn check_still(&self, rest: &[String]) -> Result<(), String> {
+        const VALUE_FLAGS: [&str; 5] = ["-o", "--out", "--max-side", "--quality", "--format"];
+        let mut input: Option<&str> = None;
+        let mut out: Option<&str> = None;
+        let mut k = 0;
+        while k < rest.len() {
+            let a = rest[k].as_str();
+            if VALUE_FLAGS.contains(&a) {
+                if a == "-o" || a == "--out" {
+                    out = rest.get(k + 1).map(String::as_str);
+                }
+                k += 2;
+                continue;
+            }
+            if let Some(v) = a.strip_prefix("--out=").or_else(|| a.strip_prefix("-o=")) {
+                out = Some(v);
+            } else if !a.starts_with('-') && input.is_none() {
+                input = Some(a);
+            }
+            k += 1;
+        }
+        if let Some(i) = input {
+            let p = self.resolve(i);
+            if !self.may_read(&p) {
+                return Err(format!("Reading {p} isn't allowed: it is outside this run's folders."));
+            }
+        }
+        if self.mode == Mode::Assistant {
+            let copies = self.work_dir.join(crate::viewable::CLAUDE_COPIES_DIR);
+            let ok = out.map(|o| self.resolve(o)).is_some_and(|o| paths::is_inside(&o, &copies) && o != copies);
+            if !ok {
+                return Err(format!(
+                    "`cutline still` must write its copy into {}/ in your working folder, with --out.",
+                    crate::viewable::CLAUDE_COPIES_DIR
+                ));
+            }
         }
         Ok(())
     }
@@ -959,6 +1012,59 @@ mod tests {
             p.decide("Read", &json!({"file_path": f.outside.join("secret.txt").to_string()})),
             Decision::Deny(_)
         ));
+    }
+
+    /// BUG-0001: the assistant may run `cutline still` (only that) to copy a HEIC/HEIF it may
+    /// read into `photo-copies/`; without cutline it has no shell at all.
+    #[test]
+    fn assistant_may_copy_heic_photos_with_cutline_still() {
+        let f = fx(Mode::Assistant);
+        let p = &f.policy;
+        let cutline = shell_quote(p.cutline.as_ref().unwrap().as_str());
+        let photo = f.media.join("IMG_7206.HEIC");
+        std::fs::write(&photo, b"x").unwrap();
+        let ok = format!("{cutline} still '{photo}' --out photo-copies/IMG_7206.jpg --max-side 1568");
+        assert_eq!(bash(p, &ok), Decision::Allow, "{ok}");
+        let abs = format!("{cutline} still {photo} -o {}", f.run.join("photo-copies/a.jpg"));
+        assert_eq!(bash(p, &abs), Decision::Allow, "{abs}");
+        // anywhere else in the folder, outside it, or no --out at all
+        for out in ["spec.md", "media-previews/x.jpg", "photo-copies", "../x.jpg", "/tmp/x.jpg"] {
+            let cmd = format!("{cutline} still '{photo}' --out {out}");
+            let why = denied(bash(p, &cmd));
+            assert!(why.contains("photo-copies") || why.contains("inside the run folder"), "{cmd}: {why}");
+        }
+        assert!(denied(bash(p, &format!("{cutline} still '{photo}'"))).contains("photo-copies"));
+        // a photo it may not read
+        let secret = f.outside.join("x.heic");
+        assert!(denied(bash(p, &format!("{cutline} still '{secret}' --out photo-copies/x.jpg"))).contains("outside"));
+        // no other cutline subcommand, helper or command
+        assert!(denied(bash(p, &format!("{cutline} render project.json5"))).contains("only `cutline still`"));
+        let helper = shell_quote(p.helper.as_ref().unwrap().as_str());
+        assert!(denied(bash(p, &format!("{helper} eleven voices"))).contains("only run `cutline still`"));
+        assert!(denied(bash(p, "rm -rf photo-copies")).contains("isn't an allowed command"));
+        assert!(denied(bash(p, &format!("{ok} | cat"))).contains("pipe"));
+        // the copies folder is not writable with Write/Edit
+        assert!(denied(p.decide("Write", &json!({"file_path": "photo-copies/a.jpg", "content": "x"})))
+            .contains("Only spec.md"));
+        // no cutline: no shell
+        let mut none = f.policy.clone();
+        none.cutline = None;
+        assert!(denied(bash(&none, &ok)).contains("Shell commands aren't available"));
+    }
+
+    #[test]
+    fn runs_may_copy_heic_photos_with_cutline_still() {
+        let f = fx(Mode::DryRun);
+        let p = &f.policy;
+        let photo = f.media.join("IMG_7206.HEIC");
+        assert_eq!(
+            bash(p, &format!("cutline still '{photo}' --out photo-copies/a.jpg --max-side 1568")),
+            Decision::Allow
+        );
+        assert_eq!(bash(p, &format!("cutline still '{photo}' --out work/a.jpg")), Decision::Allow);
+        assert!(denied(bash(p, &format!("cutline still '{photo}' --out /tmp/a.jpg"))).contains("inside the run folder"));
+        let secret = f.outside.join("x.heic");
+        assert!(denied(bash(p, &format!("cutline still '{secret}' --out a.jpg"))).contains("outside"));
     }
 
     #[test]

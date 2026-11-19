@@ -12,6 +12,9 @@ use crate::{media, paths};
 
 /// The folder of copies inside the run or session folder. The app writes it; Claude reads it.
 pub const PREVIEWS_DIR: &str = "media-previews";
+/// Where Claude itself puts copies it makes with `cutline still` of photos outside the media
+/// list (in a media or reference folder). Claude writes it; the app never reads it.
+pub const CLAUDE_COPIES_DIR: &str = "photo-copies";
 /// Longest side of a copy: the vision-input limit the review pack uses (spec §7.3).
 pub const MAX_SIDE: u32 = 1568;
 const QUALITY: u32 = 85;
@@ -20,6 +23,14 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 /// True for the photo formats Claude can't open itself.
 pub fn needs_copy(path: &Utf8Path) -> bool {
     matches!(path.extension().map(|e| e.to_ascii_lowercase()).as_deref(), Some("heic" | "heif"))
+}
+
+/// The prompt line that tells Claude how to open any other HEIC/HEIF it finds: `cutline` is the
+/// command as Claude should type it.
+pub fn on_demand_note(cutline: &str) -> String {
+    format!(
+        "For a HEIC/HEIF photo that isn't in that list (one you find in a media or reference folder), don't try Read on it: make a JPEG copy first with `{cutline} still '<photo>' --out {CLAUDE_COPIES_DIR}/<name>.jpg --max-side {MAX_SIDE}` (one photo per command, run in your working folder), then Read the copy. Refer to the original photo, never the copy, in what you write."
+    )
 }
 
 /// One JPEG of `src` at `out` (longest side `MAX_SIDE`), or why there is none: the last
