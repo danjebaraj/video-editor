@@ -79,11 +79,30 @@ export function sidebar(w: ProjectWindow): { el: HTMLElement; tab: Signal<Sideba
     );
   }
 
-  function thumbFor(m: MediaItem): HTMLElement {
-    const url = m.kind === 'video' || m.kind === 'image' ? w.preview?.thumb(m.id, 0) : null;
-    if (url && d.resolution(m.id)?.status !== 'missing') return h('img', { class: 'thumb', src: url, alt: '', loading: 'lazy' });
+  function glyphFor(m: MediaItem): HTMLElement {
     const g = m.kind === 'audio' ? Icons.audio : m.kind === 'font' ? Icons.font : m.kind === 'image' ? Icons.image : m.kind === 'video' ? Icons.video : Icons.document;
     return h('span', { class: 'thumb glyph' }, icon(g));
+  }
+
+  function thumbFor(m: MediaItem): HTMLElement {
+    const url = m.kind === 'video' || m.kind === 'image' ? w.preview?.thumb(m.id, 0) : null;
+    if (!url || d.resolution(m.id)?.status === 'missing') return glyphFor(m);
+    const img = h('img', { class: 'thumb', src: url, alt: '', loading: 'lazy' }) as HTMLImageElement;
+    // HEIC photos are served as JPEG copies; when no copy can be made the host says why
+    if (/\.hei[cf]$/i.test(m.paths.absolute ?? m.paths.relative ?? '')) {
+      img.onerror = async () => {
+        const glyph = glyphFor(m);
+        let why = 'no preview';
+        try {
+          why = (await (await fetch(url)).text()).trim() || why;
+        } catch {
+          /* keep the generic reason */
+        }
+        glyph.title = `Can't preview this HEIC photo: ${why}`;
+        img.replaceWith(glyph);
+      };
+    }
+    return img;
   }
 
   function renderMedia() {

@@ -269,3 +269,22 @@ current ones are clean; the demo's late `zoom_to` on its `fit: "speed"` clip get
 
 Not done: a script check for languages other than English beyond letter similarity; `src_at`
 on `freeze`; `{speed}` inside template `params`; removing silence with `gaps`.
+
+## HEIC/HEIF photos (FEAT-0004, 2026-11-19)
+
+| Change | Tests |
+|---|---|
+| `heic`/`heif` are images; `probe` reports the composed tile grid, upright | `cutline-render/tests/heic.rs`, `cutline-cli/tests/heic_cli.rs` |
+| Decoded once into `.cutline/cache/still/*.png` (`cutline_media::still`); renders read the still, credits name the photo | `heic.rs` (golden `tests/golden/heic/`), `heic_cli.rs` (Shorts render + QA) |
+| `E_IMAGE_DECODE` at `/assets/<id>`; doctor's optional HEIC check; `render --dry-run` lists the decode | `heic.rs`, `heic_cli.rs` |
+| `cutline still <in> --out <x.jpg or x.png> [--max-side] [--quality]` | `heic_cli.rs` |
+| Video Studio: viewable JPEG copies in `media-previews/` for runs and the assistant; `view:` in the media list; app-only writes | `video-studio-cli/tests/e2e_tools.rs` (fake cutline `still`), broker unit test |
+| Windows media host serves HEIC as cached JPEG copies; sidebar placeholder with the reason | `e2e_tools.rs` (`viewable::cached_copy`); the Windows shell itself is not built on macOS |
+
+Notes: ffmpeg composes tile grids only through its own filter graph, so the decode adds no `-vf`
+(8-bit via `-pix_fmt`). HEIF is read by ffmpeg's `mov` demuxer (there is no separate `heif`
+one); doctor checks for it, `hevc` and ffmpeg ≥ 7.1. The fixtures are synthetic test cards
+written by macOS ImageIO with the iPhone layout (48 tiles of 512 px, orientation 6). macOS
+thumbnails already decode HEIC upright through ImageIO (checked on the fixtures); no change.
+Not done: the manual checks with real iPhone photos (spec assistant on macOS, thumbnails on
+Windows) and a Windows build of the media-host change.

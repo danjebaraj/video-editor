@@ -9,6 +9,8 @@
 *.png binary
 *.jpg binary
 *.jpeg binary
+*.heic binary
+*.heif binary
 *.ico binary
 *.ttf binary
 *.otf binary

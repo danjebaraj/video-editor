@@ -127,6 +127,7 @@ pub struct Capabilities {
     pub filters: BTreeSet<String>,
     pub encoders: BTreeSet<String>,
     pub decoders: BTreeSet<String>,
+    pub demuxers: BTreeSet<String>,
 }
 
 fn list(ffmpeg: &Path, flag: &str, name_col: usize) -> Result<BTreeSet<String>> {
@@ -162,6 +163,7 @@ pub fn capabilities(tc: &Toolchain) -> Result<Capabilities> {
         filters: list(&tc.ffmpeg, "-filters", 1)?,
         encoders: list(&tc.ffmpeg, "-encoders", 1)?,
         decoders: list(&tc.ffmpeg, "-decoders", 1)?,
+        demuxers: list(&tc.ffmpeg, "-demuxers", 1)?,
     })
 }
 
@@ -194,6 +196,24 @@ pub const REQUIRED_FILTERS: &[&str] = &[
 pub const OPTIONAL_FILTERS: &[&str] = &["zscale", "vidstabdetect", "vidstabtransform", "arnndn"];
 pub const REQUIRED_ENCODERS: &[&str] = &["libx264", "aac", "prores_ks", "png"];
 pub const REQUIRED_DECODERS: &[&str] = &["libvpx-vp9", "prores", "hevc", "h264"];
+/// ffmpeg ≥ 7.1 composes HEIF tile grids (iPhone photos) when decoding.
+pub const HEIF_MIN_VERSION: (u32, u32) = (7, 1);
+
+/// Why HEIC/HEIF photos can't be used with this ffmpeg, or `None` when they can. HEIF is read by
+/// the `mov` demuxer (listed as `mov,mp4,m4a,3gp,3g2,mj2`) or a dedicated `heif` one.
+pub fn heif_unavailable(tc: &Toolchain, c: &Capabilities) -> Option<String> {
+    let demux = c.demuxers.iter().any(|d| d == "heif" || d.split(',').any(|n| n == "mov"));
+    if !demux {
+        Some("ffmpeg has no HEIF (mov) demuxer".into())
+    } else if !c.decoders.contains("hevc") {
+        Some("ffmpeg has no hevc decoder".into())
+    } else if parse_version(&tc.version) < HEIF_MIN_VERSION {
+        Some(format!("ffmpeg {} can't compose HEIF tile grids (7.1 or later needed)", tc.version))
+    } else {
+        None
+    }
+}
+
 pub const DRAFT_HW_ENCODERS: &[&str] = &["h264_videotoolbox", "h264_nvenc", "h264_qsv", "h264_amf"];
 
 #[derive(Debug, Clone, Serialize)]

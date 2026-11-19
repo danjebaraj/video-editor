@@ -9,6 +9,7 @@ pub fn run() -> CmdResult {
     let mut warnings = 0;
     let mut lines = vec![];
 
+    let mut heic_json = json!({"supported": false, "reason": "ffmpeg not found"});
     let tc = cutline_deps::tools::discover();
     let (tool_json, caps_json) = match &tc {
         Ok(tc) => {
@@ -39,6 +40,17 @@ pub fn run() -> CmdResult {
                     checks.iter().filter(|c| c.required).count()
                 ));
             }
+            // HEIC/HEIF photos are optional: without them every other check still holds
+            let heif = cutline_deps::tools::heif_unavailable(tc, &caps);
+            match &heif {
+                None => lines.push("✔ HEIC/HEIF photos supported".into()),
+                Some(why) => {
+                    warnings += 1;
+                    lines.push(format!("⚠ HEIC photos can't be used: {why}"));
+                    fixes.push("cutline deps install ffmpeg   # 7.1 or later reads HEIC photos".into());
+                }
+            }
+            heic_json = json!({"supported": heif.is_none(), "reason": heif});
             (json!(tc), json!(checks))
         }
         Err(e) => {
@@ -160,6 +172,7 @@ pub fn run() -> CmdResult {
         "platform": paths::platform_id(),
         "ffmpeg": tool_json,
         "capabilities": caps_json,
+        "heic": heic_json,
         "fonts": {"dir": fonts_dir, "files": fonts},
         "chrome": chrome,
         "vhs": vhs,

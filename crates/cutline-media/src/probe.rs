@@ -73,7 +73,26 @@ fn s(v: &serde_json::Value) -> Option<String> {
     v.as_str().map(str::to_string).filter(|x| !x.is_empty() && x != "unknown")
 }
 
-const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"];
+const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif", "heic", "heif"];
+
+/// HEIC/HEIF photos (iPhone pictures): stored as HEVC tiles, decoded to a still before use.
+pub fn is_heif(path: &Path) -> bool {
+    matches!(path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("heic" | "heif"))
+}
+
+/// Rotation from a `side_data_list` (display matrix, counter-clockwise degrees).
+fn side_rotation(v: &serde_json::Value) -> Option<i32> {
+    v["side_data_list"].as_array()?.iter().find_map(|d| d["rotation"].as_i64()).map(|r| r as i32)
+}
+
+/// The picture of a HEIF tile grid as displayed: (width, height, rotation). A tiled photo
+/// probes as one 512×512 stream per tile; the grid group holds the whole picture's size.
+fn tile_grid(j: &serde_json::Value) -> Option<(u32, u32, i32)> {
+    let g = j["stream_groups"].as_array()?.iter().find(|g| g["type"].as_str() == Some("Tile Grid"))?;
+    let c = g["components"].as_array()?.first()?;
+    let (w, h) = (c["width"].as_u64()? as u32, c["height"].as_u64()? as u32);
+    Some((w, h, side_rotation(c).or_else(|| side_rotation(g)).unwrap_or(0)))
+}
 
 fn pix_has_alpha(p: &str) -> bool {
     p.starts_with("yuva")
@@ -101,6 +120,9 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
     let is_seq = ps.contains('%');
     let mut cmd = tc.ffprobe_cmd();
     cmd.args(["-print_format", "json", "-show_format", "-show_streams"]);
+    if is_heif(path) {
+        cmd.arg("-show_stream_groups");
+    }
     if is_seq {
         cmd.args(["-f", "image2", "-framerate", &format!("{}", fps_hint.unwrap_or(30.0))]);
     } else if !path.exists() {
@@ -119,11 +141,12 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
     let vs =
         streams.iter().find(|st| st["codec_type"] == "video" && st["disposition"]["attached_pic"].as_i64() != Some(1));
     let a = streams.iter().find(|st| st["codec_type"] == "audio");
+    let grid = tile_grid(&j);
 
     let video = vs.map(|v| {
         let codec = s(&v["codec_name"]).unwrap_or_default();
-        let width = v["width"].as_u64().unwrap_or(0) as u32;
-        let height = v["height"].as_u64().unwrap_or(0) as u32;
+        let mut width = v["width"].as_u64().unwrap_or(0) as u32;
+        let mut height = v["height"].as_u64().unwrap_or(0) as u32;
         let mut rotation = 0i32;
         if let Some(sd) = v["side_data_list"].as_array() {
             for d in sd {
@@ -131,6 +154,9 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
                     rotation = r as i32;
                 }
             }
+        }
+        if let Some((w, h, r)) = grid {
+            (width, height, rotation) = (w, h, r);
         }
         if rotation == 0 {
             if let Some(r) = v["tags"]["rotate"].as_str().and_then(|x| x.parse::<i32>().ok()) {
@@ -194,7 +220,16 @@ pub fn probe(tc: &Toolchain, path: &Path, fps_hint: Option<f64>) -> Result<Media
         "video"
     }
     .to_string();
-    let faststart = if format.contains("mp4") || format.contains("mov") { moov_before_mdat(path).ok() } else { None };
+    if kind == "image" && is_heif(path) {
+        duration = 0.0;
+    }
+    let faststart = if kind == "image" {
+        None
+    } else if format.contains("mp4") || format.contains("mov") {
+        moov_before_mdat(path).ok()
+    } else {
+        None
+    };
     Ok(MediaInfo {
         path: ps,
         size: fmt["size"].as_str().and_then(|x| x.parse().ok()).unwrap_or(0),

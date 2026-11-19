@@ -148,3 +148,47 @@ fn a_failing_step_names_itself() {
     let msg = format!("{e:#}");
     assert!(msg.contains("step 1") && msg.contains("#missing"), "{msg}");
 }
+
+/// F6: a login typed from `$NAME` reaches the page but is never written to the cache or the
+/// sidecar (they hold the script's `$NAME`, not the value).
+#[test]
+fn credentials_from_the_environment_stay_out_of_the_cache_and_sidecar() {
+    if !chrome_ok() {
+        return;
+    }
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    let secret = "s3cr3t-Pa55-7319";
+    std::env::set_var("CUTLINE_TEST_DEMO_PASSWORD", secret);
+    let script = setup(
+        d.path(),
+        "{type: {into: '#email', text: '$CUTLINE_TEST_DEMO_PASSWORD', delay: 5}, name: 'login'},
+         {wait: 'text=s3cr3t-Pa55-7319', timeout: 3}",
+    );
+    let cache = d.path().join("cache");
+    let rec = record_cached(tc, &script, &cache, false, None).unwrap();
+    assert!(rec.events.step("login").is_some(), "the typed value reached the page (the wait step found it)");
+    let mut checked = 0;
+    for e in walk(&cache) {
+        let bytes = std::fs::read(&e).unwrap();
+        assert!(!bytes.windows(secret.len()).any(|w| w == secret.as_bytes()), "the secret is in {}", e.display());
+        checked += 1;
+    }
+    assert!(checked >= 2, "the video and its sidecar were checked");
+    let sidecar = serde_json::to_string(&rec.events).unwrap();
+    assert!(!sidecar.contains(secret));
+    std::env::remove_var("CUTLINE_TEST_DEMO_PASSWORD");
+}
+
+fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}

@@ -14,7 +14,11 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize)]
 pub struct AssetMedia {
     pub id: String,
+    /// The file the renderers read: the asset itself, or the decoded still of a HEIC/HEIF.
     pub path: PathBuf,
+    /// The user's file when `path` is a decoded still of it (HEIC/HEIF).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<PathBuf>,
     pub fingerprint: String,
     pub info: Option<MediaInfo>,
     pub facts: MediaFacts,
@@ -104,6 +108,54 @@ fn audible_end(tc: &Toolchain, path: &Path, duration: f64) -> Option<f64> {
     (open && start > 1.0 && duration - start >= 0.5).then(|| crate::round3(start + 0.25))
 }
 
+/// ffmpeg composes HEIF tile grids from 7.1 on; older builds decode one 512×512 tile.
+pub const HEIF_MIN_FFMPEG: (u32, u32) = (7, 1);
+
+/// An asset photo that could not be decoded (`E_IMAGE_DECODE` at `/assets/<id>`).
+#[derive(Debug, Clone)]
+pub struct AssetDecodeError {
+    pub id: String,
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+impl AssetDecodeError {
+    fn new(id: &str, path: &Path, reason: String) -> Self {
+        Self { id: id.to_string(), path: path.to_path_buf(), reason }
+    }
+}
+
+impl std::fmt::Display for AssetDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "E_IMAGE_DECODE: asset `{}` ({}) can't be decoded: {}", self.id, self.path.display(), self.reason)
+    }
+}
+
+impl std::error::Error for AssetDecodeError {}
+
+/// Decoded stills sit next to the probe cache (`.cutline/cache/still`).
+fn still_cache(probe_cache: &Cache) -> Cache {
+    Cache::new(probe_cache.root.with_file_name("still"))
+}
+
+fn decode_heif(tc: &Toolchain, path: &Path, fp: &str, alpha: bool, cache: &Cache) -> Result<PathBuf> {
+    let v = cutline_deps::tools::parse_version(&tc.version);
+    if v < HEIF_MIN_FFMPEG && !crate::still::cached_path(fp, cache).is_file() {
+        anyhow::bail!(
+            "ffmpeg {} can't compose HEIF tile grids (7.1 or later needed; run `cutline deps install ffmpeg`)",
+            tc.version
+        );
+    }
+    crate::still::decode_with_fingerprint(tc, path, fp, alpha, cache)
+}
+
+fn decode_reason(e: &anyhow::Error) -> String {
+    match e.downcast_ref::<crate::still::DecodeError>() {
+        Some(d) => d.reason.clone(),
+        None => format!("{e:#}"),
+    }
+}
+
 /// Probe all assets. Missing files produce `exists: false` facts (validation reports them).
 pub fn probe_project(tc: &Toolchain, p: &Project, dir: &Path, cache: &Cache) -> Result<ProjectMedia> {
     let mut out = ProjectMedia::default();
@@ -119,6 +171,7 @@ pub fn probe_project(tc: &Toolchain, p: &Project, dir: &Path, cache: &Cache) -> 
                 AssetMedia {
                     id: id.clone(),
                     path,
+                    source: None,
                     fingerprint: String::new(),
                     info: None,
                     facts: MediaFacts {
@@ -145,6 +198,7 @@ pub fn probe_project(tc: &Toolchain, p: &Project, dir: &Path, cache: &Cache) -> 
                 AssetMedia {
                     id: id.clone(),
                     path,
+                    source: None,
                     fingerprint: fp,
                     info: None,
                     facts: MediaFacts {
@@ -164,11 +218,18 @@ pub fn probe_project(tc: &Toolchain, p: &Project, dir: &Path, cache: &Cache) -> 
             continue;
         }
         let fps_hint = a.fps.map(|f| f.as_f64());
-        let key = crate::hash_key(&[fp.as_bytes(), format!("{fps_hint:?}").as_bytes(), b"probe-v1"]);
+        let heif = crate::probe::is_heif(&path);
+        // HEIC/HEIF probes changed (the whole tile grid, an image): earlier ones said "video"
+        let version: &[u8] = if heif { b"probe-heif-v1" } else { b"probe-v1" };
+        let key = crate::hash_key(&[fp.as_bytes(), format!("{fps_hint:?}").as_bytes(), version]);
         let info: MediaInfo = match cache.get_json(&key) {
             Some(i) => i,
             None => {
-                let i = probe(tc, &path, fps_hint)?;
+                let i = match probe(tc, &path, fps_hint) {
+                    Ok(i) => i,
+                    Err(e) if heif => return Err(AssetDecodeError::new(id, &path, format!("{e:#}")).into()),
+                    Err(e) => return Err(e),
+                };
                 let _ = cache.put_json(&key, &i);
                 i
             }
@@ -203,7 +264,17 @@ pub fn probe_project(tc: &Toolchain, p: &Project, dir: &Path, cache: &Cache) -> 
             facts.duration = n as f64 / f.as_f64();
             facts.fps = Some(f);
         }
-        out.assets.insert(id.clone(), AssetMedia { id: id.clone(), path, fingerprint: fp, info: Some(info), facts });
+        // HEIC/HEIF photos are rendered from a decoded still; the fingerprint stays the photo's
+        let (path, source) = if heif && kind == AssetKind::Image {
+            let alpha = info.video.as_ref().is_some_and(|v| v.alpha);
+            let still = decode_heif(tc, &path, &fp, alpha, &still_cache(cache))
+                .map_err(|e| AssetDecodeError::new(id, &path, decode_reason(&e)))?;
+            (still, Some(path))
+        } else {
+            (path, None)
+        };
+        out.assets
+            .insert(id.clone(), AssetMedia { id: id.clone(), path, source, fingerprint: fp, info: Some(info), facts });
     }
     Ok(out)
 }

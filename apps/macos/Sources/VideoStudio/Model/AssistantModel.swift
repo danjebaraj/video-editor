@@ -254,7 +254,12 @@ final class AssistantModel: ObservableObject {
         draft = ""
 
         let p = document.project
-        let summary: SummaryResult? = try? Core.run("project.summary", ["project": Core.arg(p), "path": document.fileURL.path, "run_config": document.selectedRunConfig?.id])
+        // Read as plain JSON: `media` goes back to the core untouched (HEIC photos in it get
+        // JPEG copies Claude can open).
+        let summaryJSON = (try? Core.raw("project.summary", ["project": Core.arg(p), "path": document.fileURL.path, "run_config": document.selectedRunConfig?.id]))
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let summary = summaryJSON.flatMap { j in (j["summary"] as? String).map { SummaryResult(summary: $0, read_paths: j["read_paths"] as? [String] ?? []) } }
         var request: [String: Any] = [
             "session_dir": scratch(session.id).path,
             "spec": document.editor.text,
@@ -264,6 +269,7 @@ final class AssistantModel: ObservableObject {
             "read_paths": summary?.read_paths ?? [],
             "reference_paths": p.assistant_folders,
             "project_summary": summary?.summary ?? "",
+            "media": summaryJSON?["media"] as? [Any] ?? [],
             "extra_env": extraEnv,
         ]
         if let e = p.models.effort, !e.isEmpty { request["effort"] = e }

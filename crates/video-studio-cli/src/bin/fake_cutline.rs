@@ -3,7 +3,9 @@
 //!
 //! Markers in `project.json5` steer it: `INVALID` makes `validate` fail, `FAIL_RENDER` makes
 //! `render` fail, `QA_WARN` and `QA_FAIL` change the QA report. `FAKE_CUTLINE_SLEEP_MS` slows
-//! `render` down (for cancellation tests).
+//! `render` down (for cancellation tests). `still` writes a JPEG as if every photo were a
+//! 3024×4032 iPhone picture, fails with `E_IMAGE_DECODE: bad file` on a file starting with
+//! `BROKEN`, and logs each call to `.fake-still-calls` next to its output.
 
 use std::io::Write;
 
@@ -79,13 +81,43 @@ fn main() {
                 std::process::exit(1);
             }
             let audio_only = f.ends_with(".wav") || f.ends_with(".mp3");
-            let image = f.ends_with(".png") || f.ends_with(".jpg");
+            let image = [".png", ".jpg", ".heic", ".HEIC", ".heif"].iter().any(|e| f.ends_with(e));
             println!(
                 "{}",
                 json!({"path": f, "format": "fake", "duration": if image { 0.0 } else { 12.5 }, "size": meta.len(), "kind": if audio_only { "audio" } else if image { "image" } else { "video" },
                 "video": if audio_only { serde_json::Value::Null } else { json!({"codec": "h264", "width": 1920, "height": 1080, "display_width": 1920, "display_height": 1080, "fps": "30/1", "fps_f64": 30.0, "vfr": false, "rotation": 0}) },
                 "audio": if image { serde_json::Value::Null } else { json!({"codec": "aac", "sample_rate": 48000, "channels": 2}) }})
             );
+        }
+        "still" => {
+            let (Some(f), Some(out)) = (file, args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)))
+            else {
+                std::process::exit(2)
+            };
+            let out = std::path::Path::new(out);
+            let dir = out.parent().unwrap_or(std::path::Path::new("."));
+            let _ = std::fs::create_dir_all(dir);
+            if let Ok(mut log) =
+                std::fs::OpenOptions::new().create(true).append(true).open(dir.join(".fake-still-calls"))
+            {
+                let _ = writeln!(log, "{f}");
+            }
+            if std::fs::read(f).map(|b| b.starts_with(b"BROKEN")).unwrap_or(true) {
+                eprintln!("E_IMAGE_DECODE: bad file");
+                std::process::exit(1);
+            }
+            let max = args
+                .iter()
+                .position(|a| a == "--max-side")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|m| m.parse::<f64>().ok())
+                .unwrap_or(4032.0)
+                .min(4032.0);
+            let (w, h) = ((3024.0 * max / 4032.0).round() as u32, max as u32);
+            image::RgbImage::from_pixel(w, h, image::Rgb([40, 90, 200]))
+                .save_with_format(out, image::ImageFormat::Jpeg)
+                .unwrap();
+            println!("{}", json!({"out": out, "width": w, "height": h}));
         }
         "validate" => match read() {
             None => {

@@ -147,7 +147,7 @@ export class Assistant {
     this.running.value = true;
     this.stopRequested = false;
     try {
-      const summary = await core<{ summary: string; read_paths: string[] }>('project.summary', { project: this.doc.p, path: this.doc.path.value, run_config: this.doc.runConfig.value || null });
+      const summary = await core<{ summary: string; read_paths: string[]; media?: unknown[] }>('project.summary', { project: this.doc.p, path: this.doc.path.value, run_config: this.doc.runConfig.value || null });
       const req = {
         session_dir: `${this.sessionsDir}\\${s.id}`,
         spec: this.getSpec(),
@@ -159,6 +159,7 @@ export class Assistant {
         read_paths: summary.read_paths,
         reference_paths: this.doc.p.assistant_folders ?? [],
         project_summary: summary.summary,
+        media: summary.media ?? [],
         helper: (await request<{ helper: string }>('shell.info')).helper,
         extra_env: this.extraEnv,
       };

@@ -168,7 +168,12 @@ impl Policy {
                     let fold = |s: &str| if cfg!(windows) { s.to_lowercase() } else { s.to_string() };
                     let first = fold(rel.components().next().map(|c| c.as_str()).unwrap_or(""));
                     let whole = fold(rel.as_str());
-                    if first == "logs" || first == ".bin" || whole == "run.json" || whole == "media-manifest.json" {
+                    if first == "logs"
+                        || first == ".bin"
+                        || first == crate::viewable::PREVIEWS_DIR
+                        || whole == "run.json"
+                        || whole == "media-manifest.json"
+                    {
                         return Decision::Deny(format!("{rel} is written by the app and is read-only."));
                     }
                 }
@@ -924,6 +929,7 @@ mod tests {
         assert!(denied(write("logs/events.ndjson".into())).contains("read-only"));
         assert!(denied(write(".bin/cutline".into())).contains("read-only"));
         assert!(denied(write("run.json".into())).contains("read-only"));
+        assert!(denied(write("media-previews/photo.jpg".into())).contains("read-only"), "the app makes the previews");
         assert!(denied(p.decide("Write", &json!({"content": "x"}))).contains("no file path"));
         assert!(denied(p.decide("WebFetch", &json!({"url": "https://example.com"}))).contains("Web access is off"));
         let mut web = p.clone();

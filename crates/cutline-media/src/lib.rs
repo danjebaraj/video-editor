@@ -3,6 +3,7 @@
 pub mod assets;
 pub mod cache;
 pub mod probe;
+pub mod still;
 
 pub use probe::{probe, MediaInfo};
 

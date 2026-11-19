@@ -189,6 +189,34 @@ fn ffmpeg() -> Option<Utf8PathBuf> {
     .clone()
 }
 
+/// cutline, as Settings finds it, found once.
+fn cutline() -> Option<Utf8PathBuf> {
+    static C: OnceLock<Option<Utf8PathBuf>> = OnceLock::new();
+    C.get_or_init(|| {
+        let s = video_studio_core::settings::Settings::load(&paths::library_dir());
+        video_studio_core::claude::locate::find_cutline(&s.cutline_path, &s.cutline_repo)
+            .map(|c| Utf8PathBuf::from(c.path))
+    })
+    .clone()
+}
+
+/// A HEIC/HEIF photo as a JPEG (WebView2 can't show HEIC): a viewable copy made with
+/// `cutline still --max-side 1568`, cached by the file's quick hash. Err: why there is none.
+fn heic_jpeg(path: &Utf8Path) -> Result<Vec<u8>, String> {
+    let cutline = cutline().ok_or_else(|| "cutline isn't installed".to_string())?;
+    let dir = paths::cache_root(&paths::library_dir()).join("heic");
+    let jpg = video_studio_core::viewable::cached_copy(path, &dir, &cutline)?;
+    std::fs::read(&jpg).map_err(|e| e.to_string())
+}
+
+/// The answer for a HEIC/HEIF: the JPEG, or 422 with the reason as text (the page shows it).
+fn heic_response(path: &Utf8Path) -> (i32, &'static str, String, Vec<u8>) {
+    match heic_jpeg(path) {
+        Ok(b) => (200, "OK", format!("Content-Type: image/jpeg\r\nContent-Length: {}", b.len()), b),
+        Err(why) => (422, "Unprocessable Content", "Content-Type: text/plain; charset=utf-8".into(), why.into_bytes()),
+    }
+}
+
 /// A JPEG still of a video frame (cached), at most 640 px wide.
 fn video_frame(path: &Utf8Path, n: u32, frames: u32, dur: f64) -> Option<Vec<u8>> {
     let fp = std::fs::metadata(path).ok()?;
@@ -248,13 +276,15 @@ pub fn respond(env: &ICoreWebView2Environment, window: u64, args: &ICoreWebView2
             return;
         }
         let uri = CoTaskMemPWSTR::from(uri).to_string();
-        // Video stills take an ffmpeg call: answer later, off the UI thread.
-        if let Some((path, n, frames, dur)) = thumb_request(&uri) {
+        // Video stills and HEIC photos take a cutline/ffmpeg call: answer later, off the UI thread.
+        let heic = path_from_url(&uri).filter(|p| video_studio_core::viewable::needs_copy(p));
+        if let Some((path, n, frames, dur)) = thumb_request(&uri).or(heic.map(|p| (p, 0, 1, 0.0))) {
             if !is_allowed(window, &path) {
                 complete(env, args, (403, "Forbidden", String::new(), Vec::new()));
                 return;
             }
-            if !content_type(&path).starts_with("video/") {
+            let heic = video_studio_core::viewable::needs_copy(&path);
+            if !heic && !content_type(&path).starts_with("video/") {
                 complete(env, args, serve_file(&path, ""));
                 return;
             }
@@ -263,9 +293,13 @@ pub fn respond(env: &ICoreWebView2Environment, window: u64, args: &ICoreWebView2
             let key = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             PENDING.with(|p| p.borrow_mut().insert(key, (args.clone(), deferral, env.clone())));
             std::thread::spawn(move || {
-                let r = match video_frame(&path, n, frames, dur) {
-                    Some(b) => (200, "OK", format!("Content-Type: image/jpeg\r\nContent-Length: {}", b.len()), b),
-                    None => (404, "Not Found", String::new(), Vec::new()),
+                let r = if heic {
+                    heic_response(&path)
+                } else {
+                    match video_frame(&path, n, frames, dur) {
+                        Some(b) => (200, "OK", format!("Content-Type: image/jpeg\r\nContent-Length: {}", b.len()), b),
+                        None => (404, "Not Found", String::new(), Vec::new()),
+                    }
                 };
                 crate::app::post(move || {
                     if let Some((args, deferral, env)) = PENDING.with(|p| p.borrow_mut().remove(&key)) {

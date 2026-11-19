@@ -208,3 +208,62 @@ fn frame_validation() {
     assert!(has("E_UNKNOWN_ASSET", "/main/1/frame/background"), "{:?}", l.diags);
     assert!(has("E_BAD_VALUE", "/main/2/frame/background/gradient"), "{:?}", l.diags);
 }
+
+/// Mean absolute luma step between neighbouring pixels (both directions) over a rectangle: how
+/// crisp fine detail such as UI text is after scaling.
+fn edge_contrast(f: &image::RgbImage, x: u32, y: u32, w: u32, h: u32) -> f64 {
+    let luma = |px: u32, py: u32| {
+        let p = f.get_pixel(px, py).0;
+        0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64
+    };
+    let mut sum = 0.0;
+    let mut n = 0.0;
+    for py in y..y + h - 1 {
+        for px in x..x + w - 1 {
+            sum += (luma(px + 1, py) - luma(px, py)).abs() + (luma(px, py + 1) - luma(px, py)).abs();
+            n += 2.0;
+        }
+    }
+    sum / n
+}
+
+/// F2 acceptance: a framed recording is as sharp as the same recording scaled to the same size
+/// with a plain `fit_pad` (no extra softening from the window, padding or shadow).
+#[test]
+fn framing_keeps_text_as_sharp_as_fit_pad_at_the_same_scale() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    // fine high-contrast detail, like small UI text
+    gen::grid_video(tc, &d.path().join("ui.mp4"), 1280, 800, 30, 2.0, 3).unwrap();
+    let fr = ScreenFrame { style: FrameStyle::Browser, ..Default::default() };
+    let l = cutline_core::frame::layout(&fr, (1280, 800), (1280, 720));
+    let (cx, cy, cw, ch) = l.content;
+    let write = |name: &str, w: u32, h: u32, clip: &str| {
+        let p = d.path().join(name);
+        std::fs::write(
+            &p,
+            format!(
+                "{{version: 1, name: '{name}', target: 'custom', width: {w}, height: {h}, fps: 30,
+                  assets: {{ui: {{path: 'ui.mp4'}}}}, audio: {{voice_chain: 'raw'}}, main: [{clip}]}}"
+            ),
+        )
+        .unwrap();
+        p
+    };
+    let framed = write(
+        "framed.json5",
+        1280,
+        720,
+        "{id: 'a', clip: 'ui', duration: 1, frame: {style: 'browser', background: '#101014', shadow: 0.5}}",
+    );
+    let (pw, ph) = (cw & !1, ch & !1);
+    let plain = write("plain.json5", pw, ph, "{id: 'a', clip: 'ui', duration: 1, reframe: {mode: 'fit_pad'}}");
+    let f = &read_frames(tc, &render(&framed).0, &[15]).unwrap()[0];
+    let g = &read_frames(tc, &render(&plain).0, &[15]).unwrap()[0];
+    // the middle of the recording in each (away from rounded corners and the bar)
+    let (mw, mh) = (cw * 6 / 10, ch * 6 / 10);
+    let in_frame = edge_contrast(f, cx + (cw - mw) / 2, cy + (ch - mh) / 2, mw, mh);
+    let in_plain = edge_contrast(g, (pw - mw) / 2, (ph - mh) / 2, mw, mh);
+    assert!(in_plain > 5.0, "the measure sees the detail: {in_plain}");
+    assert!(in_frame >= in_plain * 0.97, "framed {in_frame:.2} vs fit_pad {in_plain:.2} at {cw}×{ch}");
+}

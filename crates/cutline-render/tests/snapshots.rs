@@ -20,6 +20,7 @@ fn media(items: &[(&str, &str, AssetKind, f64, u32, u32, bool)]) -> ProjectMedia
             AssetMedia {
                 id: id.to_string(),
                 path: PathBuf::from("/proj").join(path),
+                source: None,
                 fingerprint: format!("fp-{id}"),
                 info: None,
                 facts: MediaFacts {

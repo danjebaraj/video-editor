@@ -28,6 +28,7 @@ pub mod spec;
 pub mod standin;
 pub mod timeutil;
 pub mod validation;
+pub mod viewable;
 
 pub use error::{Error, Result};
 

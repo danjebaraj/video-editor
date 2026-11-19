@@ -144,7 +144,7 @@ pub fn default_kind_from_ext(path: &str) -> AssetKind {
     }
     let ext = Path::new(&p).extension().and_then(|e| e.to_str()).unwrap_or("");
     match ext {
-        "png" | "jpg" | "jpeg" | "webp" | "bmp" | "tif" | "tiff" | "gif" => AssetKind::Image,
+        "png" | "jpg" | "jpeg" | "webp" | "bmp" | "tif" | "tiff" | "gif" | "heic" | "heif" => AssetKind::Image,
         "wav" | "mp3" | "m4a" | "aac" | "flac" | "ogg" | "opus" | "aiff" | "aif" => AssetKind::Audio,
         "html" | "htm" => AssetKind::Html,
         "svg" => AssetKind::Svg,
