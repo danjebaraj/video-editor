@@ -701,6 +701,10 @@ struct ClaudeInfo: Codable, Equatable {
 struct CutlineInfo: Codable, Equatable {
     var path: String
     var version: String
+    /// Whether this cutline has `cutline still` (HEIC/HEIF copies). Kept so validation sees it
+    /// when the environment goes back to the core; dropping it reported every cutline as an
+    /// older build (BUG-0003).
+    var still: Bool?
 }
 
 struct DoctorSummary: Codable, Equatable {

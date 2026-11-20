@@ -187,9 +187,21 @@ impl EnvProbe for ShellEnv {
 
 fn environment_arg(args: &Value, settings: &Settings) -> R<Environment> {
     Ok(match opt::<Environment>(args, "environment")? {
-        Some(e) => e,
+        Some(mut e) => {
+            recheck_still(&mut e);
+            e
+        }
         None => detect_environment(settings),
     })
+}
+
+/// A shell that doesn't know `still` (an older app build) sends the environment without it, and
+/// it reads as `false`, so every cutline looked like an old build (BUG-0003). The cutline itself
+/// is asked again before anything relies on `still: false`.
+fn recheck_still(env: &mut Environment) {
+    if let Some(c) = env.cutline.as_mut().filter(|c| !c.still) {
+        c.still = locate::has_still(Utf8Path::new(&c.path));
+    }
 }
 
 // MARK: The dispatcher
@@ -816,5 +828,32 @@ mod tests {
         assert!(
             matches!(call("no.such".into(), "{}".into()), Err(CoreError::Failed { code, .. }) if code == "bad_request")
         );
+    }
+
+    /// BUG-0003: the macOS app sent the environment back without `still`, so validation said a
+    /// current cutline was an older build. A missing `still` is asked of the cutline again.
+    #[cfg(unix)]
+    #[test]
+    fn environment_without_still_is_rechecked() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let make = |name: &str, still: bool| {
+            let p = t.path().join(name);
+            let tail = if still { "exit 0" } else { "echo \"error: unrecognized subcommand '$1'\" >&2; exit 2" };
+            std::fs::write(&p, format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cutline 0.1.0'; exit 0; fi\n{tail}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p.to_str().unwrap().to_string()
+        };
+        let parse = |path: &str| -> Environment {
+            serde_json::from_value(json!({"cutline": {"path": path, "version": "0.1.0"}, "min_claude_version": ""}))
+                .unwrap()
+        };
+        let mut current = parse(&make("new", true));
+        assert!(!current.cutline.as_ref().unwrap().still);
+        recheck_still(&mut current);
+        assert!(current.cutline.unwrap().still);
+        let mut old = parse(&make("old", false));
+        recheck_still(&mut old);
+        assert!(!old.cutline.unwrap().still);
     }
 }
