@@ -2,9 +2,9 @@
 id: BUG-0003
 type: bug
 title: Cutline not latest
-status: fixed
+status: verified
 fix: fixed
-verified: no
+verified: yes
 approved: yes
 approved-on: 2026-11-19
 priority: medium
@@ -44,3 +44,9 @@ The core detects `still: true` correctly, but the macOS app's `CutlineInfo` (`ap
 - Not done: checking in the running app that Validate no longer warns (verified: no).
 - Files: apps/macos/Sources/VideoStudio/Core/Models.swift, crates/video-studio-ffi/src/lib.rs
 - Commit/PR: not committed
+
+### 2026-11-19
+- Implemented: closed as verified. The owner confirmed the fix ("mark the three fixed bugs as done"; `verified: yes` was already set).
+- Not done: nothing.
+- Files: none (planner item only)
+- Commit/PR: none
