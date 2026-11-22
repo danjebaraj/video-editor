@@ -116,25 +116,117 @@ pub fn text_background_detail(on: &RgbImage, off: &RgbImage, bbox: (u32, u32, u3
     (n > 0).then(|| sum / n as f64)
 }
 
+/// One frame of `path` near `t` (seconds) as RGB: the first stored frame at or after `t`.
+///
+/// A variable-rate screen recording stores a frame only when the screen changes, so a seek can
+/// land after the last stored frame while still inside the file's duration; ffmpeg then writes
+/// nothing and prints nothing (TASK-silver-cherry-R3MZ, TASK-honest-cedar-A73E). When the fast
+/// seek gives no frame this tries an accurate seek (`-ss` after `-i`), then the last frame at or
+/// before `t`. If all fail, the error names the file, `t`, the duration, the frame count and
+/// ffmpeg's messages.
 pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
     let still =
         cutline_core::timeline::default_kind_from_ext(&path.to_string_lossy()) == cutline_core::model::AssetKind::Image;
-    let mut cmd = std::process::Command::new(&tc.ffmpeg);
-    cmd.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
-    if !still {
-        cmd.args(["-ss", &format!("{:.6}", t.max(0.0))]);
+    let ts = format!("{:.6}", t.max(0.0));
+    let mut errs = String::new();
+    // 1. fast input seek; 2. accurate output seek
+    for accurate in [false, true] {
+        if still && accurate {
+            break;
+        }
+        let mut cmd = std::process::Command::new(&tc.ffmpeg);
+        cmd.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
+        if !still && !accurate {
+            cmd.args(["-ss", &ts]);
+        }
+        cmd.arg("-i").arg(path);
+        if accurate {
+            cmd.args(["-ss", &ts]);
+        }
+        let o = cmd
+            .args(["-frames:v", "1", "-vf", cutline_testkit::analyze::CONV, "-f", "image2pipe", "-c:v", "png", "-"])
+            .output()?;
+        if o.status.success() && !o.stdout.is_empty() {
+            return Ok(image::load_from_memory(&o.stdout)?.to_rgb8());
+        }
+        errs.push_str(String::from_utf8_lossy(&o.stderr).trim());
     }
-    let o = cmd
+    // 3. the frame on screen at `t`: the last one stored at or before it
+    if !still {
+        match grab_held(tc, path, t) {
+            Ok(img) => return Ok(img),
+            Err(e) => {
+                let e = e.to_string();
+                if !e.is_empty() && !errs.contains(&e) {
+                    if !errs.is_empty() {
+                        errs.push('\n');
+                    }
+                    errs.push_str(&e);
+                }
+            }
+        }
+    }
+    let (dur, frames) = frame_facts(tc, path);
+    anyhow::bail!(
+        "frame grab at {t:.3}s failed: {} (duration {}, {} frames): {}",
+        path.display(),
+        dur.map(|d| format!("{d:.3}s")).unwrap_or_else(|| "unknown".into()),
+        frames.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()),
+        if errs.trim().is_empty() { "(ffmpeg printed nothing)".to_string() } else { errs }
+    )
+}
+
+/// The frame on screen at `t`: the last stored frame whose time is at or before `t`. Decodes from
+/// the start of the file, so use it for sparse, variable-rate recordings (or as a fallback),
+/// where the first frame after a seek can be seconds later than the one being shown.
+pub fn grab_held(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
+    let dir = tempfile::tempdir()?;
+    let out = dir.path().join("held.png");
+    let o = std::process::Command::new(&tc.ffmpeg)
+        .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-t", &format!("{:.6}", t.max(0.0) + 0.0005)])
         .arg("-i")
         .arg(path)
-        .args(["-frames:v", "1", "-vf", cutline_testkit::analyze::CONV, "-f", "image2pipe", "-c:v", "png", "-"])
+        .args([
+            "-an",
+            "-vf",
+            cutline_testkit::analyze::CONV,
+            "-fps_mode",
+            "passthrough",
+            "-update",
+            "1",
+            "-c:v",
+            "png",
+            "-y",
+        ])
+        .arg(&out)
         .output()?;
-    anyhow::ensure!(
-        o.status.success() && !o.stdout.is_empty(),
-        "frame grab at {t:.3}s failed: {}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-    Ok(image::load_from_memory(&o.stdout)?.to_rgb8())
+    match std::fs::read(&out) {
+        Ok(b) if o.status.success() && !b.is_empty() => Ok(image::load_from_memory(&b)?.to_rgb8()),
+        _ => anyhow::bail!("{}", String::from_utf8_lossy(&o.stderr).trim()),
+    }
+}
+
+/// The frame shown at `t` in a source: the held frame for a sparse recording, else [`grab`].
+pub fn grab_source(tc: &cutline_deps::Toolchain, path: &Path, t: f64, sparse: bool) -> Result<RgbImage> {
+    if sparse {
+        if let Ok(img) = grab_held(tc, path, t) {
+            return Ok(img);
+        }
+    }
+    grab(tc, path, t)
+}
+
+/// Duration and stored video frame count, for error messages.
+fn frame_facts(tc: &cutline_deps::Toolchain, path: &Path) -> (Option<f64>, Option<u64>) {
+    let o = std::process::Command::new(&tc.ffprobe)
+        .args(["-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries"])
+        .args(["format=duration:stream=nb_read_packets", "-of", "default=nw=1"])
+        .arg(path)
+        .output();
+    let Ok(o) = o else { return (None, None) };
+    let text = String::from_utf8_lossy(&o.stdout);
+    let field = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)).map(str::trim).map(str::to_string);
+    (field("duration=").and_then(|v| v.parse().ok()), field("nb_read_packets=").and_then(|v| v.parse().ok()))
 }
 
 fn clip_label(tl: &Timeline, t: f64) -> String {
@@ -251,12 +343,152 @@ pub fn static_gaps(pr: &Prepared, min: f64) -> Vec<(f64, f64)> {
     ev.windows(2).filter(|w| w[1] - w[0] > min).map(|w| (w[0], w[1])).collect()
 }
 
+/// Mean absolute difference (0–1) between frames 0.5 s apart above which an HTML graphic counts
+/// as a visual change.
+pub const HTML_CHANGE: f64 = 0.005;
+
+/// [`static_gaps`], then each gap that an HTML / Lottie / SVG clip or layer covers is checked in
+/// the rendered `video`: such a graphic changes the picture through its own animation (its seek
+/// function), which the edit doesn't show. Frames 0.5 s apart that differ by more than
+/// [`HTML_CHANGE`] split the gap (TASK-honest-cedar-A73E).
+pub fn static_gaps_seen(pr: &Prepared, min: f64, tc: &cutline_deps::Toolchain, video: &Path) -> Vec<(f64, f64)> {
+    use cutline_core::model::{AssetKind, Layer};
+    let tl = &pr.timeline;
+    let drawn = |k: AssetKind| matches!(k, AssetKind::Html | AssetKind::Lottie | AssetKind::Svg);
+    let mut spans: Vec<(f64, f64)> = tl
+        .clips
+        .iter()
+        .filter(|c| drawn(c.kind))
+        .map(|c| (tl.secs(c.start), tl.secs(c.end())))
+        .chain(
+            tl.layers
+                .iter()
+                .filter(|l| matches!(l.layer, Layer::Html { .. }))
+                .map(|l| (tl.secs(l.start), tl.secs(l.end))),
+        )
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = vec![];
+    for (a, b) in static_gaps(pr, min) {
+        let mut cuts: Vec<f64> = vec![];
+        for (s, e) in spans.iter().map(|(s, e)| (s.max(a), e.min(b))).filter(|(s, e)| e - s >= 1.0) {
+            cuts.extend(picture_changes(tc, video, s, e, 0.5, HTML_CHANGE));
+        }
+        if cuts.is_empty() {
+            out.push((a, b));
+            continue;
+        }
+        let mut ev = vec![a, b];
+        ev.extend(cuts);
+        ev.sort_by(|x, y| x.total_cmp(y));
+        out.extend(ev.windows(2).filter(|w| w[1] - w[0] > min).map(|w| (w[0], w[1])));
+    }
+    out
+}
+
+/// Times in `from..to` of `video` where the frame differs from the one `step` seconds earlier by
+/// a mean absolute luma difference above `limit` (0–1).
+fn picture_changes(tc: &cutline_deps::Toolchain, video: &Path, from: f64, to: f64, step: f64, limit: f64) -> Vec<f64> {
+    let (w, h) = (96usize, 96usize);
+    let Ok(o) = std::process::Command::new(&tc.ffmpeg)
+        .args([
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            &format!("{from:.3}"),
+            "-t",
+            &format!("{:.3}", to - from),
+        ])
+        .arg("-i")
+        .arg(video)
+        .args(["-an", "-vf", &format!("fps={},scale={w}:{h},format=gray", 1.0 / step), "-f", "rawvideo", "-"])
+        .output()
+    else {
+        return vec![];
+    };
+    let frames: Vec<&[u8]> = o.stdout.chunks_exact(w * h).collect();
+    frames
+        .windows(2)
+        .enumerate()
+        .filter(|(_, p)| {
+            p[0].iter().zip(p[1]).map(|(x, y)| (*x as f64 - *y as f64).abs()).sum::<f64>() / (w * h) as f64 / 255.0
+                > limit
+        })
+        .map(|(k, _)| from + (k + 1) as f64 * step)
+        .collect()
+}
+
 pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
     review_with(l, out_dir, None)
 }
 
 /// `review`, with a text recognition engine chosen on the command line (`--ocr`).
 pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<ReviewReport> {
+    review_opts(l, out_dir, ocr, None)
+}
+
+/// One side of a shot comparison.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+pub struct ShotSample {
+    pub clip: String,
+    /// Timeline seconds of the sampled frame.
+    pub at: f64,
+    /// Mean normalized BT.709 luma (0–1) of the graded picture, before captions and overlays.
+    pub mean_luma: f64,
+}
+
+/// `--compare-shots LEFT,RIGHT`: two clips' graded frames side by side, with their luma.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+pub struct ShotComparison {
+    pub left: ShotSample,
+    pub right: ShotSample,
+    /// Right minus left.
+    pub difference: f64,
+    pub image: PathBuf,
+}
+
+/// Where a main clip can be sampled: the middle of the part of it that is on screen alone (outside
+/// the transitions into and out of it), in timeline frames. `Err` names the clip and why.
+pub fn clean_sample_frame(tl: &Timeline, id: &str) -> std::result::Result<i64, String> {
+    let Some(c) = tl.clips.iter().find(|c| c.id == id) else {
+        let ids: Vec<&str> = tl.clips.iter().map(|c| c.id.as_str()).collect();
+        return Err(format!("--compare-shots: no main clip `{id}` in this export (clips: {})", ids.join(", ")));
+    };
+    let mut from = c.start;
+    let mut to = c.start + c.frames;
+    for t in &tl.transitions {
+        if t.after + 1 == c.index {
+            from = from.max(t.start + t.frames);
+        }
+        if t.after == c.index {
+            to = to.min(t.start);
+        }
+    }
+    if to <= from {
+        return Err(format!(
+            "--compare-shots: clip `{id}` is never on screen alone (its transitions cover all of it), so it has no clean frame to sample"
+        ));
+    }
+    Ok((from + to) / 2)
+}
+
+/// Mean normalized BT.709 luma (0–1) of an RGB frame.
+pub fn mean_luma(img: &RgbImage) -> f64 {
+    let n = (img.width() * img.height()).max(1) as f64;
+    img.pixels().map(|p| 0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64).sum::<f64>() / n / 255.0
+}
+
+/// Like [`review_with`]; `compare` names two main clips whose graded frames are put side by side
+/// (`shots/compare_<left>_<right>.png` and `.json`). The comparison is information only: it
+/// changes neither the project nor QA.
+pub fn review_opts(
+    l: &Loaded,
+    out_dir: &Path,
+    ocr: Option<&str>,
+    compare: Option<(&str, &str)>,
+) -> Result<ReviewReport> {
     let tc = cutline_deps::toolchain()?;
     std::fs::create_dir_all(out_dir)?;
     for sub in ["cuts", "captions", "reframe", "annotations"] {
@@ -266,9 +498,59 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     }
     let (name, e) = pipeline::exports(&l.project).remove(0);
     let pr = pipeline::prepare(l, name.clone(), &e, true)?;
+    let compare_frames = match compare {
+        Some((a, b)) => Some((
+            (a, clean_sample_frame(&pr.timeline, a).map_err(anyhow::Error::msg)?),
+            (b, clean_sample_frame(&pr.timeline, b).map_err(anyhow::Error::msg)?),
+        )),
+        None => None,
+    };
     let preview = out_dir.join("preview_540p.mp4");
     let opts = RenderOptions { draft: true, out: Some(preview.clone()), ..Default::default() };
     let (plan, _exec) = pipeline::render(l, &pr, &opts)?;
+    // ---- shot comparison (graded clip segments: no captions or overlays yet)
+    let mut shot_outputs: Option<(PathBuf, PathBuf)> = None;
+    if let Some(((a, fa), (b, fb))) = compare_frames {
+        let tlr = &pr.timeline;
+        let sample = |id: &str, f: i64| -> Result<(ShotSample, RgbImage)> {
+            let c = tlr.clips.iter().find(|c| c.id == id).context("clip")?;
+            let seg = plan.segments.iter().find(|s| s.clip_id == id).context("the clip's segment")?;
+            let img = grab(tc, &seg.mezzanine, tlr.fps.frames_to_secs(f - c.start))?;
+            Ok((ShotSample { clip: id.to_string(), at: tlr.secs(f), mean_luma: mean_luma(&img) }, img))
+        };
+        let (ls, li) = sample(a, fa)?;
+        let (rs, ri) = sample(b, fb)?;
+        let h = li.height().min(ri.height()).min(720);
+        let rl = image::imageops::resize(&li, li.width() * h / li.height(), h, image::imageops::FilterType::Triangle);
+        let rr = image::imageops::resize(&ri, ri.width() * h / ri.height(), h, image::imageops::FilterType::Triangle);
+        let mut img = hstack(&rl, &rr, 8);
+        let p = Painter::new();
+        p.label(
+            &mut img,
+            8,
+            8,
+            16.0,
+            &format!("{}  {}  luma {:.3}", ls.clip, format_tc(ls.at), ls.mean_luma),
+            [255, 255, 255],
+        );
+        p.label(
+            &mut img,
+            rl.width() as i32 + 16,
+            8,
+            16.0,
+            &format!("{}  {}  luma {:.3}", rs.clip, format_tc(rs.at), rs.mean_luma),
+            [255, 255, 255],
+        );
+        let dir = out_dir.join("shots");
+        std::fs::create_dir_all(&dir)?;
+        let stem = format!("compare_{}_{}", sanitize(a), sanitize(b));
+        let png = dir.join(format!("{stem}.png"));
+        img.save(&png)?;
+        let cmp = ShotComparison { difference: rs.mean_luma - ls.mean_luma, left: ls, right: rs, image: png.clone() };
+        let jp = dir.join(format!("{stem}.json"));
+        std::fs::write(&jp, serde_json::to_vec_pretty(&cmp)?)?;
+        shot_outputs = Some((png, jp));
+    }
     // prefer an up-to-date final render for stills and QA
     let final_path = l.dir.join("out").join(format!("{}.mp4", cutline_render::output_name(&l.project, &l.path)));
     let proj_mtime = std::fs::metadata(&l.path).and_then(|m| m.modified()).ok();
@@ -277,11 +559,15 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     let tl = &pr.timeline;
     let dur = tl.duration();
     let painter = Painter::new();
-    let mut images: Vec<PathBuf> = vec![];
-    let mut files: Vec<PathBuf> = vec![];
+    // the shot comparison first, so the image limit never drops it
+    let (mut images, mut files): (Vec<PathBuf>, Vec<PathBuf>) = match shot_outputs {
+        Some((png, json)) => (vec![png], vec![json]),
+        None => (vec![], vec![]),
+    };
 
     // ---- QA
     let mut ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);
+    ctx.ocr = crate::ocr::setting(ocr, pr.project.qa.as_ref().and_then(|q| q.ocr))?;
     let mut target = tl.target.clone();
     if !use_final {
         target.width = plan.geometry.width;
@@ -402,7 +688,7 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
         for frac in [0.1, 0.5, 0.9] {
             let i = ((path.len() as f64 - 1.0) * frac) as usize;
             let src_t = c.src_in + (i as f64 / path.fps) * c.speed;
-            let mut f = grab(tc, &m.path, src_t)?;
+            let mut f = grab_source(tc, &m.path, src_t, m.sparse())?;
             let s = f.width() as f64 / path.src_w as f64;
             stroke_rect(
                 &mut f,
@@ -444,7 +730,7 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     let tp = out_dir.join("timeline.txt");
     std::fs::write(&tp, timeline_text(&pr))?;
     files.push(tp);
-    let mut suggestions = suggestions(&pr, &qa, &plan.audio, tc)?;
+    let mut suggestions = suggestions_seen(&pr, &qa, &plan.audio, tc, Some(&src))?;
     // ---- text over detailed content: compare a frame without the text with one showing it
     for b in pr.extras.text_boxes.iter().filter(|b| b.kind == "text") {
         let t_on = (b.start + b.end) / 2.0;
@@ -589,8 +875,24 @@ pub fn suggestions(
     audio: &cutline_render::audio_plan::AudioPlan,
     tc: &cutline_deps::Toolchain,
 ) -> Result<Vec<String>> {
+    suggestions_seen(pr, qa, audio, tc, None)
+}
+
+/// [`suggestions`], with the rendered `video` to look at where the edit alone can't tell
+/// (HTML graphics that animate).
+pub fn suggestions_seen(
+    pr: &Prepared,
+    qa: &QaReport,
+    audio: &cutline_render::audio_plan::AudioPlan,
+    tc: &cutline_deps::Toolchain,
+    video: Option<&Path>,
+) -> Result<Vec<String>> {
     let mut s = vec![];
-    for (a, b) in static_gaps(pr, 5.0) {
+    let gaps = match video {
+        Some(v) => static_gaps_seen(pr, 5.0, tc, v),
+        None => static_gaps(pr, 5.0),
+    };
+    for (a, b) in gaps {
         s.push(format!(
             "No visual change for {:.1}s ({}–{}): add a cut, punch-in, B-roll or a graphic.",
             b - a,

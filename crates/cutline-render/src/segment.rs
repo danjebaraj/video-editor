@@ -30,6 +30,10 @@ pub struct SegmentSpec {
     pub has_source_audio: bool,
     /// ProRes 4444 (yuv444p10le) instead of 422 HQ.
     pub chroma444: bool,
+    /// The dialogue part of `filter` alone (`[aout]`), for audio-only renders.
+    pub audio_filter: String,
+    /// Whether `audio_filter` reads the input (`[0:a]`); silence needs no input at all.
+    pub audio_reads_input: bool,
 }
 
 /// Extra per-clip inputs computed outside (reframe crop paths etc.).
@@ -359,6 +363,8 @@ pub fn build(
     filter.push_str(";\n");
     filter.push_str(&a.join(";\n"));
     filter.push('\n');
+    let audio_filter = format!("{}\n", a.join(";\n"));
+    let audio_reads_input = audio_filter.contains("[0:a]");
     let mut deps = extras.deps.clone();
     if let Some(fp) = frame {
         deps.push(fp.png.clone());
@@ -376,7 +382,26 @@ pub fn build(
         deps,
         has_source_audio: has_audio,
         chroma444: extras.chroma444,
+        audio_filter,
+        audio_reads_input,
     }
+}
+
+/// Job that renders only a segment's dialogue (`[aout]`) as PCM f32 WAV: the same samples as the
+/// mezzanine's audio, without decoding or encoding any picture (`cutline audio`).
+pub fn audio_job(s: &SegmentSpec, tc: &cutline_deps::Toolchain, script: &Path, out_tmp: &Path) -> Job {
+    let mut j = Job::new(format!("segment audio {}", s.clip_id));
+    j.args(base_args(false));
+    if s.audio_reads_input {
+        j.args(s.input_args.clone());
+    }
+    j.args(tc.filter_complex_file_args(script));
+    j.args(["-map", "[aout]", "-c:a", "pcm_f32le", "-ar", "48000", "-ac", "2", "-map_metadata", "-1"]);
+    j.args(["-fflags", "+bitexact", "-flags:a", "+bitexact", "-f", "wav"]);
+    j.arg(out_tmp.to_string_lossy().to_string());
+    j.scripts.push((script.to_path_buf(), s.audio_filter.clone()));
+    j.outputs.push(out_tmp.to_path_buf());
+    j
 }
 
 /// Job that renders the segment mezzanine (ProRes 422 HQ + PCM f32).

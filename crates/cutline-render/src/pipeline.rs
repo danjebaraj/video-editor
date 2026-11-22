@@ -520,6 +520,136 @@ pub fn plan_for(l: &Loaded, pr: &Prepared, opts: &RenderOptions) -> Result<Plan>
     build_plan(tc, &pr.project, &l.path, &l.media, &pr.timeline, opts, pr.export_name.as_deref(), &pr.extras)
 }
 
+/// `prepare` for an audio-only render: the same timeline and audio inputs, without the picture
+/// work (`extras::compute_audio`).
+pub fn prepare_audio(l: &Loaded, export_name: Option<String>, e: &Export) -> Result<Prepared> {
+    let brand = crate::extras::load_brand(l, &l.project)?;
+    let (expanded, notes) = crate::auto::expand(l, &l.project, &brand)?;
+    let p = for_export(&expanded, e);
+    let (tl, mut diags) = resolve(&p, &l.media, &context(&l.dir));
+    diags.extend(notes);
+    if has_errors(&diags) {
+        bail!(LoadError::Invalid(diags));
+    }
+    let tl = tl.context("timeline did not resolve")?;
+    let extras = crate::extras::compute_audio(l, &p, &tl)?;
+    diags.extend(extras.warnings.clone());
+    Ok(Prepared { export_name, project: p, timeline: tl, diags, extras, export: e.clone() })
+}
+
+/// What `render_audio` made.
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioRender {
+    pub export: Option<String>,
+    pub output: PathBuf,
+    /// Seconds (the delivered length of the export).
+    pub duration: f64,
+    pub sample_rate: u32,
+    pub channels: u32,
+    /// Whether any source can be heard (false: a silent timeline).
+    pub audible: bool,
+    pub loudness: Option<crate::audio_plan::LoudnessResult>,
+    pub segments_rendered: usize,
+    pub segments_cached: usize,
+}
+
+/// The export's final mix as a WAV, exactly as the production render makes it before muxing
+/// (trims, offsets, gains, fades, ducking, silence and two-pass loudness), without rendering,
+/// capturing or encoding any picture. Clip dialogue comes from audio-only segment renders (cached
+/// by content); an export `range` is cut out as the video's would be. `out` is written only when
+/// everything succeeded.
+pub fn render_audio(l: &Loaded, pr: &Prepared, out: &Path, opts: &RenderOptions) -> Result<AudioRender> {
+    let tc = cutline_deps::toolchain()?;
+    let p = &pr.project;
+    let tl = &pr.timeline;
+    let g = crate::Geometry { width: tl.target.width, height: tl.target.height, fps: tl.fps };
+    let cdir = crate::cutline_dir(&l.dir);
+    let seg_dir = cdir.join("cache").join("audio-segments");
+    let work =
+        cdir.join("tmp").join(format!("{}-audio-{}", std::process::id(), pr.export_name.as_deref().unwrap_or("main")));
+    std::fs::create_dir_all(&seg_dir)?;
+    std::fs::create_dir_all(&work)?;
+    let default_mode = p.default_reframe.as_ref().map(|r| r.mode).unwrap_or(cutline_core::model::ReframeMode::Cover);
+    let (mut wavs, mut todo) = (vec![], vec![]);
+    for c in &tl.clips {
+        let m = l.media.get(&c.asset).with_context(|| format!("no media for asset {}", c.asset))?;
+        let ex = crate::segment::ClipExtras { pad_color: pr.extras.pad_color.clone(), ..Default::default() };
+        let spec = crate::segment::build(
+            c,
+            m,
+            &g,
+            default_mode,
+            &ex,
+            crate::segment::samples_at(c.start, &g),
+            crate::segment::samples_at(c.end(), &g),
+        );
+        let key = cutline_media::hash_key(&[
+            if spec.audio_reads_input { m.fingerprint.as_bytes() } else { b"silence" },
+            spec.audio_filter.as_bytes(),
+            if spec.audio_reads_input {
+                spec.input_args.join(" ").replace(&*m.path.to_string_lossy(), "")
+            } else {
+                String::new()
+            }
+            .as_bytes(),
+            cutline_core::VERSION.as_bytes(),
+            tc.version.as_bytes(),
+            b"aseg-v1",
+        ]);
+        let wav = seg_dir.join(format!("{key}.wav"));
+        if opts.no_cache || !wav.exists() {
+            let script = work.join(format!("aseg_{:03}.filter", c.index));
+            let tmp = seg_dir.join(format!("{key}.tmp.wav"));
+            todo.push((crate::segment::audio_job(&spec, tc, &script, &tmp), tmp, wav.clone()));
+        }
+        wavs.push(wav);
+    }
+    let rendered = todo.len();
+    for (job, tmp, wav) in todo {
+        job.run(tc)?;
+        std::fs::rename(&tmp, &wav)?;
+    }
+    let audio = crate::audio_plan::plan(tc, p, tl, &g, &wavs, &l.media, &work, &l.dir, &pr.extras, opts)?;
+    let loudness = crate::audio_plan::execute(tc, &audio)?;
+    // silent: no source, or nothing above the loudness gate
+    let audible = !audio.stems.is_empty() && loudness.as_ref().map(|r| r.input_i > -69.0).unwrap_or(true);
+    // the delivered part, as the final encode cuts it
+    let d = delivery(&pr.export, tl);
+    let (from, to) = d.range.unwrap_or((0, tl.total_frames));
+    let (s0, s1) = (crate::segment::samples_at(from, &g), crate::segment::samples_at(to, &g));
+    let tmp_out = out.with_extension("partial.wav");
+    let o = std::process::Command::new(&tc.ffmpeg)
+        .args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i"])
+        .arg(&audio.final_wav)
+        .args([
+            "-af",
+            &format!("atrim=start_sample={s0}:end_sample={s1},asetpts=N/SR/TB"),
+            "-c:a",
+            "pcm_f32le",
+            "-f",
+            "wav",
+        ])
+        .arg(&tmp_out)
+        .output()?;
+    if !o.status.success() {
+        let _ = std::fs::remove_file(&tmp_out);
+        bail!("writing the mix failed: {}", String::from_utf8_lossy(&o.stderr).trim());
+    }
+    std::fs::rename(&tmp_out, out)?;
+    let _ = std::fs::remove_dir_all(&work);
+    Ok(AudioRender {
+        export: pr.export_name.clone(),
+        output: out.to_path_buf(),
+        duration: (s1 - s0) as f64 / crate::segment::SAMPLE_RATE as f64,
+        sample_rate: crate::segment::SAMPLE_RATE as u32,
+        channels: 2,
+        audible,
+        loudness,
+        segments_rendered: rendered,
+        segments_cached: tl.clips.len() - rendered,
+    })
+}
+
 pub fn render(l: &Loaded, pr: &Prepared, opts: &RenderOptions) -> Result<(Plan, ExecReport)> {
     let tc = cutline_deps::toolchain()?;
     let plan = plan_for(l, pr, opts)?;

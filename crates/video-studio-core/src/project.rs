@@ -320,6 +320,9 @@ impl RunConfig {
 pub enum RunKind {
     DryRun,
     Production,
+    /// Audio Review (FEAT-neat-osprey-DKK7): the soundtrack of one output, built from the spec
+    /// with the production audio steps and mixed with `cutline audio`; no picture is rendered.
+    AudioReview,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

@@ -836,6 +836,33 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 ));
                 continue;
             }
+            // A page, animation or vector graphic is drawn by Chrome, not decoded by ffmpeg: as a
+            // `video`/`broll`/`image`/`presenter` layer it reached the final encode as a raw file
+            // and ffmpeg failed with "Invalid data found when processing input".
+            let drawn = facts
+                .get(a)
+                .map(|f| f.kind)
+                .filter(|k| matches!(k, AssetKind::Html | AssetKind::Lottie | AssetKind::Svg));
+            if let (
+                Some(k),
+                Layer::Video { .. } | Layer::Broll { .. } | Layer::Image { .. } | Layer::Presenter { .. },
+            ) = (drawn, l)
+            {
+                let kind = match k {
+                    AssetKind::Html => "HTML",
+                    AssetKind::Lottie => "Lottie",
+                    _ => "SVG",
+                };
+                d.push(
+                    Diagnostic::error(
+                        "E_WRONG_ASSET_KIND",
+                        format!("{base}/type"),
+                        format!("`{a}` is an {kind} graphic, which a `{}` layer can't play", l.kind()),
+                    )
+                    .hint(format!("use {{type: \"html\", asset: \"{a}\", …}}: cutline renders it in headless Chrome with alpha (set `duration` on the asset)")),
+                );
+                continue;
+            }
         }
         if let Layer::Text { template, .. } = l {
             if !catalog::TEXT_TEMPLATES.contains(&template.as_str()) {
@@ -1112,6 +1139,35 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 } else {
                     // shorter than the span: start later instead
                     start = end - fps.secs_to_frames(ml);
+                }
+            }
+        }
+        if let Layer::Audio { gain_keys, .. } = &layer {
+            let span = fps.frames_to_secs(end - start);
+            for (k, g) in gain_keys.iter().enumerate() {
+                let kp = format!("{base}/gain_keys/{k}");
+                if !g.db.is_finite() || g.db.abs() > 60.0 {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{kp}/db"),
+                        "db must be a finite gain within ±60 dB",
+                    ));
+                }
+                if !g.at.is_finite() || g.at < 0.0 || g.at > span + 1e-6 {
+                    d.push(
+                        Diagnostic::error(
+                            "E_BAD_VALUE",
+                            format!("{kp}/at"),
+                            format!("at must be within the layer: 0 to {span:.3}s from its start"),
+                        )
+                        .hint("gain key times are seconds from the layer's start, not timeline times"),
+                    );
+                } else if k > 0 && gain_keys[k - 1].at.is_finite() && g.at <= gain_keys[k - 1].at {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{kp}/at"),
+                        format!("gain key times must increase: {} is not after {}", g.at, gain_keys[k - 1].at),
+                    ));
                 }
             }
         }

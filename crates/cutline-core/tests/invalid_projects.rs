@@ -32,10 +32,14 @@ fn lookup() -> StaticLookup {
         MediaFacts { kind: AssetKind::Image, alpha: false, duration: 0.04, has_audio: false, ..vid(0.04) },
     );
     m.0.insert("gone".into(), MediaFacts { exists: false, ..vid(0.0) });
+    m.0.insert(
+        "card".into(),
+        MediaFacts { kind: AssetKind::Html, alpha: true, duration: 3.0, has_audio: false, fps: None, ..vid(3.0) },
+    );
     m
 }
 
-const ASSETS: &str = r#"assets: { a: {path: "a.mp4"}, b: {path: "b.mp4"}, music: {path: "m.mp3", role: "music"}, logo: {path: "logo.png"} }"#;
+const ASSETS: &str = r#"assets: { a: {path: "a.mp4"}, b: {path: "b.mp4"}, music: {path: "m.mp3", role: "music"}, logo: {path: "logo.png"}, card: {path: "graphics/card.html", duration: 3} }"#;
 
 /// Returns (code, path) of all errors (warnings included when `warn`).
 fn check(body: &str) -> Vec<(String, String)> {
@@ -178,6 +182,21 @@ fn e19_empty_main() {
 #[test]
 fn e20_wrong_asset_kind() {
     expect(r#"main: [{id: "c1", clip: "music"}]"#, "E_WRONG_ASSET_KIND", "/main/0/clip");
+}
+/// TASK-silver-cherry-R3MZ: an HTML file used as an ordinary video overlay used to pass validation
+/// and fail in ffmpeg ("Invalid data found when processing input"). It now fails at the layer's
+/// `type`, before anything is rendered; the supported `html` layer stays valid.
+#[test]
+fn e20b_html_asset_as_media_layer() {
+    for t in ["video", "broll", "image"] {
+        expect(
+            &format!("{OK_MAIN}, layers: [{{type: \"{t}\", asset: \"card\", start: 0, end: 3}}]"),
+            "E_WRONG_ASSET_KIND",
+            "/layers/0/type",
+        );
+    }
+    let ok = check(&format!("{OK_MAIN}, layers: [{{type: \"html\", asset: \"card\", start: 0, end: 3}}]"));
+    assert!(ok.is_empty(), "{ok:?}");
 }
 #[test]
 fn e21_layer_time() {
@@ -431,4 +450,36 @@ fn a_narrower_only_rect_reframe_leaves_the_wide_output_whole() {
         "E_FIELD_CONFLICT",
         "/main/0/reframe/narrower_only",
     );
+}
+
+/// TASK-honest-cedar-A73E: a font that isn't bundled (Georgia) names the bundled ones.
+#[test]
+fn missing_font_lists_the_bundled_fonts() {
+    let p = cutline_core::parse::parse_project(&format!(
+        "{{ version: 1, {ASSETS}, {OK_MAIN}, captions: {{font: 'Georgia'}} }}"
+    ))
+    .unwrap();
+    let ctx = Context { fonts: vec!["Anton".into(), "Inter".into()], ..Default::default() };
+    let (_, d) = resolve(&p, &lookup(), &ctx);
+    let f = d.iter().find(|x| x.code == "E_FONT_MISSING").expect("E_FONT_MISSING");
+    assert_eq!(f.path, "/captions/font");
+    assert_eq!(f.hint.as_deref(), Some("bundled: Anton, Inter"));
+}
+
+/// FEAT-magic-alpaca-JPD6: gain keys must be finite, increase, and lie inside the layer.
+#[test]
+fn gain_keys_are_checked() {
+    let layer = |keys: &str| {
+        format!("{OK_MAIN}, layers: [{{type: \"audio\", asset: \"music\", start: 1, end: 5, gain_keys: [{keys}]}}]")
+    };
+    let ok = check(&layer("{at: 0, db: 0}, {at: 2, db: -12}, {at: 4, db: -3}"));
+    assert!(ok.is_empty(), "{ok:?}");
+    expect(&layer("{at: 1, db: 0}, {at: 1, db: -6}"), "E_BAD_VALUE", "/layers/0/gain_keys/1/at");
+    expect(&layer("{at: 3, db: 0}, {at: 2, db: -6}"), "E_BAD_VALUE", "/layers/0/gain_keys/1/at");
+    expect(&layer("{at: -0.5, db: 0}"), "E_BAD_VALUE", "/layers/0/gain_keys/0/at");
+    expect(&layer("{at: 4.5, db: 0}"), "E_BAD_VALUE", "/layers/0/gain_keys/0/at");
+    expect(&layer("{at: 1, db: 100}"), "E_BAD_VALUE", "/layers/0/gain_keys/0/db");
+    // not a number at all never reaches the timeline
+    assert!(!check(&layer("{at: 1, db: Infinity}")).is_empty());
+    assert!(!check(&layer("{at: 1, gain: 3}")).is_empty());
 }

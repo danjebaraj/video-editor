@@ -16,7 +16,7 @@ export type MediaRole = ("footage" | "b_roll" | "screen_recording" | "logo" | "m
  * This interface was referenced by `Project`'s JSON-Schema
  * via the `definition` "RunKind".
  */
-export type RunKind = ("dry_run" | "production")
+export type RunKind = (("dry_run" | "production") | "audio_review")
 /**
  * This interface was referenced by `Project`'s JSON-Schema
  * via the `definition` "RunStatus".

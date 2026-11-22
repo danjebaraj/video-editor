@@ -79,6 +79,20 @@ fn role_name(r: Role) -> &'static str {
     }
 }
 
+/// An ffmpeg `volume` expression (linear factor) for a gain curve in dB: linear in dB between
+/// keys, the first/last key's value before/after them; `t` is seconds from the layer start.
+pub fn gain_curve_expr(keys: &[cutline_core::model::GainKey]) -> String {
+    let db = |k: &cutline_core::model::GainKey| f(k.db);
+    let mut e = db(keys.last().unwrap());
+    for w in keys.windows(2).rev() {
+        let (a, b) = (&w[0], &w[1]);
+        let seg = format!("{}+({})*(t-{})/{}", db(a), f(b.db - a.db), f(a.at), f(b.at - a.at));
+        e = format!("if(lt(t,{}),{seg},{e})", f(b.at));
+    }
+    e = format!("if(lt(t,{}),{},{e})", f(keys[0].at), db(&keys[0]));
+    format!("pow(10,({e})/20)")
+}
+
 /// The loudness every voice-over file is brought to before the voice chain (`audio.level_voice`).
 const VOICE_LEVEL_LUFS: f64 = -20.0;
 /// The most one voice-over file is raised or lowered to get there.
@@ -128,6 +142,7 @@ pub fn plan(
         fade_out: f64,
         looped: bool,
         file_dur: f64,
+        gain_keys: Vec<cutline_core::model::GainKey>,
     }
     let mut srcs: Vec<Src> = vec![];
     let resolve_sfx = |name: &str| -> Option<(PathBuf, f64)> {
@@ -140,7 +155,7 @@ pub fn plan(
         let start = samples_at(l.start, g);
         let len = samples_at(l.end, g) - start;
         match &l.layer {
-            Layer::Audio { asset, src_in, gain_db, fade_in, fade_out, r#loop, role, .. } => {
+            Layer::Audio { asset, src_in, gain_db, fade_in, fade_out, r#loop, role, gain_keys, .. } => {
                 let Some(m) = media.get(asset) else { continue };
                 let r = role.or(p.assets.get(asset).and_then(|a| a.role)).unwrap_or(Role::Music);
                 srcs.push(Src {
@@ -154,6 +169,7 @@ pub fn plan(
                     fade_out: fade_out.unwrap_or(0.0),
                     looped: r#loop.unwrap_or(false),
                     file_dur: m.facts.duration,
+                    gain_keys: gain_keys.clone(),
                 });
             }
             Layer::Sfx { asset, gain_db, pick_from, .. } => {
@@ -179,6 +195,7 @@ pub fn plan(
                     fade_out: 0.0,
                     looped: false,
                     file_dur: d,
+                    gain_keys: vec![],
                 });
             }
             Layer::Video { asset, audio: Some(true), gain_db, src_in, .. }
@@ -199,6 +216,7 @@ pub fn plan(
                     fade_out: 0.01,
                     looped: false,
                     file_dur: m.facts.duration,
+                    gain_keys: vec![],
                 });
             }
             _ => {}
@@ -221,6 +239,7 @@ pub fn plan(
                         fade_out: 0.01,
                         looped: false,
                         file_dur: m.facts.duration,
+                        gain_keys: vec![],
                     });
                 }
             }
@@ -247,6 +266,7 @@ pub fn plan(
                 fade_out: 0.0,
                 looped: false,
                 file_dur: d,
+                gain_keys: vec![],
             });
         }
     }
@@ -287,6 +307,11 @@ pub fn plan(
         let secs = s.len_s as f64 / SAMPLE_RATE as f64;
         if s.gain.abs() > 1e-9 {
             ch.push(format!("volume={}dB", f(s.gain)));
+        }
+        if !s.gain_keys.is_empty() {
+            // small frames so the per-frame gain follows the curve smoothly (no zipper steps)
+            ch.push("asetnsamples=n=64:p=0".into());
+            ch.push(format!("volume='{}':eval=frame", gain_curve_expr(&s.gain_keys)));
         }
         if s.fade_in > 0.0 {
             ch.push(format!("afade=t=in:d={}", f(s.fade_in.min(secs / 2.0))));

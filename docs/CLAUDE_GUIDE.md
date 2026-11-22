@@ -245,6 +245,35 @@ Segments are cached: changing captions, text or music does not re-render clips.
 - The music stays ducked through pauses in the voice shorter than `audio.duck.hold` (1.5 s by
   default), so it does not swell and drop between sentences; it comes up in longer pauses.
 
+- **Split edits (J-cut, L-cut):** let the sound of a shot lead into the cut or carry past it.
+  Mute each clip's own sound (`audio: "mute"`) and place it as an audio layer instead, so no
+  dialogue plays twice. Keep source handles: the clips use `in: 1`, so there is footage before
+  and after each picture span. The layer's `src_in` is the source time at its `start`: for the
+  sound to stay in sync with the picture, `src_in` = clip `in` − (clip start − layer start).
+  Picture cut at 2.0 s:
+
+  ```json5
+  // J-cut: B is heard from 1.5 s, half a second before it is seen
+  main: [ { id: "a", clip: "a", in: 1, out: 3, audio: "mute" },
+          { id: "b", clip: "b", in: 1, out: 3, audio: "mute" } ],
+  layers: [ { type: "audio", asset: "a", role: "dialogue", src_in: 1,   start: 0,   end: 1.5 },
+            { type: "audio", asset: "b", role: "dialogue", src_in: 0.5, start: 1.5, end: 4 } ],
+  // L-cut: A carries on to 2.5 s, half a second after the cut
+  layers: [ { type: "audio", asset: "a", role: "dialogue", src_in: 1,   start: 0,   end: 2.5 },
+            { type: "audio", asset: "b", role: "dialogue", src_in: 1.5, start: 2.5, end: 4 } ],
+  ```
+
+  Listen at the cut: the incoming line should start (J) or the outgoing line end (L) at the
+  layer boundary, never under both shots at once. Add a short `fade_in`/`fade_out` on the layers
+  where a word would be clipped.
+- **Gain over time:** `gain_keys: [{at, db}]` on an audio layer (seconds from the layer's
+  start) swells the music or dips it under one line without splitting the layer, for example
+  `gain_keys: [{at: 6, db: 0}, {at: 6.5, db: -10}, {at: 9, db: -10}, {at: 9.5, db: 0}]`. It adds to
+  `gain_db`, before ducking and loudness.
+- **Matching shots:** `cutline review project.json5 --compare-shots a,b` writes
+  `shots/compare_a_b.png` (the two graded frames, middle of each shot) and `.json` with each
+  frame's mean luma and the difference. Adjust `color.exposure` on the shot that is off, then
+  compare again. A difference can be intended (a lighting change); QA never warns about it.
 - Roles: `dialogue` (clip audio), `voice` (VO assets), `music`, `sfx`. Voice/dialogue chain
   `clean_voice` by default (`podcast_warm`, `raw` available).
 - Loudness: two-pass normalization to −14 LUFS / −1 dBTP by default (`audio.loudness`).
@@ -261,6 +290,16 @@ Segments are cached: changing captions, text or music does not re-render clips.
   `window.__cutline_seek = async (t) => {...}` for JS-driven animation. Asset `params` arrive as
   `window.__cutline_params`. Network is blocked (only local files next to the page / in the project).
 - HTML variants of templates: `hook_title_html`, `lower_third_html`, `end_card_html`.
+- Put an HTML / SVG / Lottie graphic over the picture with an `html` layer, never a `video`,
+  `broll` or `image` layer (those are for files ffmpeg decodes; validation rejects the mix with
+  `E_WRONG_ASSET_KIND` at `/layers/N/type`):
+
+  ```json5
+  assets: { ov04: { path: "graphics/ov04.html", duration: 4 } },   // duration: how long the page runs
+  layers: [ { type: "html", asset: "ov04", start: 2, end: 6 } ],  // transparent where the page is
+  ```
+
+  As a full-screen card in `main`, use the asset as a clip: `{id: "card", clip: "ov04"}`.
 
 ## Fixing common errors
 

@@ -4078,6 +4078,8 @@ dependencies = [
  "camino",
  "chrono",
  "cutline-core",
+ "cutline-deps",
+ "cutline-media",
  "fs2",
  "getrandom 0.3.4",
  "image",

@@ -64,6 +64,12 @@ pub struct QaContext {
     pub looped: bool,
     /// Spans of speech (file seconds) in an export delivered without audio.
     pub muted_speech: Vec<(f64, f64)>,
+    /// An HTML / Lottie / SVG clip or layer is on screen at 0.5 s: text drawn there isn't in
+    /// `first_text_at`, so the hook check reads the frame (TASK-honest-cedar-A73E).
+    pub html_opening: bool,
+    /// Text recognition for the content checks (`hook` with an HTML opening, `black_frames` on
+    /// dark cards): `qa.ocr`, `CUTLINE_OCR` or `--ocr`. `Off` skips it.
+    pub ocr: cutline_core::model::OcrEngine,
 }
 
 #[derive(Debug, Clone, Serialize)]

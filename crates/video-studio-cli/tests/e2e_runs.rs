@@ -857,3 +857,73 @@ fn a_run_drives_and_records_an_app_through_the_helper() {
     let perms = ndjson(&w.run_folder().join("logs/permissions.ndjson"));
     assert!(perms.iter().any(|p| p["reason"].as_str().unwrap_or("").contains("App recording is turned off")));
 }
+
+/// FEAT-neat-osprey-DKK7: an Audio Review builds only the soundtrack. Generated audio goes
+/// through the helper as in production; `cutline audio` is allowed and every picture command is
+/// refused; the run's result is the WAV of the chosen output, and reopening it plays the saved
+/// file. A run that ends without the mix is a failure that offers nothing to play.
+#[test]
+fn audio_review_builds_only_the_soundtrack() {
+    let mut w = World::new();
+    let eleven = fake_eleven();
+    w.eleven_url = Some(eleven.url.clone());
+    w.set_script(json!([
+        {"tool": "Write", "input": {"file_path": "project.json5", "content": PROJECT_JSON5}},
+        {"tool": "Bash", "input": {"command": "cutline validate --json project.json5"}},
+        {"tool": "Bash", "input": {"command": "video-studio eleven tts --voice v1 --text 'Hello there' --out vo.mp3"}},
+        {"tool": "Bash", "input": {"command": "cutline render project.json5"}},
+        {"tool": "Bash", "input": {"command": "cutline review project.json5"}},
+        {"tool": "Bash", "input": {"command": "cutline preview project.json5 --at 1"}},
+        {"tool": "Bash", "input": {"command": "video-studio capture open Safari"}},
+        {"tool": "Bash", "input": {"command": "cutline audio project.json5 --export youtube-shorts --out outputs/audio-review.wav"}},
+        {"tool": "Write", "input": {"file_path": "summary.md", "content": "## What you will hear\nThe voice-over.\n"}},
+        {"result": {"text": "The soundtrack is mixed.", "cost": 0.2}}
+    ]));
+    let o =
+        w.command(&["run", w.project.as_str(), "--config", "Social pack", "--audio-review", "--yes"]).output().unwrap();
+    assert_eq!(o.status.code(), Some(0), "stdout:\n{}\nstderr:\n{}", stdout(&o), stderr(&o));
+    let calls = w.tool_calls();
+    let by = |needle: &str| calls.iter().filter(|c| c.3.contains(needle)).map(|c| c.1.as_str()).collect::<Vec<_>>();
+    assert_eq!(by("cutline render"), vec!["deny"]);
+    assert_eq!(by("cutline review"), vec!["deny"]);
+    assert_eq!(by("cutline preview"), vec!["deny"]);
+    assert_eq!(by("capture open"), vec!["deny"]);
+    assert_eq!(by("cutline audio"), vec!["allow"]);
+    assert_eq!(by("eleven tts"), vec!["allow"], "generated audio is made as in production");
+    let p = w.load_project();
+    let r = p.runs.last().unwrap();
+    assert_eq!(r.kind, RunKind::AudioReview);
+    assert_eq!(r.status, RunStatus::Succeeded, "{r:?}");
+    let folder = Utf8Path::new(&r.folder);
+    assert!(folder.starts_with(w.lib.join("audio-reviews")), "{folder}");
+    assert!(folder.join("outputs/audio-review.wav").is_file());
+    assert!(!folder.join("outputs/youtube-shorts/youtube-shorts.mp4").exists(), "no video");
+    // reopening the result plays the saved file: no build
+    let results = video_studio_core::run::collect::load_results(folder);
+    assert_eq!(results.outputs.len(), 1, "{:?}", results.outputs);
+    assert!(results.outputs[0].path.ends_with("outputs/audio-review.wav") && results.outputs[0].exists);
+    assert!(!results.outputs[0].incomplete);
+    assert!((results.outputs[0].duration_s.unwrap() - 1.0).abs() < 0.01);
+    let prompt = std::fs::read_to_string(folder.join("logs/prompt.md")).unwrap();
+    assert!(prompt.contains("cutline audio project.json5"), "{prompt}");
+
+    // without the mix the run fails and offers nothing to play; the first review stays
+    w.set_script(json!([
+        {"tool": "Write", "input": {"file_path": "project.json5", "content": PROJECT_JSON5}},
+        {"result": {"text": "Done.", "cost": 0.1}}
+    ]));
+    let o =
+        w.command(&["run", w.project.as_str(), "--config", "Social pack", "--audio-review", "--yes"]).output().unwrap();
+    assert_ne!(o.status.code(), Some(0));
+    let p = w.load_project();
+    let r = p.runs.last().unwrap();
+    assert_eq!((r.kind, r.status), (RunKind::AudioReview, RunStatus::Failed));
+    let failed = video_studio_core::run::collect::load_results(Utf8Path::new(&r.folder));
+    assert!(failed.outputs.iter().all(|o| o.incomplete || !o.exists), "nothing to play: {:?}", failed.outputs);
+    assert_eq!(
+        p.runs.iter().filter(|r| r.kind == RunKind::AudioReview && r.status == RunStatus::Succeeded).count(),
+        1,
+        "the first review is still there"
+    );
+    assert!(folder.join("outputs/audio-review.wav").is_file());
+}

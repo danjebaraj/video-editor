@@ -22,6 +22,7 @@ cutline-transcribe = { version = "0.1.0", path = "../cutline-transcribe" }
 image = "0.25.6"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+tempfile = "3.27.0"
 tracing = "0.1.44"
 
 [features]

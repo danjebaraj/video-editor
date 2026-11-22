@@ -197,6 +197,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         cutline: cutline.clone(),
         helper: None,
         capture: false,
+        audio_review: false,
         path_dirs: cutline.iter().filter_map(|c| c.parent().map(Utf8Path::to_path_buf)).collect(),
         web_access: request.web_access,
         log: None,

@@ -60,6 +60,12 @@ name = "vs-fake-cutline"
 path = "src/bin/fake_cutline.rs"
 test = false
 
+# A Codex App Server double (FEAT-spry-alpaca-5RQZ)
+[[bin]]
+name = "vs-fake-codex"
+path = "src/bin/fake_codex.rs"
+test = false
+
 # The Win32 app the Windows recording backend is tested against (ui/spec.md §23.7)
 [[bin]]
 name = "vs-capture-target"

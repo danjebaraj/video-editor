@@ -465,6 +465,24 @@ fn html_cache(l: &Loaded) -> std::path::PathBuf {
     crate::cutline_dir(&l.dir).join("cache").join("html")
 }
 
+/// The extras an audio-only render needs (`cutline audio`): the brand's SFX files and the speech
+/// spans that drive ducking, with the script and pace checks. No HTML, reframing, frames,
+/// annotations or other picture work.
+pub fn compute_audio(l: &Loaded, p: &Project, tl: &Timeline) -> Result<PlanExtras> {
+    let brand = load_brand(l, p)?;
+    let mut extras = PlanExtras {
+        pad_color: crate::overlay::ff_color(&brand.colors.background),
+        sfx_files: brand.sfx_files(),
+        ..Default::default()
+    };
+    captions(l, p, tl, &brand, &mut extras)?;
+    let (script_notes, script_mismatches) = crate::auto::script_check(l, p, Some(tl), &brand);
+    extras.warnings.extend(script_notes);
+    extras.warnings.extend(crate::auto::voice_pace(l, p));
+    extras.script_mismatches = script_mismatches;
+    Ok(extras)
+}
+
 /// HTML capture settings: drafts and previews capture at half pixel density (same CSS layout)
 /// and at most 15 fps, which cuts Chrome's frame capture, the slowest part of a cold preview,
 /// by about 8×. Final renders capture every frame at full size.

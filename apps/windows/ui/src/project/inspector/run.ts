@@ -18,6 +18,16 @@ export function runTab(w: ProjectWindow): HTMLElement {
   let results: RunResults | null = null;
   let resultsFor = '';
   let timer: number | undefined;
+  // The live inspector is rebuilt on every update; the Transcript's open state and reading position
+  // live here so a rebuild keeps them (FEAT-humble-parrot-M68S).
+  let transcriptOpen = true;
+  const itemKeys = new WeakMap<object, number>();
+  let nextKey = 1;
+  const keyOf = (t: object) => {
+    let k = itemKeys.get(t);
+    if (k === undefined) itemKeys.set(t, (k = nextKey++));
+    return k;
+  };
 
   effect([w.runs.live, w.runs.selectedRun, w.doc.project, sub], () => {
     const live = w.runs.live.value;
@@ -49,28 +59,70 @@ export function runTab(w: ProjectWindow): HTMLElement {
     renderResult(rec);
   });
 
+  /** The first transcript entry visible at the top of the scroll area, and how far above or below
+   *  the top it sits, so the same entry can be put back in the same place after a rebuild. */
+  function readingPosition(): { key: string; offset: number; scrollTop: number } | null {
+    const body = root.querySelector<HTMLElement>('.live-transcript-body');
+    if (!body) return null;
+    const top = body.scrollTop;
+    for (const el of Array.from(body.querySelectorAll<HTMLElement>('[data-key]'))) {
+      if (el.offsetTop + el.offsetHeight > top) return { key: el.dataset.key!, offset: el.offsetTop - top, scrollTop: top };
+    }
+    return { key: '', offset: 0, scrollTop: top };
+  }
+
+  function restoreReadingPosition(pos: { key: string; offset: number; scrollTop: number } | null) {
+    const body = root.querySelector<HTMLElement>('.live-transcript-body');
+    if (!body || !pos) return;
+    const el = pos.key ? body.querySelector<HTMLElement>(`[data-key="${pos.key}"]`) : null;
+    body.scrollTop = el ? el.offsetTop - pos.offset : pos.scrollTop;
+  }
+
   function renderLive() {
     const l = w.runs.live.value!;
     const secs = (Date.now() - l.started) / 1000;
+    const pos = readingPosition();
     const stages = h('ol', { class: 'stages', 'aria-label': 'Stages' }, l.stages.map((s) => h('li', { class: `stage ${s.state}` },
-      h('span', { class: 'stage-icon' }, s.state === 'active' ? spinner(s.label) : icon(s.state === 'done' ? Icons.checkCircle : s.state === 'failed' ? Icons.warning : '')),
+      h('span', { class: 'stage-icon' }, s.state === 'active' ? spinner(s.label) : icon(s.state === 'done' ? Icons.checkCircle : s.state === 'failed' ? Icons.warning : '')),
       h('div', { class: 'grow' }, h('div', null, s.label), s.state === 'active' && l.fraction !== null ? h('fluent-progress-bar', { value: String(Math.round(l.fraction * 100)), max: '100', 'aria-label': `${s.label} progress` }) : null, s.state === 'active' && l.detail ? h('div', { class: 'muted small' }, l.detail) : null),
       s.seconds ? h('span', { class: 'muted small' }, `${Math.round(s.seconds)} s`) : null)));
     const cost = l.cost;
+    const toggle = h('button', {
+      class: 'live-transcript-toggle',
+      'aria-expanded': String(transcriptOpen),
+      'aria-controls': 'live-transcript-body',
+      onclick: () => {
+        transcriptOpen = !transcriptOpen;
+        renderLive();
+      },
+    }, h('span', { class: 'chevron', 'aria-hidden': 'true' }, transcriptOpen ? '▾' : '▸'), ' Transcript');
+    const body = transcriptOpen
+      ? h('div', { class: 'live-transcript-body transcript small', id: 'live-transcript-body', role: 'log', 'aria-label': 'Transcript entries', tabindex: '0' },
+          l.transcript.map((t) => {
+            const el = transcriptItem(t);
+            el.dataset.key = String(keyOf(t));
+            return el;
+          }),
+          l.streaming ? h('div', { class: 'msg assistant' }, l.streaming) : null)
+      : null;
     clear(
       root,
-      h('div', { class: 'tab-header' }, h('strong', null, l.kind === 'dry_run' ? 'Dry run' : 'Production run'), h('span', { class: 'muted' }, ` · ${modelName(l.model)} · ${elapsed(secs)}`), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, l.status)),
-      l.question
-        ? h('div', null, questionCard(l.question.questions, (a) => w.runs.answer(a)), l.question.timeout_s ? h('p', { class: 'hint' }, `With no answer in ${l.question.timeout_s} s, Claude proceeds on its stated assumption.`) : null)
-        : null,
-      stages,
-      h('dl', { class: 'estimates' },
-        h('dt', null, 'Claude'), h('dd', null, usd(cost?.claude_usd, cost?.claude_estimated)),
-        l.kind === 'production' ? [h('dt', null, 'ElevenLabs'), h('dd', null, `${cost?.eleven_credits ?? 0} of ${cost?.eleven_cap ?? 0} credits`)] : null),
-      l.warnings.length ? h('ul', { class: 'warnings small' }, l.warnings.map((x) => h('li', { class: 'warn' }, x))) : null,
-      h('details', { class: 'live-transcript' }, h('summary', null, 'Transcript'), h('div', { class: 'transcript small' }, l.transcript.slice(-200).map((t) => transcriptItem(t)), l.streaming ? h('div', { class: 'msg assistant' }, l.streaming) : null)),
-      h('div', { class: 'row end' }, button('Reveal Folder', () => request('shell.reveal', { path: l.folder }), { glyph: Icons.openFolder }), button(l.stopping ? 'Stopping…' : 'Stop', () => w.runs.stop(), { glyph: Icons.stop, disabled: l.stopping })),
+      h('div', { class: `live-details${transcriptOpen ? ' capped' : ''}` },
+        h('div', { class: 'tab-header' }, h('strong', null, l.kind === 'dry_run' ? 'Dry run' : 'Production run'), h('span', { class: 'muted' }, ` · ${modelName(l.model)} · ${elapsed(secs)}`), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, l.status)),
+        l.question
+          ? h('div', { class: 'live-pad' }, questionCard(l.question.questions, (a) => w.runs.answer(a)), l.question.timeout_s ? h('p', { class: 'hint' }, `With no answer in ${l.question.timeout_s} s, Claude proceeds on its stated assumption.`) : null)
+          : null,
+        stages,
+        h('dl', { class: 'estimates' },
+          h('dt', null, 'Claude'), h('dd', null, usd(cost?.claude_usd, cost?.claude_estimated)),
+          l.kind === 'production' ? [h('dt', null, 'ElevenLabs'), h('dd', null, `${cost?.eleven_credits ?? 0} of ${cost?.eleven_cap ?? 0} credits`)] : null),
+        l.warnings.length ? h('ul', { class: 'warnings small live-pad' }, l.warnings.map((x) => h('li', { class: 'warn' }, x))) : null),
+      h('div', { class: 'live-transcript-head' }, toggle),
+      body ?? h('div', { class: 'live-spacer' }),
+      h('div', { class: 'row end live-actions' }, button('Reveal Folder', () => request('shell.reveal', { path: l.folder }), { glyph: Icons.openFolder }), button(l.stopping ? 'Stopping…' : 'Stop', () => w.runs.stop(), { glyph: Icons.stop, disabled: l.stopping })),
     );
+    root.classList.add('live');
+    restoreReadingPosition(pos);
   }
 
   function transcriptItem(t: { role: string; text: string; detail?: string; failed?: boolean }): HTMLElement {
@@ -89,6 +141,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
   }
 
   function renderResult(rec: RunRecord) {
+    root.classList.remove('live');
     const rc = w.doc.p.run_configs.find((c) => c.id === rec.run_config);
     const failed = rec.status === 'failed';
     const head = h('div', { class: 'result-head' },

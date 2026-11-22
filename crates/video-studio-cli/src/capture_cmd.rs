@@ -93,6 +93,10 @@ pub enum CaptureCommand {
         y: f64,
         #[arg(allow_hyphen_values = true)]
         lines: i32,
+        /// Spread the scroll evenly over SECONDS (0.1 to 60) in small steps, for a smooth movement
+        /// in a recording
+        #[arg(long, value_name = "SECONDS")]
+        over: Option<f64>,
     },
     /// Type text into the app, at a pace that reads well on video
     Type { text: String },
@@ -166,7 +170,7 @@ fn execute(command: CaptureCommand, target: &Target) -> Result<String, Error> {
         }
         CaptureCommand::Move { x, y } => s.pointer(Pointer::Move { x, y }, app, frame),
         CaptureCommand::Drag { x, y, to_x, to_y } => s.pointer(Pointer::Drag { x, y, to_x, to_y }, app, frame),
-        CaptureCommand::Scroll { x, y, lines } => s.pointer(Pointer::Scroll { x, y, lines }, app, frame),
+        CaptureCommand::Scroll { x, y, lines, over } => s.pointer(Pointer::Scroll { x, y, lines, over }, app, frame),
         CaptureCommand::Type { text } => s.type_text(&text, app),
         CaptureCommand::Key { combo, times } => s.key(&combo, times, app),
         CaptureCommand::Menu { path } => s.menu(&path, app),

@@ -73,6 +73,8 @@ windows = { version = "0.62", features = [
 windows-core = "0.62"
 
 [dev-dependencies]
+cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+cutline-media = { version = "0.1.0", path = "../cutline-media" }
 tempfile = "3.27.0"
 
 [lints]

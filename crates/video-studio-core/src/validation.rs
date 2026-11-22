@@ -215,6 +215,14 @@ pub trait EnvProbe {
     fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
         None
     }
+    /// The provider chosen in Settings › Assistant.
+    fn provider(&self) -> crate::codex::Provider {
+        crate::codex::Provider::Claude
+    }
+    /// Codex's readiness, when Codex is the provider.
+    fn codex_status(&self) -> Option<crate::codex::CodexStatus> {
+        None
+    }
 }
 
 /// The real machine.
@@ -226,6 +234,12 @@ pub struct SystemEnv<'a> {
 }
 
 impl EnvProbe for SystemEnv<'_> {
+    fn provider(&self) -> crate::codex::Provider {
+        self.settings.provider
+    }
+    fn codex_status(&self) -> Option<crate::codex::CodexStatus> {
+        Some(crate::codex::check(&self.settings.codex_path))
+    }
     fn claude(&self) -> Option<ClaudeInfo> {
         locate::find_claude(&self.settings.claude_path)
     }
@@ -356,10 +370,12 @@ pub fn estimate_claude_cost(
     let context = 30_000.0 + spec_tokens + project.media.len() as f64 * 120.0;
     let turns = match kind {
         RunKind::DryRun => 12.0,
+        RunKind::AudioReview => 18.0 + project.media.len() as f64 * 0.5,
         RunKind::Production => 25.0 + 10.0 * outputs as f64 + project.media.len() as f64 * 0.5,
     };
     let output_tokens = match kind {
         RunKind::DryRun => 6_000.0,
+        RunKind::AudioReview => 8_000.0 + spec_tokens * 2.0,
         RunKind::Production => 12_000.0 + 3_000.0 * outputs as f64 + spec_tokens * 2.0,
     };
     // Most input is read from the prompt cache (about a tenth of the input price).
@@ -396,10 +412,7 @@ fn doctor_issues(c: &mut Ctx, env: &dyn EnvProbe, info: &CutlineInfo) {
                     Severity::Info,
                     "environment",
                     "Some optional cutline tools aren't installed".into(),
-                    Some(format!(
-                        "Not installed: {}. They are only needed for HTML graphics, captions from speech or reframing.",
-                        d.missing_optional.join(", ")
-                    )),
+                    Some(optional_tools_text(&d.missing_optional)),
                     FixLink::target("settings", "cutline"),
                 );
             }
@@ -407,8 +420,75 @@ fn doctor_issues(c: &mut Ctx, env: &dyn EnvProbe, info: &CutlineInfo) {
     }
 }
 
+/// What each missing optional tool is for, and only that (TASK-honest-cedar-A73E): with only
+/// whisper missing, HTML graphics and reframing aren't mentioned.
+pub fn optional_tools_text(missing: &[String]) -> String {
+    let purpose = |m: &str| -> (String, &'static str) {
+        let name = m.split(" (").next().unwrap_or(m).trim().to_string();
+        let lower = m.to_lowercase();
+        let what = if lower.starts_with("chrome") {
+            "to render HTML graphics"
+        } else if lower.starts_with("whisper") {
+            "to make captions from speech when no transcript is supplied"
+        } else if lower.starts_with("face model") {
+            "to follow faces when reframing"
+        } else {
+            ""
+        };
+        (name, what)
+    };
+    let items: Vec<(String, &str)> = missing.iter().map(|m| purpose(m)).collect();
+    let names: Vec<&str> = items.iter().map(|(n, _)| n.as_str()).collect();
+    let uses: Vec<String> = items
+        .iter()
+        .filter(|(_, w)| !w.is_empty())
+        .map(|(n, w)| if items.len() == 1 { format!("It's only needed {w}") } else { format!("{n} only {w}") })
+        .collect();
+    let mut text = format!("Not installed: {}.", names.join(", "));
+    if !uses.is_empty() {
+        let mut u = uses.join("; ");
+        if items.len() > 1 {
+            // "Chrome is only needed to …; whisper only to …"
+            u = u.replacen(" only ", " is only needed ", 1);
+        }
+        text.push(' ');
+        text.push_str(&u);
+        text.push('.');
+    }
+    text
+}
+
+/// The provider check for Codex (FEAT-spry-alpaca-5RQZ): missing, incompatible and signed out are
+/// separate blockers, each with its remedy. Claude isn't needed then.
+fn check_codex(c: &mut Ctx, env: &dyn EnvProbe) {
+    let status = env.codex_status().unwrap_or(crate::codex::CodexStatus::Missing);
+    if let Some((rule, title, fix)) = status.finding() {
+        c.add(rule, None, Severity::Blocker, "environment", title, Some(fix), FixLink::target("settings", "assistant"));
+        return;
+    }
+    // The transport and readiness are in place; the assistant and runs still drive Claude Code.
+    c.add(
+        "codex_runs_unavailable",
+        None,
+        Severity::Blocker,
+        "environment",
+        "Runs with Codex aren't available in this build yet".into(),
+        Some("Codex is installed and signed in, but this version still produces videos with Claude Code only. Choose Claude in Settings › Assistant to run.".into()),
+        FixLink::target("settings", "assistant"),
+    );
+}
+
 fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
     let env = input.env;
+    if env.provider() == crate::codex::Provider::Codex {
+        check_codex(c, env);
+    } else {
+        check_claude(c, env);
+    }
+    check_cutline_env(c, input, est, needs_audio);
+}
+
+fn check_claude(c: &mut Ctx, env: &dyn EnvProbe) {
     match env.claude() {
         None => c.add(
             "claude_missing",
@@ -458,6 +538,10 @@ fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, ne
             }
         }
     }
+}
+
+fn check_cutline_env(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
+    let env = input.env;
     match env.cutline() {
         None => c.add(
             "cutline_missing",
@@ -1373,7 +1457,7 @@ pub fn validate(input: &ValidateInput) -> Report {
     }
     let model = match input.kind {
         RunKind::DryRun => p.models.dry_run_or(input.settings),
-        RunKind::Production => input
+        RunKind::Production | RunKind::AudioReview => input
             .run_config
             .map(|r| r.production_model.clone())
             .unwrap_or_else(|| input.settings.default_production_model.clone()),
@@ -1383,14 +1467,14 @@ pub fn validate(input: &ValidateInput) -> Report {
     est.claude_usd_high = hi;
 
     // A dry run generates no audio, so the key and credits aren't needed for it.
-    let needs_audio = (needs_tts || needs_music) && input.kind == RunKind::Production;
+    let needs_audio = (needs_tts || needs_music) && input.kind != RunKind::DryRun;
     check_environment(&mut c, input, &mut est, needs_audio);
     check_media(&mut c, input, &outputs);
     check_spec(&mut c, input, &est);
     check_brand(&mut c, input);
     check_run_needs(&mut c, input, &outputs);
     check_outputs(&mut c, input, &outputs, out_root.as_ref(), &mut est);
-    if input.kind == RunKind::Production {
+    if input.kind != RunKind::DryRun {
         check_budget(&mut c, input, &est, outputs.len());
     }
 
@@ -1419,6 +1503,8 @@ pub struct FakeEnv {
     pub cartesia_key: bool,
     pub eleven_remaining: Option<u64>,
     pub capture: Option<crate::capture::Permissions>,
+    pub provider: crate::codex::Provider,
+    pub codex: Option<crate::codex::CodexStatus>,
 }
 
 impl Default for FakeEnv {
@@ -1442,6 +1528,8 @@ impl Default for FakeEnv {
             cartesia_key: false,
             eleven_remaining: Some(1_000_000),
             capture: Some(crate::capture::Permissions { screen_recording: true, accessibility: true, supported: true }),
+            provider: Default::default(),
+            codex: None,
         }
     }
 }
@@ -1476,6 +1564,12 @@ impl EnvProbe for FakeEnv {
     }
     fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
         self.capture
+    }
+    fn provider(&self) -> crate::codex::Provider {
+        self.provider
+    }
+    fn codex_status(&self) -> Option<crate::codex::CodexStatus> {
+        self.codex.clone()
     }
 }
 
@@ -1735,6 +1829,22 @@ mod tests {
         f.env = FakeEnv::default();
         f.env.signed_in = Some(false);
         assert!(has(&f.run(), "claude_signed_out", Severity::Blocker));
+        // Codex as the provider: Claude isn't needed; each Codex problem is its own blocker
+        f.env = FakeEnv { claude: None, provider: crate::codex::Provider::Codex, ..FakeEnv::default() };
+        for (status, rule) in [
+            (crate::codex::CodexStatus::Missing, "codex_missing"),
+            (crate::codex::CodexStatus::Incompatible { detail: "x".into() }, "codex_incompatible"),
+            (crate::codex::CodexStatus::SignInRequired, "codex_signed_out"),
+        ] {
+            f.env.codex = Some(status);
+            let r = f.run();
+            assert!(has(&r, rule, Severity::Blocker), "{rule}");
+            assert!(!has(&r, "claude_missing", Severity::Blocker), "a Codex workflow doesn't need Claude");
+        }
+        f.env.codex = Some(crate::codex::CodexStatus::Ready { plan: None, models: vec![] });
+        let r = f.run();
+        assert!(!has(&r, "codex_missing", Severity::Blocker) && !has(&r, "claude_missing", Severity::Blocker));
+        assert!(has(&r, "codex_runs_unavailable", Severity::Blocker), "runs with Codex aren't wired yet");
         // Windows: no Git Bash means no shell tool for Claude
         f.env = FakeEnv::default();
         f.env.claude.as_mut().unwrap().git_bash = None;
@@ -1771,6 +1881,19 @@ mod tests {
         f.env.doctor =
             Some(DoctorSummary { ok: true, missing_optional: vec!["tool chrome".into()], ..Default::default() });
         assert!(has(&f.run(), "cutline_optional", Severity::Info));
+        f.env.doctor = Some(DoctorSummary {
+            ok: true,
+            missing_optional: vec!["whisper (captions from speech)".into()],
+            ..Default::default()
+        });
+        let r = f.run();
+        let opt = r.issues.iter().find(|i| i.rule == "cutline_optional").unwrap();
+        assert_eq!(
+            opt.detail.as_deref(),
+            Some(
+                "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied."
+            )
+        );
         f.env = FakeEnv::default();
         f.env.free = Some(1_000);
         assert!(has(&f.run(), "disk_space", Severity::Blocker));
@@ -2119,5 +2242,18 @@ mod tests {
         r.add_dry_run(&readiness);
         assert_eq!(r.warnings, 3, "adding again replaces the old findings");
         assert!(!r.has_blockers());
+    }
+
+    #[test]
+    fn optional_tools_say_what_each_is_for() {
+        assert_eq!(
+            optional_tools_text(&["whisper (captions from speech)".into()]),
+            "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied."
+        );
+        assert_eq!(
+            optional_tools_text(&["Chrome (HTML graphics)".into(), "face model (reframing)".into()]),
+            "Not installed: Chrome, face model. Chrome is only needed to render HTML graphics; face model only to follow faces when reframing."
+        );
+        assert_eq!(optional_tools_text(&["tool chrome".into()]), "Not installed: tool chrome.");
     }
 }

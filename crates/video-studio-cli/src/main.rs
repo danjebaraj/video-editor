@@ -72,6 +72,13 @@ enum Command {
         /// Skip the dry run even if the run config asks for one
         #[arg(long)]
         no_dry_run: bool,
+        /// Audio Review: build and mix only the soundtrack of one output (no dry run, no
+        /// picture), saved as outputs/audio-review.wav in the run folder
+        #[arg(long)]
+        audio_review: bool,
+        /// With --audio-review: the output (name or ID) to audition; default the first
+        #[arg(long, requires = "audio_review")]
+        audio_output: Option<String>,
         /// Don't ask anything: accept warnings, and let Claude proceed on its stated assumption
         #[arg(long)]
         yes: bool,
@@ -287,8 +294,30 @@ fn main() {
         Command::Validate { project, config, dry_run, json } => {
             cmd_validate(&project, config.as_deref(), dry_run, json)
         }
-        Command::Run { project, config, model, output, no_dry_run, yes, json, log_level } => {
-            cmd_run(&project, &config, model, output, no_dry_run, yes, json, log_level == "debug")
+        Command::Run {
+            project,
+            config,
+            model,
+            output,
+            no_dry_run,
+            audio_review,
+            audio_output,
+            yes,
+            json,
+            log_level,
+        } => {
+            let audio = audio_review.then(|| audio_output.unwrap_or_default());
+            cmd_run(
+                &project,
+                &config,
+                model,
+                output,
+                no_dry_run || audio.is_some(),
+                audio,
+                yes,
+                json,
+                log_level == "debug",
+            )
         }
         Command::List { project, json } => cmd_list(&project, json),
         Command::Relink { project, search, prefix, write, json } => {
@@ -534,6 +563,7 @@ fn cmd_validate(project: &Utf8Path, config: Option<&str>, dry_run: bool, json: b
             model: None,
             output: None,
             revise: None,
+            audio_output: None,
             assume_answers: true,
             question_timeout_s: None,
             validation: Some(report.clone()),
@@ -650,10 +680,12 @@ fn cmd_run(
     model: Option<String>,
     output: Option<Utf8PathBuf>,
     no_dry_run: bool,
+    audio_review: Option<String>,
     yes: bool,
     json: bool,
     debug: bool,
 ) -> i32 {
+    let kind = if audio_review.is_some() { RunKind::AudioReview } else { RunKind::Production };
     let mut worst = exit_code::SUCCESS;
     let interactive = !json && !yes && std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
     for config in configs {
@@ -662,7 +694,7 @@ fn cmd_run(
             Err(e) => return fail(&e),
         };
         // Validation always runs first; a run can't start with blockers.
-        let mut report = match static_validation(&mut l, Some(config), RunKind::Production, output.as_deref()) {
+        let mut report = match static_validation(&mut l, Some(config), kind, output.as_deref()) {
             Ok(r) => r,
             Err(e) => return fail(&e),
         };
@@ -696,6 +728,7 @@ fn cmd_run(
                 model: None,
                 output: None,
                 revise: None,
+                audio_output: None,
                 assume_answers: yes,
                 question_timeout_s: None,
                 validation: Some(report.clone()),
@@ -743,10 +776,11 @@ fn cmd_run(
         let request = RunRequest {
             project_path: l.path.clone(),
             run_config: rc.id.clone(),
-            kind: RunKind::Production,
+            kind,
             model: model.clone(),
             output: output.clone(),
             revise: None,
+            audio_output: audio_review.clone().filter(|o| !o.is_empty()),
             assume_answers: yes,
             question_timeout_s: None,
             validation: Some(report),

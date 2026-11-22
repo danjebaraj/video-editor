@@ -231,8 +231,19 @@ fluent-button.danger-button { --colorBrandBackground: var(--danger); margin: 0 0
 .stage.failed .stage-icon { color: var(--warn); }
 .stage-icon { width: 20px; display: grid; place-items: center; }
 fluent-progress-bar { width: 100%; margin-top: 4px; }
-.live-transcript summary { cursor: pointer; }
-.live-transcript .transcript { max-height: 260px; }
+/* Live run: the details, the Transcript toggle and the actions stay put; only the transcript body
+   scrolls, and scrolling past either end doesn't move the run section (FEAT-humble-parrot-M68S). */
+.run-tab.live { display: flex; flex-direction: column; height: 100%; overflow: hidden; padding-bottom: 0; }
+.run-tab.live > * { margin-left: 0; margin-right: 0; }
+.run-tab.live .live-details { flex: 0 0 auto; overflow: auto; overscroll-behavior: contain; }
+.run-tab.live .live-details.capped { flex: 0 1 auto; max-height: 55%; }
+.run-tab.live .live-pad { margin: 0 12px; }
+.run-tab.live .live-transcript-head { flex: none; padding: 4px 12px; border-top: 1px solid var(--stroke); }
+.live-transcript-toggle { background: none; border: 0; padding: 4px 0; font: inherit; color: inherit; cursor: pointer; width: 100%; text-align: left; }
+.live-transcript-toggle .chevron { display: inline-block; width: 1em; color: var(--text-muted); }
+.run-tab.live .live-transcript-body { position: relative; flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: 4px; }
+.run-tab.live .live-spacer { flex: 1 1 0; }
+.run-tab.live .live-actions { flex: none; padding: 8px 12px; border-top: 1px solid var(--stroke); margin: 0; }
 .result-head { padding: 12px 0 8px; }
 .output-card { background: var(--card); border: 1px solid var(--stroke); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
 .player { width: 100%; max-height: 360px; background: black; border-radius: 4px; margin: 8px 0; }

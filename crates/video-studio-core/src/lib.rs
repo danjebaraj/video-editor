@@ -11,6 +11,7 @@ pub mod assistant;
 pub mod brand;
 pub mod capture;
 pub mod claude;
+pub mod codex;
 pub mod eleven;
 pub mod error;
 pub mod finish;

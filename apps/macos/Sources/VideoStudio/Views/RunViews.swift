@@ -365,36 +365,27 @@ struct LiveRunView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(runs.kind == "dry_run" ? "Dry run" : "Production run").font(.headline)
-                            Text(runs.liveModel).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(Fmt.elapsed(runs.elapsed)).font(.title3.monospacedDigit())
-                            .accessibilityLabel("Elapsed \(Fmt.elapsed(runs.elapsed))")
+            // The run details and the Transcript header stay put; only the transcript body scrolls
+            // (FEAT-humble-parrot-M68S). The details scroll on their own only when the inspector is
+            // too short to show them whole.
+            GeometryReader { geo in
+                VStack(alignment: .leading, spacing: 0) {
+                    ViewThatFits(in: .vertical) {
+                        details
+                        ScrollView { details }.scrollBounceBehavior(.basedOnSize)
                     }
-                    if let q = runs.question {
-                        QuestionCard(questions: q.questions, state: .pending, answers: [:], onAnswer: { runs.answer($0) }, onDismiss: nil)
-                        if let t = q.timeout { Text("With no answer in \(t) s, Claude proceeds on its stated assumption.").font(.caption).foregroundStyle(.secondary) }
+                    .frame(maxHeight: showTranscript ? geo.size.height * 0.55 : .infinity, alignment: .top)
+                    transcriptHeader
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                    if showTranscript {
+                        TranscriptScrollView(items: runs.transcript, streaming: runs.streamingText)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Spacer(minLength: 0)
                     }
-                    stageList
-                    costBox
-                    if !runs.warnings.isEmpty {
-                        VStack(alignment: .leading, spacing: 3) {
-                            ForEach(Array(runs.warnings.enumerated()), id: \.offset) { _, w in
-                                Label(w, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
-                            }
-                        }
-                    }
-                    DisclosureGroup("Transcript", isExpanded: $showTranscript) {
-                        TranscriptView(items: runs.transcript, streaming: runs.streamingText)
-                    }
-                    .font(.callout)
                 }
-                .padding(14)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
             }
             Divider()
             HStack {
@@ -409,6 +400,56 @@ struct LiveRunView: View {
             .controlSize(.small)
             .padding(10)
         }
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(runs.kind == "dry_run" ? "Dry run" : "Production run").font(.headline)
+                    Text(runs.liveModel).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(Fmt.elapsed(runs.elapsed)).font(.title3.monospacedDigit())
+                    .accessibilityLabel("Elapsed \(Fmt.elapsed(runs.elapsed))")
+            }
+            if let q = runs.question {
+                QuestionCard(questions: q.questions, state: .pending, answers: [:], onAnswer: { runs.answer($0) }, onDismiss: nil)
+                if let t = q.timeout { Text("With no answer in \(t) s, Claude proceeds on its stated assumption.").font(.caption).foregroundStyle(.secondary) }
+            }
+            stageList
+            costBox
+            if !runs.warnings.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(runs.warnings.enumerated()), id: \.offset) { _, w in
+                        Label(w, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
+        }
+        .padding([.horizontal, .top], 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The Transcript disclosure control, outside the transcript's scroll area.
+    private var transcriptHeader: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { showTranscript.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .rotationEffect(.degrees(showTranscript ? 90 : 0))
+                    .foregroundStyle(.secondary)
+                Text("Transcript").font(.callout)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Transcript")
+        .accessibilityValue(showTranscript ? "expanded" : "collapsed")
+        .accessibilityAddTraits(.isButton)
     }
 
     private var stageList: some View {
@@ -463,13 +504,48 @@ struct LiveRunView: View {
     }
 }
 
+/// The live transcript in its own vertical scroll area. Scrolling stops at either end without moving
+/// the run section around it; a reading position on an earlier entry is kept while new entries arrive
+/// (the top visible entry is the scroll anchor, so entries trimmed from the start don't shift it).
+struct TranscriptScrollView: View {
+    var items: [TranscriptItem]
+    var streaming: String
+    @State private var topID: UUID?
+
+    var body: some View {
+        ScrollView(.vertical) {
+            TranscriptView(items: items, streaming: streaming, lazy: true)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+        }
+        .scrollPosition(id: $topID, anchor: .top)
+        .scrollBounceBehavior(.basedOnSize)
+        .font(.callout)
+        .accessibilityLabel("Transcript entries")
+    }
+}
+
 struct TranscriptView: View {
     var items: [TranscriptItem]
     var streaming: String
+    /// In its own scroll area: every kept entry, laid out lazily, each a scroll target so the
+    /// reading position can be held on it.
+    var lazy = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(items.suffix(200)) { item in
+        if lazy {
+            LazyVStack(alignment: .leading, spacing: 5) { entries(Array(items)) }
+                .scrollTargetLayout()
+                .padding(.top, 2)
+        } else {
+            VStack(alignment: .leading, spacing: 5) { entries(Array(items.suffix(200))) }
+                .padding(.top, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func entries(_ shown: [TranscriptItem]) -> some View {
+            ForEach(shown) { item in
                 switch item.role {
                 case "assistant":
                     MarkdownText(text: item.text).font(.callout)
@@ -494,8 +570,6 @@ struct TranscriptView: View {
                 }
             }
             if !streaming.isEmpty { Text(streaming).font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
-        }
-        .padding(.top, 6)
     }
 
     /// Inline Markdown (code spans in tool summaries).

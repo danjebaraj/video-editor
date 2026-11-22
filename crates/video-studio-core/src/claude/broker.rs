@@ -49,6 +49,10 @@ pub struct Policy {
     /// Whether the run may drive and record apps with `video-studio capture …`.
     #[serde(default)]
     pub capture: bool,
+    /// An Audio Review: only the soundtrack is made, so cutline commands that render, capture or
+    /// review pictures are refused (`cutline audio` makes the mix).
+    #[serde(default)]
+    pub audio_review: bool,
     /// PATH folders used to resolve bare command names, in order.
     #[serde(default)]
     pub path_dirs: Vec<Utf8PathBuf>,
@@ -61,7 +65,8 @@ pub struct Policy {
 
 /// cutline subcommands a run may use. `deps`, `cache` and `selftest` change or exercise the
 /// installation and are never needed to make a video.
-const CUTLINE_ALLOWED: [&str; 19] = [
+const CUTLINE_ALLOWED: [&str; 20] = [
+    "audio",
     "validate",
     "schema",
     "init",
@@ -84,6 +89,8 @@ const CUTLINE_ALLOWED: [&str; 19] = [
 ];
 /// Not available in a dry run: final renders and anything that records or renders deliverables.
 const CUTLINE_DRY_RUN_DENIED: [&str; 3] = ["render", "thumbnail", "record"];
+/// Not available in an Audio Review: anything that renders or looks at pictures.
+const CUTLINE_AUDIO_REVIEW_DENIED: [&str; 5] = ["render", "thumbnail", "record", "review", "preview"];
 /// Global cutline options that take a value.
 const CUTLINE_VALUE_FLAGS: [&str; 2] = ["--variant", "--locale"];
 
@@ -321,6 +328,9 @@ impl Policy {
         if !CUTLINE_ALLOWED.contains(&sub) {
             return Err(format!("`cutline {sub}` isn't available during a run."));
         }
+        if self.audio_review && CUTLINE_AUDIO_REVIEW_DENIED.contains(&sub) {
+            return Err(format!("`cutline {sub}` isn't available in an Audio Review: it builds only the soundtrack. Mix it with `cutline audio project.json5 --export <name> --out outputs/audio-review.wav`."));
+        }
         if self.mode == Mode::DryRun && CUTLINE_DRY_RUN_DENIED.contains(&sub) {
             return Err(format!("`cutline {sub}` isn't available in a dry run: a dry run validates and reviews, it never renders finals. Use `cutline validate`, `cutline expand`, `cutline cues` and `cutline review`."));
         }
@@ -444,7 +454,9 @@ impl Policy {
 
 impl Policy {
     /// `video-studio capture …`: driving and recording apps. The helper itself decides which
-    /// apps may be touched and where files go; here only the mode and the project's switch count.
+    /// apps may be touched and where files go, and checks each subcommand's flags (such as
+    /// `scroll … --over <seconds>`); here only the subcommand, the mode and the project's switch
+    /// count.
     fn check_capture(&self, args: &[String]) -> Result<(), String> {
         let sub = args.first().map(String::as_str).unwrap_or("");
         const SUBS: [&str; 13] = [
@@ -731,6 +743,7 @@ mod tests {
             cutline: Some(cutline),
             helper: Some(helper),
             capture: true,
+            audio_review: false,
             path_dirs: vec![run.join(".bin"), tools],
             web_access: false,
             log: None,
@@ -920,6 +933,7 @@ mod tests {
             "video-studio capture screenshot --out look.png",
             "video-studio capture click 320 200 --double",
             "video-studio capture scroll 400 300 -5",
+            "video-studio capture scroll 566 700 -12 --over 10",
             "video-studio capture type 'Q4 launch'",
             "video-studio capture menu \"File\" \"New Project…\"",
             "video-studio capture record start --out scene1.mov --seconds 30 && video-studio capture wait 2",

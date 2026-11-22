@@ -180,10 +180,43 @@ pub struct Permissions {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Pointer {
-    Move { x: f64, y: f64 },
-    Click { x: f64, y: f64, right: bool, count: u8 },
-    Drag { x: f64, y: f64, to_x: f64, to_y: f64 },
-    Scroll { x: f64, y: f64, lines: i32 },
+    Move {
+        x: f64,
+        y: f64,
+    },
+    Click {
+        x: f64,
+        y: f64,
+        right: bool,
+        count: u8,
+    },
+    Drag {
+        x: f64,
+        y: f64,
+        to_x: f64,
+        to_y: f64,
+    },
+    /// `over`: spread the lines evenly over that many seconds (`--over`), else all at once.
+    Scroll {
+        x: f64,
+        y: f64,
+        lines: i32,
+        over: Option<f64>,
+    },
+}
+
+/// Shortest and longest `--over` for a timed scroll, in seconds.
+pub const SCROLL_OVER_RANGE: std::ops::RangeInclusive<f64> = 0.1..=60.0;
+
+/// A timed scroll as steps: the delta of each step in the platform's fine unit (`unit` per line:
+/// pixels on macOS, 1/120 of a notch on Windows) and the pause between steps. At least one step
+/// per line and at least 10 steps a second, evenly spaced; the deltas add up to exactly
+/// `lines × unit`, so the whole movement happens.
+pub fn scroll_plan(lines: i32, over: f64, unit: i32) -> (Vec<i32>, Duration) {
+    let total = lines as i64 * unit as i64;
+    let n = (lines.unsigned_abs() as u64).max((over * 10.0).ceil() as u64).max(1);
+    let steps: Vec<i32> = (1..=n as i64).map(|k| (total * k / n as i64 - total * (k - 1) / n as i64) as i32).collect();
+    (steps, Duration::from_secs_f64(over / n as f64))
 }
 
 /// A key with modifiers, such as `cmd+shift+n`.
@@ -306,6 +339,60 @@ pub trait Backend {
     fn record_running(&self, pid: u32) -> bool;
     /// Ends the recorder now; the file is lost.
     fn record_cancel(&self, pid: u32);
+    /// ffmpeg, for rewriting finished recordings at a constant frame rate.
+    fn ffmpeg(&self) -> Option<Utf8PathBuf> {
+        ffmpeg()
+    }
+}
+
+/// ffmpeg as cutline installs it: `CUTLINE_FFMPEG` if set, else `cutline deps path ffmpeg` for
+/// the configured cutline.
+pub fn ffmpeg() -> Option<Utf8PathBuf> {
+    if let Some(p) = std::env::var("CUTLINE_FFMPEG").ok().filter(|v| !v.is_empty()).map(Utf8PathBuf::from) {
+        return p.is_file().then_some(p);
+    }
+    let settings = crate::settings::Settings::load(&crate::paths::library_dir());
+    let cutline = crate::eleven::HelperContext::from_env().ok().and_then(|c| c.cutline).or_else(|| {
+        crate::claude::locate::find_cutline(&settings.cutline_path, &settings.cutline_repo).map(|c| c.path.into())
+    })?;
+    let (code, out, _) = crate::platform::run_capture(
+        std::process::Command::new(cutline.as_str()).args(["deps", "path", "ffmpeg"]),
+        Duration::from_secs(20),
+    )
+    .ok()?;
+    let p = Utf8PathBuf::from(out.trim());
+    (code == 0 && p.is_file()).then_some(p)
+}
+
+/// The frame rate recordings are rewritten at.
+pub const RECORDING_FPS: u32 = 30;
+
+/// Rewrites a finished recording at a constant 30 fps (TASK-honest-cedar-A73E). The system
+/// recorders store a frame only when the picture changes, so a 7 s capture can hold 25 frames;
+/// seeks, crops and frame grabs on such a file land between frames. Writes a temporary file next
+/// to `path` and renames it over `path` only when ffmpeg succeeds; otherwise `path` is untouched.
+pub fn rewrite_cfr(ffmpeg: &Utf8Path, path: &Utf8Path) -> Result<()> {
+    let ext = path.extension().unwrap_or(RECORDING_EXT);
+    let tmp = Utf8PathBuf::from(format!("{}.cfr-tmp.{ext}", path.as_str().trim_end_matches(&format!(".{ext}"))));
+    let _ = std::fs::remove_file(&tmp);
+    let (code, _, err) = crate::platform::run_capture(
+        std::process::Command::new(ffmpeg.as_str())
+            .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", path.as_str()])
+            .args(["-map", "0:v:0", "-map", "0:a?", "-vf", &format!("fps={RECORDING_FPS}")])
+            .args(["-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy"])
+            .arg(tmp.as_str()),
+        Duration::from_secs(600),
+    )?;
+    let size = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
+    if code != 0 || size == 0 {
+        let _ = std::fs::remove_file(&tmp);
+        let why = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("ffmpeg failed").trim().to_string();
+        return Err(Error::other(why));
+    }
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        Error::from(e)
+    })
 }
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -367,11 +454,27 @@ impl Backend for Unsupported {
 /// files. The app in front is whatever was last activated.
 pub struct FakeBackend {
     log: Utf8PathBuf,
+    /// A real video copied as the "recording" ([`FAKE_RECORDING_ENV`]); placeholder bytes
+    /// otherwise.
+    recording: Option<Utf8PathBuf>,
+    /// ffmpeg for the rewrite of a real recording (`CUTLINE_FFMPEG`).
+    ffmpeg: Option<Utf8PathBuf>,
 }
+
+/// Names a video the fake backend hands back as its recording; set only by tests.
+pub const FAKE_RECORDING_ENV: &str = "VIDEO_STUDIO_CAPTURE_FAKE_RECORDING";
 
 impl FakeBackend {
     pub fn new(log: impl Into<Utf8PathBuf>) -> Self {
-        FakeBackend { log: log.into() }
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).map(Utf8PathBuf::from);
+        FakeBackend { log: log.into(), recording: env(FAKE_RECORDING_ENV), ffmpeg: env("CUTLINE_FFMPEG") }
+    }
+    /// The fake recorder copies `video` instead of writing placeholder bytes, and `record wait`
+    /// rewrites it with `ffmpeg`.
+    pub fn with_recording(mut self, video: impl Into<Utf8PathBuf>, ffmpeg: Option<Utf8PathBuf>) -> Self {
+        self.recording = Some(video.into());
+        self.ffmpeg = ffmpeg;
+        self
     }
     fn note(&self, v: serde_json::Value) {
         crate::claude::broker::append_line(&self.log, &v.to_string());
@@ -402,6 +505,8 @@ impl Backend for FakeBackend {
     fn set_window(&self, size: Option<(f64, f64)>, at: Option<(f64, f64)>) -> Result<Rect> {
         self.note(json!({"do": "set_window", "size": size, "at": at}));
         let (w, h) = size.unwrap_or((1280.0, 800.0));
+        // like Safari, the fake app's windows are at least 574 points wide
+        let w = w.max(574.0);
         let (x, y) = at.unwrap_or((100.0, 80.0));
         Ok(Rect { x, y, w, h })
     }
@@ -419,7 +524,9 @@ impl Backend for FakeBackend {
                 json!({"do": "click", "x": x, "y": y, "right": right, "count": count})
             }
             Pointer::Drag { x, y, to_x, to_y } => json!({"do": "drag", "x": x, "y": y, "to_x": to_x, "to_y": to_y}),
-            Pointer::Scroll { x, y, lines } => json!({"do": "scroll", "x": x, "y": y, "lines": lines}),
+            Pointer::Scroll { x, y, lines, over } => {
+                json!({"do": "scroll", "x": x, "y": y, "lines": lines, "over": over})
+            }
         });
         Ok(())
     }
@@ -439,7 +546,12 @@ impl Backend for FakeBackend {
     }
     fn record_start(&self, rect: Rect, out: &Utf8Path, seconds: u32, show_clicks: bool) -> Result<u32> {
         self.note(json!({"do": "record_start", "rect": rect, "out": out, "seconds": seconds, "clicks": show_clicks}));
-        std::fs::write(out, b"fake recording")?;
+        match &self.recording {
+            Some(src) => {
+                std::fs::copy(src, out)?;
+            }
+            None => std::fs::write(out, b"fake recording")?,
+        }
         Ok(0)
     }
     fn record_running(&self, _: u32) -> bool {
@@ -447,6 +559,11 @@ impl Backend for FakeBackend {
     }
     fn record_cancel(&self, pid: u32) {
         self.note(json!({"do": "record_cancel", "pid": pid}));
+    }
+    /// Only with a real recording to rewrite, and never by asking a cutline for its ffmpeg.
+    fn ffmpeg(&self) -> Option<Utf8PathBuf> {
+        self.recording.as_ref()?;
+        self.ffmpeg.clone()
     }
 }
 
@@ -687,7 +804,21 @@ impl Session {
         } else {
             self.backend.window()?
         };
-        Ok(format!("{front}: window {}×{} at {},{} (points).", w.w, w.h, w.x, w.y))
+        // Say what the window actually got: an app can refuse a size (Safari's minimum width is
+        // 574 pt), and the caller shouldn't have to measure a screenshot to find out.
+        let got = format!("window: {}x{} at {},{}", w.w.round(), w.h.round(), w.x.round(), w.y.round());
+        let note = match size {
+            Some((rw, rh)) if (w.w - rw).abs() > 2.0 || (w.h - rh).abs() > 2.0 => {
+                let why = if w.w >= rw - 2.0 && w.h >= rh - 2.0 {
+                    "the app's minimum is larger"
+                } else {
+                    "the app or the screen limited it"
+                };
+                format!(" (asked for {}x{}; {why})", rw.round(), rh.round())
+            }
+            _ => String::new(),
+        };
+        Ok(format!("{front}: {got}{note} (points)."))
     }
 
     fn frame_rect(&self, app: Option<&str>, frame: Frame) -> Result<Rect> {
@@ -752,11 +883,26 @@ impl Session {
                 let (bx, by) = place(to_x, to_y)?;
                 (Pointer::Drag { x: ax, y: ay, to_x: bx, to_y: by }, format!("Dragged from {x},{y} to {to_x},{to_y}."))
             }
-            Pointer::Scroll { x, y, lines } => {
+            Pointer::Scroll { x, y, lines, over } => {
+                if let Some(t) = over {
+                    if !SCROLL_OVER_RANGE.contains(&t) {
+                        return Err(Error::other(format!(
+                            "--over is how many seconds the scroll takes: {} to {}.",
+                            SCROLL_OVER_RANGE.start(),
+                            SCROLL_OVER_RANGE.end()
+                        )));
+                    }
+                }
                 let (ax, ay) = place(x, y)?;
+                let lines = lines.clamp(-50, 50);
                 (
-                    Pointer::Scroll { x: ax, y: ay, lines: lines.clamp(-50, 50) },
-                    format!("Scrolled {} {} lines at {x},{y}.", if lines < 0 { "down" } else { "up" }, lines.abs()),
+                    Pointer::Scroll { x: ax, y: ay, lines, over },
+                    format!(
+                        "Scrolled {} {} lines at {x},{y}{}.",
+                        if lines < 0 { "down" } else { "up" },
+                        lines.abs(),
+                        over.map(|t| format!(" over {t} s")).unwrap_or_default()
+                    ),
                 )
             }
         };
@@ -888,11 +1034,30 @@ impl Session {
                 self.screen_error(Error::other(format!("The recording {} is empty or missing.", self.rel(&r.out))))
             );
         }
-        Ok(format!(
-            "Saved {} ({}). The recorder only writes frames when the picture changes, so check the real length with `cutline probe`, then use it in project.json5 like any other clip and trim it to the part you need.",
-            self.rel(&r.out),
-            paths::format_bytes(size)
-        ))
+        // The recorder only writes a frame when the picture changes: make every frame explicit.
+        let cfr = match self.backend.ffmpeg() {
+            Some(ff) => rewrite_cfr(&ff, &r.out).map_err(|e| e.to_string()),
+            None if self.is_fake() => Err(String::new()),
+            None => Err("ffmpeg wasn't found (`cutline deps install --all`)".into()),
+        };
+        let size = std::fs::metadata(&r.out).map(|m| m.len()).unwrap_or(size);
+        Ok(match cfr {
+            Ok(()) => format!(
+                "Saved {} ({}), rewritten at a constant {RECORDING_FPS} fps. Check the real length with `cutline probe`, then use it in project.json5 like any other clip and trim it to the part you need.",
+                self.rel(&r.out),
+                paths::format_bytes(size)
+            ),
+            Err(why) => format!(
+                "Saved {} ({}). The recorder only writes frames when the picture changes, so check the real length with `cutline probe`, then use it in project.json5 like any other clip and trim it to the part you need.{}",
+                self.rel(&r.out),
+                paths::format_bytes(size),
+                if why.is_empty() {
+                    String::new()
+                } else {
+                    format!(" Warning: it couldn't be rewritten at a constant {RECORDING_FPS} fps ({why}), so it's kept as recorded.")
+                }
+            ),
+        })
     }
 
     /// Drops the running recording.
@@ -1036,5 +1201,115 @@ mod tests {
         stop_stray(&dir.join("capture.json"));
         std::env::remove_var(FAKE_ENV);
         assert_eq!(actions(&dir).iter().filter(|v| v["do"] == "record_cancel").count(), 2);
+    }
+
+    /// TASK-honest-cedar-A73E: a sparse recording (25 frames over 7 s) comes out of `record
+    /// wait` at a constant 30 fps, as `cutline probe` sees it; a failed rewrite keeps the file.
+    #[test]
+    fn record_wait_rewrites_recordings_at_a_constant_frame_rate() {
+        let Ok(tc) = cutline_deps::toolchain() else {
+            eprintln!("SKIP: no ffmpeg toolchain");
+            return;
+        };
+        let (_t, dir) = tmp();
+        let src = dir.join("sparse.mov");
+        let keep: Vec<String> = [
+            0, 10, 13, 15, 16, 18, 39, 43, 44, 45, 59, 75, 82, 103, 114, 122, 128, 129, 132, 150, 158, 162, 170, 187,
+            209,
+        ]
+        .iter()
+        .map(|n| format!("eq(n,{n})"))
+        .collect();
+        let st = std::process::Command::new(&tc.ffmpeg)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=30:d=7"])
+            .args([
+                "-vf",
+                &format!("select='{}'", keep.join("+")),
+                "-fps_mode",
+                "passthrough",
+                "-c:v",
+                "libx264",
+                "-bf",
+                "0",
+            ])
+            .args(["-pix_fmt", "yuv420p", src.as_str()])
+            .status()
+            .unwrap();
+        assert!(st.success());
+        let before = cutline_media::probe::probe(tc, src.as_std_path(), None).unwrap();
+        assert!(before.video.as_ref().unwrap().vfr, "the fixture is variable-rate");
+
+        let ff = Utf8PathBuf::from_path_buf(tc.ffmpeg.clone()).unwrap();
+        let mut s = session(&dir, &[]);
+        s.backend = Box::new(FakeBackend::new(dir.join("fake.ndjson")).with_recording(src.clone(), Some(ff)));
+        s.open("Notes", None).unwrap();
+        s.record_start("scene1", 7, None, Frame::Window, false).unwrap();
+        let msg = s.record_wait().unwrap();
+        assert!(msg.contains("rewritten at a constant 30 fps"), "{msg}");
+        let out = dir.join(format!("run/captures/scene1.{RECORDING_EXT}"));
+        let info = cutline_media::probe::probe(tc, out.as_std_path(), None).unwrap();
+        let v = info.video.unwrap();
+        assert!(!v.vfr && (v.fps_f64 - 30.0).abs() < 0.5, "{v:?}");
+        assert!((info.duration - 7.0).abs() < 0.1, "{}", info.duration);
+        assert!(!dir.join("run/captures").read_dir().unwrap().any(|e| e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("cfr-tmp")));
+
+        // ffmpeg fails (not a video): the file is kept as it was and the reply warns
+        let junk = dir.join("junk.mov");
+        std::fs::write(&junk, b"not a video").unwrap();
+        let ff = Utf8PathBuf::from_path_buf(tc.ffmpeg.clone()).unwrap();
+        s.backend = Box::new(FakeBackend::new(dir.join("fake.ndjson")).with_recording(junk, Some(ff)));
+        s.record_start("scene2", 7, None, Frame::Window, false).unwrap();
+        let msg = s.record_wait().unwrap();
+        assert!(msg.contains("Warning: it couldn't be rewritten"), "{msg}");
+        assert_eq!(std::fs::read(dir.join(format!("run/captures/scene2.{RECORDING_EXT}"))).unwrap(), b"not a video");
+    }
+
+    #[test]
+    fn timed_scrolls_are_even_and_complete() {
+        // 12 lines over 10 s on macOS (pixels): 100 steps 0.1 s apart, 120 px in all
+        let (steps, gap) = scroll_plan(-12, 10.0, 10);
+        assert_eq!(steps.len(), 100);
+        assert_eq!(steps.iter().sum::<i32>(), -120);
+        assert!(steps.iter().all(|d| (-2..=-1).contains(d)), "{steps:?}");
+        assert_eq!(gap, Duration::from_millis(100));
+        // Windows notches: a short, fast scroll still has a step per line
+        let (steps, gap) = scroll_plan(30, 0.5, 120);
+        assert_eq!((steps.len(), steps.iter().sum::<i32>()), (30, 3600));
+        assert!((gap.as_secs_f64() - 0.5 / 30.0).abs() < 1e-9);
+        let (steps, _) = scroll_plan(1, 0.1, 120);
+        assert_eq!(steps, vec![120]);
+
+        let (_t, dir) = tmp();
+        let s = session(&dir, &[]);
+        s.open("Notes", None).unwrap();
+        let done = s.pointer(Pointer::Scroll { x: 566.0, y: 700.0, lines: -12, over: Some(10.0) }, None, Frame::Window);
+        assert_eq!(done.unwrap(), "Scrolled down 12 lines at 566,700 over 10 s.");
+        assert_eq!(actions(&dir).last().unwrap()["over"].as_f64(), Some(10.0));
+        for bad in [0.0, 0.05, 61.0, f64::NAN] {
+            let e = s.pointer(Pointer::Scroll { x: 566.0, y: 700.0, lines: -12, over: Some(bad) }, None, Frame::Window);
+            assert!(e.unwrap_err().to_string().contains("--over"), "{bad}");
+        }
+        let plain = s.pointer(Pointer::Scroll { x: 566.0, y: 700.0, lines: -1, over: None }, None, Frame::Window);
+        assert_eq!(plain.unwrap(), "Scrolled down 1 lines at 566,700.");
+    }
+
+    #[test]
+    fn window_reports_the_size_it_got() {
+        let (_t, dir) = tmp();
+        let s = session(&dir, &[]);
+        s.open("Safari", None).unwrap();
+        assert_eq!(
+            s.window(None, Some((540.0, 960.0)), Some((80.0, 40.0))).unwrap(),
+            "Safari: window: 574x960 at 80,40 (asked for 540x960; the app's minimum is larger) (points)."
+        );
+        assert_eq!(
+            s.window(None, Some((1280.0, 800.0)), Some((80.0, 40.0))).unwrap(),
+            "Safari: window: 1280x800 at 80,40 (points)."
+        );
+        assert_eq!(s.window(None, Some((575.5, 801.0)), None).unwrap(), "Safari: window: 576x801 at 100,80 (points).");
     }
 }

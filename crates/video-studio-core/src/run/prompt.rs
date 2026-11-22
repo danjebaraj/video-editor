@@ -366,6 +366,9 @@ fn cartesia_note(input: &PromptInput) -> String {
 
 /// How a production run makes footage of an app that nobody recorded beforehand.
 fn capture_section(input: &PromptInput) -> String {
+    if input.kind == RunKind::AudioReview {
+        return "Apps aren't driven or recorded in an Audio Review: only the soundtrack is built. Where the spec has app footage that isn't attached, hold its place with `video-studio standin video --out captures/<name>.mov --seconds <n>` so the timing (and any sound tied to it) is right.\n".into();
+    }
     let cap = &input.project.app_capture;
     if !cap.enabled {
         return "App recording is turned off for this project: you cannot drive or record apps. If the spec asks for footage of an app that isn't in the media manifest, do not fake it: say exactly which shots are missing (in summary.md under Known issues, or under missing_media in a dry run) and that the user can turn on Project › App recording or attach recordings.\n".into();
@@ -384,9 +387,9 @@ fn capture_section(input: &PromptInput) -> String {
         "When the spec asks for footage of an app that isn't in the media manifest — a `- **Record:**` line, or a scene that describes steps in a desktop app or a web app — you make that footage yourself. You (Claude Code) open the app, operate it and record the screen with the app's helper. cutline does not do this; it only edits the recordings afterwards. Do this before writing project.json5.\n\
          - `video-studio capture check` — whether screen recording and control of apps are allowed. Run it first.\n\
          - `video-studio capture open \"<app name>\"` or `video-studio capture open <https://address> [--with \"<browser>\"]` — opens it and makes it the app being driven. Web apps are driven in the browser.\n\
-         - `video-studio capture window --size 1280x800 --at 80,60` — set the window's size and position before recording; 16:9 or 16:10 sizes edit best.\n\
+         - `video-studio capture window --size 1280x800 --at 80,60` — set the window's size and position before recording; 16:9 or 16:10 sizes edit best. It prints the size the window actually got: an app can keep a larger minimum, so plan the crop on that size.\n\
          - `video-studio capture screenshot --out <name>.png` — the app's front window. Open it with Read to see the app. One pixel is one point, so its pixel coordinates are what click, move, drag and scroll take.\n\
-         - `video-studio capture click <x> <y> [--double] [--right]`, `move <x> <y>`, `drag <x> <y> <to_x> <to_y>`, `scroll <x> <y> <lines>` (negative scrolls down).\n\
+         - `video-studio capture click <x> <y> [--double] [--right]`, `move <x> <y>`, `drag <x> <y> <to_x> <to_y>`, `scroll <x> <y> <lines> [--over <seconds>]` (negative scrolls down). In a recording, scroll in one smooth movement with `--over` instead of repeated calls, for example `video-studio capture scroll 566 700 -12 --over 10`.\n\
          - `video-studio capture type \"<text>\"`, `video-studio capture key <combo>` (return, tab, escape, down, cmd+n, cmd+shift+z; `--times <n>`), `video-studio capture menu \"File\" \"New Project…\"` (exact names, including …).\n\
          - `video-studio capture wait <seconds>` — let a page load or an animation finish (30 at most per call).\n\
          - `video-studio capture record start --out <name>.mov --seconds <n> [--clicks]` — records the app's front window for exactly `n` seconds (600 at most) and returns at once. Perform the steps, then `video-studio capture record wait` until it reports the file. A recording can't be stopped early, only dropped with `record cancel`, so choose `n` to cover every step plus a few seconds and trim the clip in the edit.\n\
@@ -408,7 +411,22 @@ pub fn system_prompt(input: &PromptInput) -> String {
     let dry = input.kind == RunKind::DryRun;
     let defaults = input.platforms.intent_defaults(p.intent.kind);
     let locales = if rc.locales.is_empty() { p.intent.locales.clone() } else { rc.locales.clone() };
-    let exports_text = serde_json::to_string_pretty(input.exports).unwrap_or_default();
+    // The project example starts with `version: 1`: a project without it fails validation
+    // (TASK-honest-cedar-A73E).
+    let exports_text = {
+        let body = serde_json::to_string_pretty(input.exports).unwrap_or_default();
+        match body.strip_prefix('{') {
+            Some(rest) if input.exports.is_object() => {
+                let rest = rest.trim_start_matches('\n');
+                if rest.trim() == "}" {
+                    "{\n  \"version\": 1\n}".to_string()
+                } else {
+                    format!("{{\n  \"version\": 1,\n{rest}")
+                }
+            }
+            _ => body,
+        }
+    };
     let mut s = String::new();
     s.push_str(&format!(
         "You are producing a video for Syncfusion Video Studio with cutline, a declarative command-line video editor. You work alone inside one run folder and the user is not watching: the app shows them your progress, your questions and the results.\n\n\
@@ -440,6 +458,19 @@ pub fn system_prompt(input: &PromptInput) -> String {
             "readiness.json:\n```json\n{\n  \"ready\": true,\n  \"ambiguities\": [{\"text\": \"what is unclear\", \"spec_line\": 12, \"detail\": \"what you would need to know\"}],\n  \"assumptions\": [{\"text\": \"what you assumed in order to continue\", \"spec_line\": 20}],\n  \"missing_media\": [{\"text\": \"what is needed and not attached\", \"spec_line\": 31}],\n  \"risks\": [{\"text\": \"a choice that may disappoint, or a check that failed\", \"detail\": \"why\"}],\n  \"planned\": [{\"text\": \"a file the production run will record or generate, with its length\", \"spec_line\": 43}],\n  \"estimated_durations\": {\"<output folder name>\": 45.0},\n  \"notes\": \"anything else the user should know before paying for a full run\"\n}\n```\n\
              `spec_line` is the 1-based line of spec.md the point is about; leave it out when there is none. `missing_media` is only for media the user must supply: footage or audio the spec needs that isn't attached and that the production run can't record or generate. Files the run makes itself (app recordings, voice-over, music, sound effects) go under `planned`, one entry each, never under `missing_media` or `risks`. Use empty lists when there is nothing to report, and set `ready` to false if a production run would fail or clearly disappoint as things stand. Be specific and brief: each entry is shown to the user as one line.\n\n",
         );
+    } else if input.kind == RunKind::AudioReview {
+        let export = input.outputs.first().and_then(|o| o.exports.first()).map(|e| e.name.clone()).unwrap_or_default();
+        s.push_str(&format!(
+            "This is an AUDIO REVIEW: the user wants to hear the soundtrack of the output below before paying for a video render.\n\
+             1. Read spec.md, media-manifest.json, outputs.json and, when there is a brand, brand-preset.json.\n\
+             2. Generate the audio the spec needs (see Audio): narration, music, sound effects. Use the helper as in production; its cache reuses files whose text and settings haven't changed.\n\
+             3. Write project.json5 for the whole edit as you would for production, with every audible track: the source clips' own sound, the voice-over, music and effects, with their trims, offsets, gains, fades and ducking. Where picture-only material isn't available (app footage, generated graphics), use a stand-in of the right length so the timing holds.\n\
+             4. `cutline validate --json project.json5` until it is clean; `cutline cues project.json5` when the project uses cues.\n\
+             5. Mix the soundtrack: `cutline audio project.json5 --export {export} --out {wav}`. It uses the same audio plan as the final render and writes the WAV only when the mix succeeds. If it reports that the timeline has no audible tracks, say so in summary.md.\n\
+             6. Write summary.md: **What you will hear** (one line per track, with when it plays), **Assumptions**, **Known issues** (a missing source, a credit limit, anything that kept a track out).\n\
+             You cannot render, review or preview pictures, or drive and record apps, in an Audio Review; those commands are refused.\n\n",
+            wav = crate::run::collect::AUDIO_REVIEW_WAV,
+        ));
     } else {
         s.push_str(&format!(
             "1. Read spec.md, media-manifest.json, outputs.json and, when there is a brand, brand-preset.json.\n\
@@ -463,7 +494,7 @@ pub fn system_prompt(input: &PromptInput) -> String {
     s.push_str(&format!("Editing defaults for this intent: {} pacing, {} captions, music level {}. cutline style: `{}`. The spec overrides these.\n\n", defaults.pacing, defaults.captions, defaults.music_level, p.intent.kind.cutline_style()));
     s.push_str("## Outputs\n");
     s.push_str(&format!(
-        "Put this `target` and these `exports` in project.json5 unchanged (names and `out` paths matter: the app collects files from them):\n```json5\n{exports_text}\n```\n"
+        "Start project.json5 with `version: 1`, and put this `target` and these `exports` in it unchanged (names and `out` paths matter: the app collects files from them):\n```json5\n{exports_text}\n```\n"
     ));
     for o in input.outputs {
         let mut limits: Vec<String> = Vec::new();
@@ -533,12 +564,19 @@ pub fn system_prompt(input: &PromptInput) -> String {
 /// The first user message of the run.
 pub fn user_prompt(kind: RunKind, revise: Option<&Revise>, previous: Option<&RunRecord>) -> String {
     match (kind, revise) {
+        (RunKind::AudioReview, Some(r)) => format!(
+            "Revise the soundtrack from the previous Audio Review.\n\nThe previous run's project.json5, audio/ and work/ have been copied into this new run folder, and its summary is in previous-summary.md{}. The previous review's WAV stays in its own folder, so the user can compare.\n\nFeedback from the user:\n\n{}\n\nMake the changes, keep everything the feedback doesn't touch, reuse the existing audio where the text hasn't changed (the helper's cache does this for unchanged requests), validate, mix again with `cutline audio` to {} and write summary.md, starting with what changed.",
+            previous.map(|p| format!(" (previous run folder: {})", p.folder)).unwrap_or_default(),
+            r.feedback.trim(),
+            crate::run::collect::AUDIO_REVIEW_WAV
+        ),
         (_, Some(r)) => format!(
             "Revise the video from the previous run.\n\nThe previous run's project.json5, audio/ and work/ have been copied into this new run folder, and its summary is in previous-summary.md{}. Outputs go to this folder's outputs/ as before.\n\nFeedback from the user:\n\n{}\n\nMake the changes, keep everything the feedback doesn't touch, reuse the existing audio where the text hasn't changed, then validate, review, render and write summary.md as usual. In summary.md, start with what changed in this revision.",
             previous.map(|p| format!(" (previous run folder: {})", p.folder)).unwrap_or_default(),
             r.feedback.trim()
         ),
         (RunKind::DryRun, None) => "Do the dry run for the video described in spec.md: write project.json5, validate and review it, then write readiness.json.".into(),
+        (RunKind::AudioReview, None) => format!("Build the soundtrack of the video described in spec.md for an Audio Review: generate the audio it needs, write project.json5, validate it, then mix it with `cutline audio project.json5 --export <name> --out {}` and write summary.md. Don't render, review or record any picture.", crate::run::collect::AUDIO_REVIEW_WAV),
         (RunKind::Production, None) => "Produce the video described in spec.md: generate the audio it needs, write project.json5, validate, review, render every output, check QA, then write summary.md.".into(),
     }
 }
@@ -851,6 +889,14 @@ mod tests {
             s.contains("## Finish\n") && s.contains("snap_to_beats") && s.contains("smoothleft"),
             "the finish is part of every run"
         );
+        // the project example starts with `version: 1` (TASK-honest-cedar-A73E)
+        let example = s.split("```json5\n").nth(1).and_then(|r| r.split("\n```").next()).unwrap();
+        assert!(example.starts_with("{\n  \"version\": 1,\n"), "{example}");
+        let v: serde_json::Value = serde_json::from_str(example).expect("the example is valid JSON");
+        assert_eq!(v["version"], 1);
+        assert_eq!(v["exports"], ex["exports"]);
+        assert!(s.contains("Start project.json5 with `version: 1`"));
+        assert!(s.contains("video-studio capture scroll 566 700 -12 --over 10"));
         for needle in [
             "/runs/r1",
             "media-manifest.json",

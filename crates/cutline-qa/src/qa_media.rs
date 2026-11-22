@@ -164,18 +164,48 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
         );
     }
 
-    // black frames
-    let black: Vec<(f64, f64)> = black_spans(&log).into_iter().filter(|s| !overlaps(*s, &ctx.intended_black)).collect();
+    // black frames. blackdetect calls a frame black when 98 % of it is darker than 8 % luma, so
+    // a near-black title card with sparse light text (#141211, #0D0D0F) counts too. A span stays
+    // black when one of three sample frames is flat (luma variance at most 0.0004, the
+    // `first_frame` limit) and shows no recognised word (TASK-silver-cherry-R3MZ,
+    // TASK-honest-cedar-A73E).
+    let mut reader = TextReader::new(ctx.ocr);
+    let mut black: Vec<(f64, f64)> = vec![];
+    let mut dark_content: Vec<serde_json::Value> = vec![];
+    for s in black_spans(&log).into_iter().filter(|s| !overlaps(*s, &ctx.intended_black)) {
+        // a quarter, half and three quarters in: content over part of a span (a caption
+        // arriving over a black opening) doesn't clear the rest of it
+        let mut evidence: Vec<String> = vec![];
+        for frac in [0.25, 0.5, 0.75] {
+            let t = s.0 + (s.1 - s.0) * frac;
+            let var = frame_variance(tc, file, t).unwrap_or(0.0);
+            if var > FLAT_VARIANCE {
+                evidence.push(format!("luma variance {var:.4} at {t:.2}s (> {FLAT_VARIANCE})"));
+                continue;
+            }
+            match reader.words_at(tc, file, t) {
+                Ok(words) if !words.is_empty() => {
+                    evidence.push(format!("text recognised at {t:.2}s: {}", words.join(" ")))
+                }
+                _ => break,
+            }
+        }
+        if evidence.len() == 3 {
+            dark_content.push(json!({"span": [s.0, s.1], "evidence": evidence}));
+        } else {
+            black.push(s);
+        }
+    }
     b.add(
         "black_frames",
         Sev::Warn,
         black.is_empty(),
-        if black.is_empty() {
-            "no black spans > 0.3 s".to_string()
-        } else {
-            format!("{} black spans > 0.3 s", black.len())
+        match (black.len(), dark_content.len()) {
+            (0, 0) => "no black spans > 0.3 s".to_string(),
+            (0, n) => format!("no black spans > 0.3 s ({n} dark span(s) show content)"),
+            (k, _) => format!("{k} black spans > 0.3 s"),
         },
-        json!(black),
+        if dark_content.is_empty() { json!(black) } else { json!({"black": black, "dark_with_content": dark_content}) },
         json!([]),
     );
 
@@ -215,20 +245,39 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
         json!({"mean_min": 0.06, "variance_min": 0.0004}),
     );
 
-    // hook (shorts): text visible within 1 s
+    // hook (shorts): text visible within 1 s. `first_text_at` comes from the caption and text
+    // layers; text drawn by an HTML clip or layer isn't among them, so with one on screen the
+    // frame at 0.5 s is read instead.
     if ctx.is_shorts {
-        let ok = ctx.first_text_at.map(|t| t <= 1.0).unwrap_or(false);
-        b.add(
-            "hook",
-            Sev::Warn,
-            ok,
-            match ctx.first_text_at {
-                Some(t) => format!("first caption/text at {t:.2}s"),
-                None => "no caption or text in the first second".into(),
-            },
-            json!(ctx.first_text_at),
-            json!({"max_s": 1.0}),
-        );
+        let from_layers = ctx.first_text_at.filter(|t| *t <= 1.0);
+        let source = match ctx.first_text_at {
+            Some(t) => format!("first caption/text at {t:.2}s (caption and text layers)"),
+            None => "no caption or text layer in the first second".into(),
+        };
+        let (ok, message, measured) = if let Some(t) = from_layers {
+            (true, format!("first caption/text at {t:.2}s"), json!(t))
+        } else if ctx.html_opening {
+            match reader.words_at(tc, file, 0.5) {
+                Ok(words) if !words.is_empty() => (
+                    true,
+                    "text on screen at 0.50s (recognised)".to_string(),
+                    json!({"first_text_at": ctx.first_text_at, "recognised_at": 0.5, "words": words}),
+                ),
+                Ok(_) => (
+                    false,
+                    format!("{source}; no text recognised at 0.50s in the HTML opening"),
+                    json!({"first_text_at": ctx.first_text_at, "recognised_at": 0.5, "words": []}),
+                ),
+                Err(why) => (
+                    false,
+                    format!("{source} (text in HTML isn't checked)"),
+                    json!({"first_text_at": ctx.first_text_at, "ocr": why}),
+                ),
+            }
+        } else {
+            (false, source, json!(ctx.first_text_at))
+        };
+        b.add("hook", Sev::Warn, ok, message, measured, json!({"max_s": 1.0}));
     }
 
     // captions: safe zone + reading speed
@@ -339,4 +388,48 @@ fn first_frame_stats(tc: &Toolchain, file: &Path) -> Result<(f64, f64)> {
     let m = px.iter().sum::<f64>() / px.len() as f64;
     let v = px.iter().map(|x| (x - m).powi(2)).sum::<f64>() / px.len() as f64;
     Ok((m, v))
+}
+
+/// Luma variance above which a frame shows something (the `first_frame` limit).
+const FLAT_VARIANCE: f64 = 0.0004;
+
+/// Luma variance (0–1 scale) of the frame at `t`, at 180 px wide so thin text still counts.
+fn frame_variance(tc: &Toolchain, file: &Path, t: f64) -> Result<f64> {
+    let out = Command::new(&tc.ffmpeg)
+        .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-ss", &format!("{:.3}", t.max(0.0)), "-i"])
+        .arg(file)
+        .args(["-frames:v", "1", "-vf", "scale=180:-2,format=gray", "-f", "rawvideo", "-"])
+        .output()?;
+    anyhow::ensure!(!out.stdout.is_empty(), "no frame at {t:.2}s");
+    let px: Vec<f64> = out.stdout.iter().map(|v| *v as f64 / 255.0).collect();
+    let m = px.iter().sum::<f64>() / px.len() as f64;
+    Ok(px.iter().map(|x| (x - m).powi(2)).sum::<f64>() / px.len() as f64)
+}
+
+/// Text recognition for QA, resolved on first use.
+struct TextReader {
+    setting: cutline_core::model::OcrEngine,
+    engine: Option<std::result::Result<crate::ocr::Engine, String>>,
+}
+
+impl TextReader {
+    fn new(setting: cutline_core::model::OcrEngine) -> Self {
+        TextReader { setting, engine: None }
+    }
+
+    /// Words (two or more letters or digits) recognised in the frame at `t`; `Err` says why
+    /// recognition didn't run.
+    fn words_at(&mut self, tc: &Toolchain, file: &Path, t: f64) -> std::result::Result<Vec<String>, String> {
+        let engine = self.engine.get_or_insert_with(|| crate::ocr::resolve(self.setting)).clone()?;
+        let img = crate::review::grab(tc, file, t).map_err(|e| e.to_string())?;
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let png = dir.path().join("frame.png");
+        img.save(&png).map_err(|e| e.to_string())?;
+        let lines = crate::ocr::recognize(engine, &png).map_err(|e| format!("{e:#}"))?;
+        Ok(lines
+            .iter()
+            .flat_map(|l| l.text.split_whitespace().map(str::to_string).collect::<Vec<_>>())
+            .filter(|w| w.chars().filter(|c| c.is_alphanumeric()).count() >= 2)
+            .collect())
+    }
 }

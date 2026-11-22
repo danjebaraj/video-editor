@@ -122,6 +122,12 @@ fn number_words(n: u64, out: &mut Vec<String>) {
 /// eight; "50%" → fifty, percent; "Just Notes'" → justnotes. A token without digits is one
 /// unit (its letters), so hyphenated and joined spellings compare by letters.
 fn units(token: &str) -> Vec<String> {
+    // "One-oh-eight", "four-oh-four": digits read one by one, written as a number
+    let parts: Vec<String> = token.split('-').map(letters).filter(|p| !p.is_empty()).collect();
+    if parts.len() >= 2 && token.contains('-') && parts.iter().all(|p| spoken_digit(p).is_some()) {
+        let digits: String = parts.iter().filter_map(|p| spoken_digit(p)).collect();
+        return units(&digits);
+    }
     if !token.chars().any(|c| c.is_ascii_digit()) {
         let mut l = letters(token);
         if token.contains('&') && l.is_empty() {
@@ -180,6 +186,134 @@ fn is_group_comma(chars: &[char], i: usize) -> bool {
         && i > 0
         && chars[i - 1].is_ascii_digit()
         && chars.get(i + 1..i + 4).is_some_and(|n| n.len() == 3 && n.iter().all(|c| c.is_ascii_digit()))
+}
+
+/// A digit read on its own: "oh" and "o" are zero, as in "one-oh-eight".
+fn spoken_digit(u: &str) -> Option<char> {
+    match u {
+        "oh" | "o" => Some('0'),
+        _ => ONES[..10].iter().position(|w| *w == u).map(|d| char::from(b'0' + d as u8)),
+    }
+}
+
+fn is_number_word(u: &str) -> bool {
+    ONES.contains(&u)
+        || TENS.contains(&u) && !u.is_empty()
+        || matches!(u, "hundred" | "thousand" | "million" | "billion")
+}
+
+/// The same cleanup for the script's and the heard spoken units, so the two spellings of one
+/// spoken thing compare equal (TASK-honest-cedar-A73E): digits read one by one ("one oh eight")
+/// become the number ("108" → one hundred eight); "and" inside a number goes ("one hundred and
+/// eight"); single letters in a row are joined ("a i" → "ai"); "dot" between two words joins
+/// them, as in a domain read aloud ("thinkask dot a i" → "thinkaskai", which is how
+/// "thinkask.ai" is written). Each unit keeps the written word it came from.
+fn cleanup(u: Vec<String>, owner: Vec<usize>) -> (Vec<String>, Vec<usize>) {
+    let mut out: Vec<(String, usize)> = Vec::with_capacity(u.len());
+    let mut i = 0;
+    while i < u.len() {
+        // digits read one by one: at least two, with an "oh" among them
+        let run = u[i..].iter().take_while(|x| spoken_digit(x).is_some()).count();
+        if run >= 2 && u[i..i + run].iter().any(|x| x == "oh" || x == "o") {
+            let digits: String = u[i..i + run].iter().filter_map(|x| spoken_digit(x)).collect();
+            out.extend(units(&digits).into_iter().map(|x| (x, owner[i])));
+            i += run;
+            continue;
+        }
+        // "hundred and eight": the "and" is part of the number
+        if u[i] == "and"
+            && i > 0
+            && matches!(u[i - 1].as_str(), "hundred" | "thousand" | "million" | "billion")
+            && u.get(i + 1).is_some_and(|n| is_number_word(n))
+        {
+            i += 1;
+            continue;
+        }
+        out.push((u[i].clone(), owner[i]));
+        i += 1;
+    }
+    // single letters in a row: "a i" → "ai"
+    let single = |x: &str| x.chars().count() == 1 && x.chars().all(|c| c.is_alphabetic());
+    let mut joined: Vec<(String, usize)> = Vec::with_capacity(out.len());
+    let mut k = 0;
+    while k < out.len() {
+        let run = out[k..].iter().take_while(|(x, _)| single(x)).count();
+        if run >= 2 {
+            joined.push((out[k..k + run].iter().map(|(x, _)| x.as_str()).collect(), out[k].1));
+            k += run;
+        } else {
+            joined.push(out[k].clone());
+            k += 1;
+        }
+    }
+    // "dot" between two words: "thinkask dot ai" → "thinkaskai"
+    let mut res: Vec<(String, usize)> = Vec::with_capacity(joined.len());
+    let mut k = 0;
+    while k < joined.len() {
+        if joined[k].0 == "dot" && !res.is_empty() && k + 1 < joined.len() {
+            let next = joined[k + 1].0.clone();
+            res.last_mut().unwrap().0.push_str(&next);
+            k += 2;
+            continue;
+        }
+        res.push(joined[k].clone());
+        k += 1;
+    }
+    res.into_iter().unzip()
+}
+
+/// Spoken units of written words, after [`cleanup`], each pointing back at its word.
+fn spoken(tokens: &mut dyn Iterator<Item = &str>) -> (Vec<String>, Vec<usize>) {
+    let (mut u, mut owner) = (vec![], vec![]);
+    for (k, tok) in tokens.enumerate() {
+        for x in tok.split_whitespace().flat_map(units) {
+            u.push(x);
+            owner.push(k);
+        }
+    }
+    cleanup(u, owner)
+}
+
+/// How much of a script was heard, comparing spoken units after the same cleanup on both sides.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Coverage {
+    /// Spoken units in the script.
+    pub script_units: usize,
+    /// Script units heard as the same or a tolerable spelling.
+    pub matched: usize,
+    /// Script units with no heard counterpart, or heard as something else.
+    pub missing: usize,
+    /// Heard units that aren't in the script.
+    pub extra: usize,
+}
+
+impl Coverage {
+    pub fn match_ratio(&self) -> f64 {
+        if self.script_units == 0 {
+            1.0
+        } else {
+            self.matched as f64 / self.script_units as f64
+        }
+    }
+}
+
+/// How much of `script` was heard in `t` (the brand dictionary applied to the heard side).
+pub fn coverage(t: &Transcript, script: &str, opts: &CheckOptions) -> Coverage {
+    let sw = script_words(script);
+    let mut heard = t.clone();
+    heard.apply_corrections(&opts.dictionary);
+    let (su, _) = spoken(&mut sw.iter().map(|s| s.as_str()));
+    let (hu, _) = spoken(&mut heard.words.iter().map(|w| w.w.as_str()));
+    let ops = align_units(&su, &hu);
+    let mut c = Coverage { script_units: su.len(), matched: 0, missing: 0, extra: 0 };
+    for op in &ops {
+        match op {
+            Op::Pair(i, j) if tolerable(&su[*i], &hu[*j], opts.similarity) => c.matched += 1,
+            Op::Pair(..) | Op::Missing(_) => c.missing += 1,
+            Op::Extra(_) => c.extra += 1,
+        }
+    }
+    c
 }
 
 /// A rough key for how a string of letters sounds: consonant classes as in Soundex (b f p v ·
@@ -292,18 +426,8 @@ pub fn check(t: &Transcript, script: &str, opts: &CheckOptions) -> Vec<Mismatch>
     heard.apply_corrections(&opts.dictionary);
     let hw: Vec<&Word> = heard.words.iter().collect();
     // spoken units, each pointing back at its written word
-    let flat = |tokens: &mut dyn Iterator<Item = &str>| -> (Vec<String>, Vec<usize>) {
-        let (mut u, mut owner) = (vec![], vec![]);
-        for (k, tok) in tokens.enumerate() {
-            for x in tok.split_whitespace().flat_map(units) {
-                u.push(x);
-                owner.push(k);
-            }
-        }
-        (u, owner)
-    };
-    let (su, s_owner) = flat(&mut sw.iter().map(|s| s.as_str()));
-    let (hu, h_owner) = flat(&mut hw.iter().map(|w| w.w.as_str()));
+    let (su, s_owner) = spoken(&mut sw.iter().map(|s| s.as_str()));
+    let (hu, h_owner) = spoken(&mut hw.iter().map(|w| w.w.as_str()));
     if su.is_empty() {
         return vec![];
     }
@@ -527,6 +651,27 @@ mod tests {
         let mut w = vec![];
         number_words(1_234_567, &mut w);
         assert_eq!(w.join(" "), "one million two hundred thirty four thousand five hundred sixty seven");
+    }
+
+    /// TASK-honest-cedar-A73E: numbers read digit by digit and a domain read aloud compare
+    /// with the way they are written.
+    #[test]
+    fn spoken_numbers_and_domains_match_their_written_form() {
+        let script = "Read the whole dossier. One-oh-eight, at thinkask dot A I.";
+        let heard = "Read the whole dossier. 108, at thinkask.ai.";
+        assert_eq!(run(heard, script), []);
+        assert_eq!(run(script, heard), [], "the same cleanup on both sides");
+        assert_eq!(run("one oh eight at thinkask dot a i", "108 at thinkask.ai"), []);
+        assert_eq!(run("one hundred and eight", "108"), []);
+        assert_eq!(run("error four oh four", "Error 404"), []);
+        let c = coverage(&t(heard), script, &CheckOptions::default());
+        assert_eq!(c.match_ratio(), 1.0, "{c:?}");
+        // a real skipped word still counts
+        assert_eq!(run("Read the dossier. 108, at thinkask.ai.", script).len(), 1);
+        assert!(coverage(&t("Read the dossier."), script, &CheckOptions::default()).match_ratio() < 0.7);
+        // a plain "dot" and single letters still compare as before when both sides agree
+        assert_eq!(run("a dot on the map", "A dot on the map"), []);
+        assert_eq!(run("a twelve hour clock", "A 24-hour clock"), [pair("24-hour", "twelve")]);
     }
 
     #[test]
