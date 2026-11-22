@@ -391,7 +391,7 @@ A brand preset holds the look and rules every video for that brand follows. Open
 | **Preset** | Name, Description | |
 | **Logos** | Primary, Horizontal, Icon, For light backgrounds, For dark backgrounds | Referenced where they are, not copied. A missing file shows in red. |
 | **Colors** | Primary, Secondary, Accent, Background, Text | Colour well or `#RRGGBB` |
-| **Fonts** | Heading, Body | cutline can draw **Anton, Bebas Neue, Inter and Poppins** (Bold and ExtraBold included). Any other font is drawn as Inter, and the run says so. |
+| **Fonts** | Heading, Body | cutline can draw **Anton, Bebas Neue, Inter, Poppins and Source Serif 4** (Poppins Bold and ExtraBold, and Source Serif 4 Italic and Bold, included). Any other font is drawn as Inter, and the run says so. |
 | **Bumpers and watermark** | Intro bumper, Outro bumper, Watermark position (default bottom right), Watermark opacity (default 60%) | The watermark is drawn from the brand logo |
 | **Style** | Lower-third style, Caption style, Music mood | Caption styles cutline knows: `bold_pop`, `karaoke`, `word_by_word`, `clean_sentence`, `boxed` |
 | **Voice** | Voice ID (ElevenLabs), Cartesia voice ID, Voice name, Model (default `eleven_v4`), Settings (JSON, e.g. `{"stability": 0.5}`) | See [Voice-over](#15-voice-over-and-music) |

@@ -622,7 +622,7 @@ Acceptance:
 | Chromium / Chrome for Testing | BSD-style + various | Yes | Internal tooling use |
 | lottie-web | MIT | Yes | |
 | chromiumoxide, clap, serde, etc. | MIT/Apache | Yes | Enforced by `cargo-deny` |
-| Fonts: Inter, Montserrat, Anton, Bebas Neue, Poppins | SIL OFL 1.1 | Yes | OFL permits embedding in videos and bundling. Keep the license files in `assets/fonts/`. |
+| Fonts: Inter, Montserrat, Anton, Bebas Neue, Poppins, Source Serif 4 | SIL OFL 1.1 | Yes | OFL permits embedding in videos and bundling. Keep the license files in `assets/fonts/`. |
 | Noto Emoji | OFL 1.1 / Apache-2.0 | Yes | Avoid Twemoji (CC-BY needs attribution) and Apple emoji (not licensed). |
 | RNNoise models (`arnndn`) | Varies by model | Check per model | Not used by default; `afftdn` needs no model. |
 | LUTs | Generate our own, or use CC0 sources only | Yes | Record sources in `assets/luts/SOURCES.md`. |

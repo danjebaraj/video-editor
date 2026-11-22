@@ -51,7 +51,7 @@ Not proposed as fixes:
 - [ ] New command: `video-studio capture scroll <x> <y> <lines> --over <seconds>`. It spreads `lines` over `seconds`, one line per step at even intervals (at least 10 steps a second, using pixel-precise scroll events where the platform has them). Without `--over`, it behaves as it does today. `--over` must be between 0.1 and 60, otherwise it exits with an error. Change `Pointer::Scroll` in `capture/mod.rs` and the macOS and Windows code.
   - [x] Shared part: `Pointer::Scroll { …, over }`, the `--over` flag, the 0.1–60 s check, the step plan (`scroll_plan`: at least one step per line and 10 a second, evenly spaced, adding up to the whole movement) and the fake backend.
   - [x] macOS: pixel-unit scroll events (10 px a line) posted on the plan; builds and the app builds. Not watched on screen.
-  - [ ] Windows: high-resolution wheel deltas (fractions of 120) posted on the plan. Written but not compiled here (the Windows target needs an MSVC toolchain this Mac lacks) and not run.
+  - [ ] Windows: high-resolution wheel deltas (fractions of 120) posted on the plan. Type-checks and is clippy-clean for `x86_64-pc-windows-msvc` (2026-11-22); not yet run on Windows.
 - [x] Add `--over` to the broker's capture allowlist (`crates/video-studio-core/src/claude/broker.rs`, the `"scroll"` entry near line 458) and to the run prompt's capture help, with an example: `video-studio capture scroll 566 700 -12 --over 10`.
 - [x] `video-studio capture window --size WxH` prints the size and position the window actually got (`window: 574x960 at 80,40`). If that differs from the request by more than 2 pt in either direction, it adds `(asked for 540x960; the app's minimum is larger)`.
 - [x] Tests in `crates/video-studio-cli/tests/`: argument parsing for `--over` (valid, missing value, out of range) and the broker allowing `scroll … --over N`.
@@ -71,7 +71,7 @@ Not proposed as fixes:
 
 ### E. Fonts, prompt and readiness text (findings 8, 9, 10)
 
-- [ ] Bundle one open-licence serif font family (Source Serif 4 under the SIL OFL 1.1, regular, italic and bold) with cutline's fonts. `captions.font` and the text templates accept it by name. Add it to the licence list in spec.md §12.1 when the owner agrees (see Design notes).
+- [x] Bundle one open-licence serif font family (Source Serif 4 under the SIL OFL 1.1, regular, italic and bold) with cutline's fonts. `captions.font` and the text templates accept it by name. Add it to the licence list in spec.md §12.1 when the owner agrees (see Design notes).
 - [x] `E_FONT_MISSING` lists the bundled fonts in its hint, for example `bundled: Inter, …, Source Serif 4`.
 - [x] The run prompt's project example (`crates/video-studio-core/src/run/prompt.rs`) starts with `version: 1`.
 - [x] `cutline_optional` in `crates/video-studio-core/src/validation.rs` says what each missing tool is for, and only that. For whisper alone: "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied."
@@ -153,3 +153,21 @@ Not proposed as fixes:
   - **Done when, real recording:** the CFR rewrite was tested through `record wait` with the fake recorder, not a real screen recording.
 - Files: `crates/cutline-qa/src/{review.rs,qa_media.rs,qa.rs,deliver.rs}`, `crates/cutline-transcribe/src/check.rs`, `crates/cutline-render/src/auto.rs`, `crates/video-studio-core/src/capture/{mod.rs,macos.rs,windows.rs}`, `crates/video-studio-core/src/{validation.rs,run/prompt.rs,claude/broker.rs}`, `crates/video-studio-cli/src/capture_cmd.rs`, and tests in `crates/cutline-qa/tests/`, `crates/cutline-render/tests/script_captions.rs`, `crates/cutline-core/tests/invalid_projects.rs` and `crates/video-studio-cli/tests/e2e_tools.rs`.
 - Commit/PR: "Implement TASK-honest-cedar-A73E: capture, review and QA fixes for vertical video" on branch `implement-approved-plans-2026-11-22`; the review/QA part is in the TASK-silver-cherry-R3MZ commit before it.
+
+### 2026-11-22 (second pass)
+
+- Implemented:
+  - **E1, Source Serif 4:** with the owner's go-ahead, `SourceSerif4-Regular.ttf`, `SourceSerif4-It.ttf` and `SourceSerif4-Bold.ttf` (adobe-fonts/source-serif release 4.005) and the licence as `OFL-sourceserif4.txt` are in `assets/fonts/`.
+    - `captions.font` accepts "Source Serif 4", and validation takes its names from the bundled fonts.
+    - The HTML text templates get `@font-face` rules in `assets/templates/_base.css`.
+    - Video Studio's `CUTLINE_FONTS` includes it.
+    - `E_FONT_MISSING`'s hint lists it.
+    - `FontDb::get` now prefers upright faces, because `SourceSerif4-It.ttf` sorted before the Regular face and was picked for plain text.
+    - spec.md §12.1 lists the font; the user guide, the Video Studio README and docs/decisions.md are updated.
+  - **Windows timed scroll:** `video-studio-core` type-checks and is clippy-clean for `x86_64-pc-windows-msvc`. A stub C compiler stood in for ring's C build, which a type-check never links.
+- Verified: `cutline-text` `fonts::tests::bundled_serif_has_regular_italic_and_bold`; `cutline-render --test bundled_serif`, which covers captions validation by name, the Georgia hint naming the serif, the template faces and CSS, and the licence file; `video-studio-core` brand tests.
+- Not done:
+  - The Windows timed scroll hasn't run on Windows.
+  - The "Done when" fixture run still needs a real screen for the timed scroll and a real recording.
+- Files: `assets/fonts/SourceSerif4-*.ttf`, `assets/fonts/OFL-sourceserif4.txt`, `assets/templates/_base.css`, `crates/cutline-text/src/fonts.rs`, `crates/cutline-render/tests/bundled_serif.rs`, `crates/video-studio-core/src/brand.rs`, `spec.md`, `docs/`.
+- Commit/PR: "TASK-honest-cedar-A73E: bundle Source Serif 4; Windows scroll type-checks" on branch `implement-approved-plans-2026-11-22-pass2`.
