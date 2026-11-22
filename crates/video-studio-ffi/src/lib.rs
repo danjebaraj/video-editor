@@ -840,7 +840,11 @@ mod tests {
         let make = |name: &str, still: bool| {
             let p = t.path().join(name);
             let tail = if still { "exit 0" } else { "echo \"error: unrecognized subcommand '$1'\" >&2; exit 2" };
-            std::fs::write(&p, format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cutline 0.1.0'; exit 0; fi\n{tail}\n")).unwrap();
+            std::fs::write(
+                &p,
+                format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cutline 0.1.0'; exit 0; fi\n{tail}\n"),
+            )
+            .unwrap();
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
             p.to_str().unwrap().to_string()
         };

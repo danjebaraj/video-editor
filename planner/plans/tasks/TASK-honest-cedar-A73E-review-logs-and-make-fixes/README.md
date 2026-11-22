@@ -2,13 +2,13 @@
 id: TASK-honest-cedar-A73E
 type: task
 title: Fix capture, review and QA issues in vertical video production
-status: todo
+status: in-progress
 done: no
 approved: yes
 approved-on: 2026-11-21
 priority: medium
 created: 2026-11-21
-updated: 2026-11-21
+updated: 2026-11-22
 attachments: []
 ---
 
@@ -40,39 +40,42 @@ Not proposed as fixes:
 
 ### A. Review crash on sparse recordings (findings 1, 2)
 
-- [ ] `grab()` in `crates/cutline-qa/src/review.rs` no longer fails with an empty reason. If ffmpeg writes nothing to stdout, `grab()` tries again with `-ss` after `-i` (accurate seek), then at the last frame at or before `t`. If that still fails, the error names the file, `t`, the clip duration, the frame count and ffmpeg's stderr, or says "(ffmpeg printed nothing)".
-- [ ] Find out why `reframe: {mode: "rect"}` on a VFR clip produces a file with no frame near 0.9 s, and fix it in the reframe path so the reframed clip has a frame for every output frame. Write down the cause in the Implementation log.
-- [ ] Test in `crates/cutline-qa/tests/`: a 7 s VFR fixture with about 25 frames (`tests/fixtures/vfr/sparse-7s.mov`), used with `reframe: {mode: "rect", rect: {x: 0.03, y: 0.055, w: 0.94, h: 0.945}}`. `cutline review` exits 0 and writes `cuts/` and `contact_sheet.jpg`.
-- [ ] After `record wait` finishes, `video-studio capture record` rewrites the recording as constant 30 fps (`ffmpeg -i in.mov -vf fps=30 -c:v libx264 -crf 18 -pix_fmt yuv420p`, written to a temp file, then renamed over `--out`). The rewrite happens in `crates/video-studio-core/src/capture/mod.rs` (`record_wait`), so it works the same on macOS and Windows. If the rewrite fails, the original file is kept and `record wait` prints a warning.
-- [ ] Test: `cutline probe` on a recording made through `record wait` reports `vfr: false` and about 30 fps.
+- [x] `grab()` in `crates/cutline-qa/src/review.rs` no longer fails with an empty reason. If ffmpeg writes nothing to stdout, `grab()` tries again with `-ss` after `-i` (accurate seek), then at the last frame at or before `t`. If that still fails, the error names the file, `t`, the clip duration, the frame count and ffmpeg's stderr, or says "(ffmpeg printed nothing)".
+- [x] Find out why `reframe: {mode: "rect"}` on a VFR clip produces a file with no frame near 0.9 s, and fix it in the reframe path so the reframed clip has a frame for every output frame. Write down the cause in the Implementation log.
+- [x] Test in `crates/cutline-qa/tests/`: a 7 s VFR fixture with about 25 frames (`tests/fixtures/vfr/sparse-7s.mov`), used with `reframe: {mode: "rect", rect: {x: 0.03, y: 0.055, w: 0.94, h: 0.945}}`. `cutline review` exits 0 and writes `cuts/` and `contact_sheet.jpg`.
+- [x] After `record wait` finishes, `video-studio capture record` rewrites the recording as constant 30 fps (`ffmpeg -i in.mov -vf fps=30 -c:v libx264 -crf 18 -pix_fmt yuv420p`, written to a temp file, then renamed over `--out`). The rewrite happens in `crates/video-studio-core/src/capture/mod.rs` (`record_wait`), so it works the same on macOS and Windows. If the rewrite fails, the original file is kept and `record wait` prints a warning.
+- [x] Test: `cutline probe` on a recording made through `record wait` reports `vfr: false` and about 30 fps.
 
 ### B. Smooth scroll and honest window size (findings 3, 4)
 
 - [ ] New command: `video-studio capture scroll <x> <y> <lines> --over <seconds>`. It spreads `lines` over `seconds`, one line per step at even intervals (at least 10 steps a second, using pixel-precise scroll events where the platform has them). Without `--over`, it behaves as it does today. `--over` must be between 0.1 and 60, otherwise it exits with an error. Change `Pointer::Scroll` in `capture/mod.rs` and the macOS and Windows code.
-- [ ] Add `--over` to the broker's capture allowlist (`crates/video-studio-core/src/claude/broker.rs`, the `"scroll"` entry near line 458) and to the run prompt's capture help, with an example: `video-studio capture scroll 566 700 -12 --over 10`.
-- [ ] `video-studio capture window --size WxH` prints the size and position the window actually got (`window: 574x960 at 80,40`). If that differs from the request by more than 2 pt in either direction, it adds `(asked for 540x960; the app's minimum is larger)`.
-- [ ] Tests in `crates/video-studio-cli/tests/`: argument parsing for `--over` (valid, missing value, out of range) and the broker allowing `scroll … --over N`.
+  - [x] Shared part: `Pointer::Scroll { …, over }`, the `--over` flag, the 0.1–60 s check, the step plan (`scroll_plan`: at least one step per line and 10 a second, evenly spaced, adding up to the whole movement) and the fake backend.
+  - [x] macOS: pixel-unit scroll events (10 px a line) posted on the plan; builds and the app builds. Not watched on screen.
+  - [ ] Windows: high-resolution wheel deltas (fractions of 120) posted on the plan. Written but not compiled here (the Windows target needs an MSVC toolchain this Mac lacks) and not run.
+- [x] Add `--over` to the broker's capture allowlist (`crates/video-studio-core/src/claude/broker.rs`, the `"scroll"` entry near line 458) and to the run prompt's capture help, with an example: `video-studio capture scroll 566 700 -12 --over 10`.
+- [x] `video-studio capture window --size WxH` prints the size and position the window actually got (`window: 574x960 at 80,40`). If that differs from the request by more than 2 pt in either direction, it adds `(asked for 540x960; the app's minimum is larger)`.
+- [x] Tests in `crates/video-studio-cli/tests/`: argument parsing for `--over` (valid, missing value, out of range) and the broker allowing `scroll … --over N`.
 
 ### C. Script check and voice pace (finding 5)
 
-- [ ] Before comparing, the script check (`W_SCRIPT_MISMATCH`) puts both texts through the same cleanup: lower-case; spoken numbers made into digits ("one-oh-eight" → "108", "one hundred and eight" → "108"); "dot" between two words made into "."; single letters separated by spaces joined ("a i" → "ai"); punctuation stripped. "thinkask dot A I" and "thinkask.ai" then both become "thinkask.ai".
-- [ ] When an asset has a `script`, `W_VOICE_PACE` counts the script's words, not the recognised words.
-- [ ] Test with the `vo7` case: script "Read the whole dossier. One-oh-eight, at thinkask dot A I." against the transcript words "Read the whole dossier. 108, at thinkask.ai." gives no `W_SCRIPT_MISMATCH` and no `W_VOICE_PACE`. A real skipped word ("Read the dossier") still warns.
+- [x] Before comparing, the script check (`W_SCRIPT_MISMATCH`) puts both texts through the same cleanup: lower-case; spoken numbers made into digits ("one-oh-eight" → "108", "one hundred and eight" → "108"); "dot" between two words made into "."; single letters separated by spaces joined ("a i" → "ai"); punctuation stripped. "thinkask dot A I" and "thinkask.ai" then both become "thinkask.ai".
+- [x] When an asset has a `script`, `W_VOICE_PACE` counts the script's words, not the recognised words.
+- [x] Test with the `vo7` case: script "Read the whole dossier. One-oh-eight, at thinkask dot A I." against the transcript words "Read the whole dossier. 108, at thinkask.ai." gives no `W_SCRIPT_MISMATCH` and no `W_VOICE_PACE`. A real skipped word ("Read the dossier") still warns.
 
 ### D. QA and review false alarms (findings 6, 7)
 
-- [ ] `hook`: if `first_text_at` is later than 1.0 s and the timeline has an HTML clip or layer covering 0–1 s, QA runs text recognition (the engine `cutline review` already uses: Vision on macOS, Tesseract elsewhere, `off` skips it) on the frame at 0.5 s. If it finds at least one word, the check passes with the message `text on screen at 0.50s (recognised)`. With recognition off or unavailable, the warning stays and adds `(text in HTML isn't checked)`.
-- [ ] `black_frames`: a span doesn't count as black if text recognition finds a word in its middle frame, or if the frame's luma variance is above 0.0004 (the same limit `first_frame` uses).
-- [ ] Review "No visual change": an HTML clip or layer whose seek function changes the picture inside the span (checked by comparing frames 0.5 s apart with a mean absolute difference above 0.5%) counts as a visual change.
-- [ ] Tests in `crates/cutline-qa/tests/`: a 3 s render of a #0D0D0F HTML card with "He quoted half a verse." visible from frame 0 has no `hook` warning and no `black_frames` warning. A truly black 1 s gap between two clips still gives `black_frames`.
+- [x] `hook`: if `first_text_at` is later than 1.0 s and the timeline has an HTML clip or layer covering 0–1 s, QA runs text recognition (the engine `cutline review` already uses: Vision on macOS, Tesseract elsewhere, `off` skips it) on the frame at 0.5 s. If it finds at least one word, the check passes with the message `text on screen at 0.50s (recognised)`. With recognition off or unavailable, the warning stays and adds `(text in HTML isn't checked)`.
+- [x] `black_frames`: a span doesn't count as black if text recognition finds a word in its middle frame, or if the frame's luma variance is above 0.0004 (the same limit `first_frame` uses).
+- [x] Review "No visual change": an HTML clip or layer whose seek function changes the picture inside the span (checked by comparing frames 0.5 s apart with a mean absolute difference above 0.5%) counts as a visual change.
+- [x] Tests in `crates/cutline-qa/tests/`: a 3 s render of a #0D0D0F HTML card with "He quoted half a verse." visible from frame 0 has no `hook` warning and no `black_frames` warning. A truly black 1 s gap between two clips still gives `black_frames`.
 
 ### E. Fonts, prompt and readiness text (findings 8, 9, 10)
 
 - [ ] Bundle one open-licence serif font family (Source Serif 4 under the SIL OFL 1.1, regular, italic and bold) with cutline's fonts. `captions.font` and the text templates accept it by name. Add it to the licence list in spec.md §12.1 when the owner agrees (see Design notes).
-- [ ] `E_FONT_MISSING` lists the bundled fonts in its hint, for example `bundled: Inter, …, Source Serif 4`.
-- [ ] The run prompt's project example (`crates/video-studio-core/src/run/prompt.rs`) starts with `version: 1`.
-- [ ] `cutline_optional` in `crates/video-studio-core/src/validation.rs` says what each missing tool is for, and only that. For whisper alone: "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied."
-- [ ] Unit test for the `cutline_optional` text with only whisper missing.
+- [x] `E_FONT_MISSING` lists the bundled fonts in its hint, for example `bundled: Inter, …, Source Serif 4`.
+- [x] The run prompt's project example (`crates/video-studio-core/src/run/prompt.rs`) starts with `version: 1`.
+- [x] `cutline_optional` in `crates/video-studio-core/src/validation.rs` says what each missing tool is for, and only that. For whisper alone: "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied."
+- [x] Unit test for the `cutline_optional` text with only whisper missing.
 
 ## Local verification inputs
 
@@ -84,9 +87,9 @@ Not proposed as fixes:
 ## Done when
 
 - [ ] Every box in Steps A–E is checked, or marked ` — dropped: <reason>` by the owner.
-- [ ] `cargo test --workspace` passes. `cargo fmt --check` and `cargo clippy` show no new warnings compared with `main` before the change.
+- [x] `cargo test --workspace` passes. `cargo fmt --check` and `cargo clippy` show no new warnings compared with `main` before the change.
 - [ ] From a clean checkout, run the local fixtures below through review, validation, QA and capture. Review writes the contact sheet, the matching narration passes both voice checks, each of the three vertical presets passes the opening hook check with recognition enabled, and one timed scroll call completes the full requested movement.
-- [ ] The Implementation log names the commit(s).
+- [x] The Implementation log names the commit(s).
 
 ## Design notes
 
@@ -107,3 +110,46 @@ Not proposed as fixes:
 - Implemented: Replaced external evidence and the original-project rerun with inline observations and local verification fixtures.
 - Not done: Implementation and verification of steps A–E.
 - Files: This task README.md.
+
+### 2026-11-22
+
+- Implemented:
+  - **A1:** `grab()` falls back to an accurate seek and then the last frame at or before `t`, and its error names the file, `t`, the duration, the frame count and ffmpeg's stderr, or "(ffmpeg printed nothing)". Shared with TASK-silver-cherry-R3MZ.
+  - **A2, the cause:** on a sparse recording, `-ss t -i` gives the first stored frame at or after `t`. Past the last stored frame (still inside the file's duration) ffmpeg writes nothing and exits 0, which is the empty `frame grab at 0.900s failed: `. Review grabs the raw source only for the reframe panels, which is why it showed up with reframing. The reframe path itself already holds sparse frames: a 25-frame, 7 s capture with `reframe: {mode: "rect", rect: {x: 0.03, y: 0.055, w: 0.94, h: 0.945}}` renders a 210-frame, 7.000 s, 30 fps segment. So the fix is in the grab: the reframe panels now use the frame on screen (`grab_source`, the held frame for sparse sources).
+  - **A3:** `crates/cutline-qa/tests/vfr_review.rs::review_finishes_on_sparse_captures` generates `tests/fixtures/vfr/sparse-7s.mov` in a temp folder (25 frames, a hold across 0.9 s, checked with ffprobe) instead of committing a binary. `cutline review` (`review_with`, OCR off) succeeds and writes `cuts/` and `contact_sheet.jpg`.
+  - **A4/A5:** `record_wait` rewrites the recording with `ffmpeg -vf fps=30 -c:v libx264 -crf 18 -pix_fmt yuv420p` (audio copied) to a temp file, then renames it over the original. If the rewrite fails it keeps the file and warns. ffmpeg comes from `CUTLINE_FFMPEG` or `cutline deps path ffmpeg`; that lookup moved from `capture/windows.rs` to `capture/mod.rs` so both platforms share it. The test `capture::tests::record_wait_rewrites_recordings_at_a_constant_frame_rate` gives a sparse 25-frame recording to the fake recorder. After `record wait`, cutline's probe reports `vfr: false`, 30 fps and 7.0 s. A broken file is kept byte for byte and the reply warns.
+  - **B:**
+    - `capture scroll … --over <seconds>` (sub-boxes above).
+    - Prompt help with the example `video-studio capture scroll 566 700 -12 --over 10`.
+    - The broker checks only subcommands, so `scroll … --over N` is already allowed; this is now tested.
+    - `capture window --size` prints `window: 574x960 at 80,40 (asked for 540x960; the app's minimum is larger)`, and the prompt says to plan on the size the window actually got.
+    - Tests: `capture::tests::{timed_scrolls_are_even_and_complete, window_reports_the_size_it_got}`, `e2e_tools::a_timed_scroll_is_parsed_and_bounded` (valid; missing value exits 2; 0, 0.05, 61 and `abc` refused), `broker` capture allowlist.
+  - **C:** `cutline-transcribe` check now cleans up both sides' spoken units the same way:
+    - Spoken digits such as "one-oh-eight" and "one oh eight" become the number.
+    - "and" inside a number is dropped.
+    - Runs of single letters are joined ("a i" → "ai").
+    - "dot" between two words joins them.
+
+    The 70% pre-check now uses `check::coverage` on those units instead of word alignment. `W_VOICE_PACE` counts the script's words and letters when there is a script (timing still comes from the transcript). The test `script_captions::spoken_numbers_and_domains_pass_the_script_and_pace_checks` uses three neighbouring passages and vo7 (10 script words over 4.0 s, 150 wpm): no `W_SCRIPT_MISMATCH` and no `W_VOICE_PACE`. On the old code the same test gives exactly the reported "only 60% of the script's 10 words were heard in `vo7` (4 missing, 0 extra in the audio)" plus "`vo7` is spoken 25% slower … (105 words a minute)". The skipped-word control ("Read the dossier") still warns that "whole" was not heard.
+  - **D:**
+    - `hook` reads the frame at 0.5 s when an HTML/Lottie/SVG clip or layer is on screen there; with recognition off or unavailable it adds "(text in HTML isn't checked)".
+    - `black_frames` clears a span only when each of three sample frames (at 25, 50 and 75 %, not just the middle one) has luma variance > 0.0004 or a recognised word. That way a caption arriving over a black opening doesn't clear the black part before it.
+    - Review's "No visual change" checks HTML-covered gaps in the rendered preview, comparing frames 0.5 s apart with a mean absolute difference > 0.5 %. On a 12 s #0D0D0F card with lines fading in at 3.9 and 5.8 s, the edit-only gap was (0, 12); with the preview checked, only (6.0, 12.0) is reported.
+    - Tests: `opening_qa::{near_black_card_versus_a_black_gap, a_visible_dark_title_card_is_not_black_and_counts_as_the_hook, an_animated_html_card_is_a_visual_change}`.
+  - **E2–E5:**
+    - `E_FONT_MISSING` already listed the bundled fonts in its hint; there is now a test (Georgia → `bundled: Anton, Inter`).
+    - The run prompt's project example starts with `"version": 1` and says so; tested in `production_prompt_carries_everything_the_spec_lists`.
+    - `cutline_optional` now says what each missing tool is for, and only that. For whisper alone: "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied." Unit tested.
+- Local fixture results:
+  - `cutline review` on the 7 s rect capture: exit 0, contact sheet written.
+  - Narration: both voice checks pass.
+  - The 3 s #0D0D0F "He quoted half a verse." card with the first caption at 1.32 s, rendered with `youtube_shorts`, `instagram_reels` and `tiktok` exports (all `shorts`, 1080×1920): every export's `hook` reports "text on screen at 0.50s (recognised)" (Vision), with no black span.
+  - Positive control: a 1 s black gap between two clips still gives `black_frames` at 3.0 s.
+- Checks: `cargo test --workspace --no-fail-fast` passes (exit 0). `cargo fmt --all --check` is clean. `cargo clippy --workspace --tests` shows only the existing `xtask` manifest lints warning.
+- Not done:
+  - **E1, Source Serif 4:** needs the font files downloaded from the internet, which this unattended run may not do without the owner's permission. Adding it to spec.md §12.1 also waits on the owner.
+  - **Windows timed scroll:** not compiled or run here.
+  - **Done when, timed scroll:** "one timed scroll call completes the full requested movement" needs a real screen and app; the step plan's sum is unit tested.
+  - **Done when, real recording:** the CFR rewrite was tested through `record wait` with the fake recorder, not a real screen recording.
+- Files: `crates/cutline-qa/src/{review.rs,qa_media.rs,qa.rs,deliver.rs}`, `crates/cutline-transcribe/src/check.rs`, `crates/cutline-render/src/auto.rs`, `crates/video-studio-core/src/capture/{mod.rs,macos.rs,windows.rs}`, `crates/video-studio-core/src/{validation.rs,run/prompt.rs,claude/broker.rs}`, `crates/video-studio-cli/src/capture_cmd.rs`, and tests in `crates/cutline-qa/tests/`, `crates/cutline-render/tests/script_captions.rs`, `crates/cutline-core/tests/invalid_projects.rs` and `crates/video-studio-cli/tests/e2e_tools.rs`.
+- Commit/PR: "Implement TASK-honest-cedar-A73E: capture, review and QA fixes for vertical video" on branch `implement-approved-plans-2026-11-22`; the review/QA part is in the TASK-silver-cherry-R3MZ commit before it.

@@ -160,3 +160,78 @@ fn a_passage_spoken_much_slower_than_the_rest_is_a_warning() {
     assert_eq!(pace[0].path, "/assets/slow");
     assert!(pace[0].message.contains("slower than the other voice passages (75 words a minute)"), "{pace:?}");
 }
+
+/// TASK-honest-cedar-A73E step C: a script that says "One-oh-eight" and "thinkask dot A I" is
+/// heard as "108" and "thinkask.ai". The script check compares them after the same cleanup, and
+/// the pace check counts the script's words, so neither warns; a really skipped word still does.
+#[test]
+fn spoken_numbers_and_domains_pass_the_script_and_pace_checks() {
+    let Some(tc) = test_toolchain() else { return };
+    let d = tempfile::tempdir().unwrap();
+    gen::still(tc, &d.path().join("bg.png"), 320, 180, "0x223344").unwrap();
+    const VO7: &str = "Read the whole dossier. One-oh-eight, at thinkask dot A I.";
+    const OTHER: &str = "Read the whole dossier now, and then read it all again.";
+    // name, script, heard words, span: the ten-word vo7 script over 4.0 s is 150 words a minute
+    let cases: [(&str, &str, &str, f64); 4] = [
+        ("vo1", OTHER, OTHER, 3.8),
+        ("vo2", OTHER, OTHER, 3.8),
+        ("vo3", OTHER, OTHER, 3.8),
+        ("vo7", VO7, "Read the whole dossier. 108, at thinkask.ai.", 4.0),
+    ];
+    let mut assets = String::new();
+    let mut layers = vec![];
+    for (k, (name, script, heard, span)) in cases.iter().enumerate() {
+        let mut c = tc.ffmpeg_cmd();
+        c.args(["-f", "lavfi", "-i", "sine=f=220:d=5", "-ac", "2"]).arg(d.path().join(format!("{name}.wav")));
+        gen::run(c).unwrap();
+        let hw: Vec<&str> = heard.split_whitespace().collect();
+        let per = span / hw.len() as f64;
+        let words: Vec<_> = hw
+            .iter()
+            .enumerate()
+            .map(|(i, w)| serde_json::json!({"w": w, "start": i as f64 * per, "end": (i + 1) as f64 * per}))
+            .collect();
+        std::fs::write(
+            d.path().join(format!("{name}.json")),
+            serde_json::json!({"asset": name, "words": words}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(d.path().join(format!("{name}.txt")), script).unwrap();
+        assets.push_str(&format!(
+            ", {name}: {{path: '{name}.wav', role: 'voice', transcript: '{name}.json', script: '{name}.txt'}}"
+        ));
+        layers.push(format!("{{type: 'audio', asset: '{name}', start: {}}}", k * 5));
+    }
+    let p = d.path().join("p.json5");
+    std::fs::write(
+        &p,
+        format!(
+            "{{version: 1, target: 'custom', width: 320, height: 180, fps: 30,
+              assets: {{bg: {{path: 'bg.png'}}{assets}}},
+              main: [{{id: 'm', clip: 'bg', duration: 20}}],
+              layers: [{}]}}",
+            layers.join(", ")
+        ),
+    )
+    .unwrap();
+    let l = pipeline::load(&p).unwrap_or_else(|e| panic!("{e}"));
+    let w = cutline_render::extras::warnings(&l);
+    let got: Vec<_> = w.iter().filter(|x| x.code == "W_SCRIPT_MISMATCH" || x.code == "W_VOICE_PACE").collect();
+    assert!(got.is_empty(), "{got:?}");
+
+    // control: "whole" really is skipped
+    std::fs::write(
+        d.path().join("vo7.json"),
+        serde_json::json!({"asset": "vo7", "words": "Read the dossier. 108, at thinkask.ai."
+            .split_whitespace().enumerate()
+            .map(|(i, w)| serde_json::json!({"w": w, "start": i as f64 * 0.66, "end": (i + 1) as f64 * 0.66}))
+            .collect::<Vec<_>>()})
+        .to_string(),
+    )
+    .unwrap();
+    let l = pipeline::load(&p).unwrap_or_else(|e| panic!("{e}"));
+    let w = cutline_render::extras::warnings(&l);
+    let m: Vec<_> = w.iter().filter(|x| x.code == "W_SCRIPT_MISMATCH" && x.path == "/assets/vo7/script").collect();
+    assert_eq!(m.len(), 1, "{w:?}");
+    assert!(m[0].message.contains("\"whole\" was not heard"), "{m:?}");
+}

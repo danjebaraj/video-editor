@@ -343,6 +343,83 @@ pub fn static_gaps(pr: &Prepared, min: f64) -> Vec<(f64, f64)> {
     ev.windows(2).filter(|w| w[1] - w[0] > min).map(|w| (w[0], w[1])).collect()
 }
 
+/// Mean absolute difference (0–1) between frames 0.5 s apart above which an HTML graphic counts
+/// as a visual change.
+pub const HTML_CHANGE: f64 = 0.005;
+
+/// [`static_gaps`], then each gap that an HTML / Lottie / SVG clip or layer covers is checked in
+/// the rendered `video`: such a graphic changes the picture through its own animation (its seek
+/// function), which the edit doesn't show. Frames 0.5 s apart that differ by more than
+/// [`HTML_CHANGE`] split the gap (TASK-honest-cedar-A73E).
+pub fn static_gaps_seen(pr: &Prepared, min: f64, tc: &cutline_deps::Toolchain, video: &Path) -> Vec<(f64, f64)> {
+    use cutline_core::model::{AssetKind, Layer};
+    let tl = &pr.timeline;
+    let drawn = |k: AssetKind| matches!(k, AssetKind::Html | AssetKind::Lottie | AssetKind::Svg);
+    let mut spans: Vec<(f64, f64)> = tl
+        .clips
+        .iter()
+        .filter(|c| drawn(c.kind))
+        .map(|c| (tl.secs(c.start), tl.secs(c.end())))
+        .chain(
+            tl.layers
+                .iter()
+                .filter(|l| matches!(l.layer, Layer::Html { .. }))
+                .map(|l| (tl.secs(l.start), tl.secs(l.end))),
+        )
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = vec![];
+    for (a, b) in static_gaps(pr, min) {
+        let mut cuts: Vec<f64> = vec![];
+        for (s, e) in spans.iter().map(|(s, e)| (s.max(a), e.min(b))).filter(|(s, e)| e - s >= 1.0) {
+            cuts.extend(picture_changes(tc, video, s, e, 0.5, HTML_CHANGE));
+        }
+        if cuts.is_empty() {
+            out.push((a, b));
+            continue;
+        }
+        let mut ev = vec![a, b];
+        ev.extend(cuts);
+        ev.sort_by(|x, y| x.total_cmp(y));
+        out.extend(ev.windows(2).filter(|w| w[1] - w[0] > min).map(|w| (w[0], w[1])));
+    }
+    out
+}
+
+/// Times in `from..to` of `video` where the frame differs from the one `step` seconds earlier by
+/// a mean absolute luma difference above `limit` (0–1).
+fn picture_changes(tc: &cutline_deps::Toolchain, video: &Path, from: f64, to: f64, step: f64, limit: f64) -> Vec<f64> {
+    let (w, h) = (96usize, 96usize);
+    let Ok(o) = std::process::Command::new(&tc.ffmpeg)
+        .args([
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            &format!("{from:.3}"),
+            "-t",
+            &format!("{:.3}", to - from),
+        ])
+        .arg("-i")
+        .arg(video)
+        .args(["-an", "-vf", &format!("fps={},scale={w}:{h},format=gray", 1.0 / step), "-f", "rawvideo", "-"])
+        .output()
+    else {
+        return vec![];
+    };
+    let frames: Vec<&[u8]> = o.stdout.chunks_exact(w * h).collect();
+    frames
+        .windows(2)
+        .enumerate()
+        .filter(|(_, p)| {
+            p[0].iter().zip(p[1]).map(|(x, y)| (*x as f64 - *y as f64).abs()).sum::<f64>() / (w * h) as f64 / 255.0
+                > limit
+        })
+        .map(|(k, _)| from + (k + 1) as f64 * step)
+        .collect()
+}
+
 pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
     review_with(l, out_dir, None)
 }
@@ -537,7 +614,7 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     let tp = out_dir.join("timeline.txt");
     std::fs::write(&tp, timeline_text(&pr))?;
     files.push(tp);
-    let mut suggestions = suggestions(&pr, &qa, &plan.audio, tc)?;
+    let mut suggestions = suggestions_seen(&pr, &qa, &plan.audio, tc, Some(&src))?;
     // ---- text over detailed content: compare a frame without the text with one showing it
     for b in pr.extras.text_boxes.iter().filter(|b| b.kind == "text") {
         let t_on = (b.start + b.end) / 2.0;
@@ -682,8 +759,24 @@ pub fn suggestions(
     audio: &cutline_render::audio_plan::AudioPlan,
     tc: &cutline_deps::Toolchain,
 ) -> Result<Vec<String>> {
+    suggestions_seen(pr, qa, audio, tc, None)
+}
+
+/// [`suggestions`], with the rendered `video` to look at where the edit alone can't tell
+/// (HTML graphics that animate).
+pub fn suggestions_seen(
+    pr: &Prepared,
+    qa: &QaReport,
+    audio: &cutline_render::audio_plan::AudioPlan,
+    tc: &cutline_deps::Toolchain,
+    video: Option<&Path>,
+) -> Result<Vec<String>> {
     let mut s = vec![];
-    for (a, b) in static_gaps(pr, 5.0) {
+    let gaps = match video {
+        Some(v) => static_gaps_seen(pr, 5.0, tc, v),
+        None => static_gaps(pr, 5.0),
+    };
+    for (a, b) in gaps {
         s.push(format!(
             "No visual change for {:.1}s ({}–{}): add a cut, punch-in, B-roll or a graphic.",
             b - a,

@@ -384,9 +384,9 @@ fn capture_section(input: &PromptInput) -> String {
         "When the spec asks for footage of an app that isn't in the media manifest — a `- **Record:**` line, or a scene that describes steps in a desktop app or a web app — you make that footage yourself. You (Claude Code) open the app, operate it and record the screen with the app's helper. cutline does not do this; it only edits the recordings afterwards. Do this before writing project.json5.\n\
          - `video-studio capture check` — whether screen recording and control of apps are allowed. Run it first.\n\
          - `video-studio capture open \"<app name>\"` or `video-studio capture open <https://address> [--with \"<browser>\"]` — opens it and makes it the app being driven. Web apps are driven in the browser.\n\
-         - `video-studio capture window --size 1280x800 --at 80,60` — set the window's size and position before recording; 16:9 or 16:10 sizes edit best.\n\
+         - `video-studio capture window --size 1280x800 --at 80,60` — set the window's size and position before recording; 16:9 or 16:10 sizes edit best. It prints the size the window actually got: an app can keep a larger minimum, so plan the crop on that size.\n\
          - `video-studio capture screenshot --out <name>.png` — the app's front window. Open it with Read to see the app. One pixel is one point, so its pixel coordinates are what click, move, drag and scroll take.\n\
-         - `video-studio capture click <x> <y> [--double] [--right]`, `move <x> <y>`, `drag <x> <y> <to_x> <to_y>`, `scroll <x> <y> <lines>` (negative scrolls down).\n\
+         - `video-studio capture click <x> <y> [--double] [--right]`, `move <x> <y>`, `drag <x> <y> <to_x> <to_y>`, `scroll <x> <y> <lines> [--over <seconds>]` (negative scrolls down). In a recording, scroll in one smooth movement with `--over` instead of repeated calls, for example `video-studio capture scroll 566 700 -12 --over 10`.\n\
          - `video-studio capture type \"<text>\"`, `video-studio capture key <combo>` (return, tab, escape, down, cmd+n, cmd+shift+z; `--times <n>`), `video-studio capture menu \"File\" \"New Project…\"` (exact names, including …).\n\
          - `video-studio capture wait <seconds>` — let a page load or an animation finish (30 at most per call).\n\
          - `video-studio capture record start --out <name>.mov --seconds <n> [--clicks]` — records the app's front window for exactly `n` seconds (600 at most) and returns at once. Perform the steps, then `video-studio capture record wait` until it reports the file. A recording can't be stopped early, only dropped with `record cancel`, so choose `n` to cover every step plus a few seconds and trim the clip in the edit.\n\
@@ -408,7 +408,22 @@ pub fn system_prompt(input: &PromptInput) -> String {
     let dry = input.kind == RunKind::DryRun;
     let defaults = input.platforms.intent_defaults(p.intent.kind);
     let locales = if rc.locales.is_empty() { p.intent.locales.clone() } else { rc.locales.clone() };
-    let exports_text = serde_json::to_string_pretty(input.exports).unwrap_or_default();
+    // The project example starts with `version: 1`: a project without it fails validation
+    // (TASK-honest-cedar-A73E).
+    let exports_text = {
+        let body = serde_json::to_string_pretty(input.exports).unwrap_or_default();
+        match body.strip_prefix('{') {
+            Some(rest) if input.exports.is_object() => {
+                let rest = rest.trim_start_matches('\n');
+                if rest.trim() == "}" {
+                    "{\n  \"version\": 1\n}".to_string()
+                } else {
+                    format!("{{\n  \"version\": 1,\n{rest}")
+                }
+            }
+            _ => body,
+        }
+    };
     let mut s = String::new();
     s.push_str(&format!(
         "You are producing a video for Syncfusion Video Studio with cutline, a declarative command-line video editor. You work alone inside one run folder and the user is not watching: the app shows them your progress, your questions and the results.\n\n\
@@ -463,7 +478,7 @@ pub fn system_prompt(input: &PromptInput) -> String {
     s.push_str(&format!("Editing defaults for this intent: {} pacing, {} captions, music level {}. cutline style: `{}`. The spec overrides these.\n\n", defaults.pacing, defaults.captions, defaults.music_level, p.intent.kind.cutline_style()));
     s.push_str("## Outputs\n");
     s.push_str(&format!(
-        "Put this `target` and these `exports` in project.json5 unchanged (names and `out` paths matter: the app collects files from them):\n```json5\n{exports_text}\n```\n"
+        "Start project.json5 with `version: 1`, and put this `target` and these `exports` in it unchanged (names and `out` paths matter: the app collects files from them):\n```json5\n{exports_text}\n```\n"
     ));
     for o in input.outputs {
         let mut limits: Vec<String> = Vec::new();
@@ -851,6 +866,14 @@ mod tests {
             s.contains("## Finish\n") && s.contains("snap_to_beats") && s.contains("smoothleft"),
             "the finish is part of every run"
         );
+        // the project example starts with `version: 1` (TASK-honest-cedar-A73E)
+        let example = s.split("```json5\n").nth(1).and_then(|r| r.split("\n```").next()).unwrap();
+        assert!(example.starts_with("{\n  \"version\": 1,\n"), "{example}");
+        let v: serde_json::Value = serde_json::from_str(example).expect("the example is valid JSON");
+        assert_eq!(v["version"], 1);
+        assert_eq!(v["exports"], ex["exports"]);
+        assert!(s.contains("Start project.json5 with `version: 1`"));
+        assert!(s.contains("video-studio capture scroll 566 700 -12 --over 10"));
         for needle in [
             "/runs/r1",
             "media-manifest.json",

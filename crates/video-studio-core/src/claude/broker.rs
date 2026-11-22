@@ -444,7 +444,9 @@ impl Policy {
 
 impl Policy {
     /// `video-studio capture …`: driving and recording apps. The helper itself decides which
-    /// apps may be touched and where files go; here only the mode and the project's switch count.
+    /// apps may be touched and where files go, and checks each subcommand's flags (such as
+    /// `scroll … --over <seconds>`); here only the subcommand, the mode and the project's switch
+    /// count.
     fn check_capture(&self, args: &[String]) -> Result<(), String> {
         let sub = args.first().map(String::as_str).unwrap_or("");
         const SUBS: [&str; 13] = [
@@ -920,6 +922,7 @@ mod tests {
             "video-studio capture screenshot --out look.png",
             "video-studio capture click 320 200 --double",
             "video-studio capture scroll 400 300 -5",
+            "video-studio capture scroll 566 700 -12 --over 10",
             "video-studio capture type 'Q4 launch'",
             "video-studio capture menu \"File\" \"New Project…\"",
             "video-studio capture record start --out scene1.mov --seconds 30 && video-studio capture wait 2",

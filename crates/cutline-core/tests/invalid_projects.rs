@@ -451,3 +451,17 @@ fn a_narrower_only_rect_reframe_leaves_the_wide_output_whole() {
         "/main/0/reframe/narrower_only",
     );
 }
+
+/// TASK-honest-cedar-A73E: a font that isn't bundled (Georgia) names the bundled ones.
+#[test]
+fn missing_font_lists_the_bundled_fonts() {
+    let p = cutline_core::parse::parse_project(&format!(
+        "{{ version: 1, {ASSETS}, {OK_MAIN}, captions: {{font: 'Georgia'}} }}"
+    ))
+    .unwrap();
+    let ctx = Context { fonts: vec!["Anton".into(), "Inter".into()], ..Default::default() };
+    let (_, d) = resolve(&p, &lookup(), &ctx);
+    let f = d.iter().find(|x| x.code == "E_FONT_MISSING").expect("E_FONT_MISSING");
+    assert_eq!(f.path, "/captions/font");
+    assert_eq!(f.hint.as_deref(), Some("bundled: Anton, Inter"));
+}

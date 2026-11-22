@@ -396,15 +396,50 @@ fn doctor_issues(c: &mut Ctx, env: &dyn EnvProbe, info: &CutlineInfo) {
                     Severity::Info,
                     "environment",
                     "Some optional cutline tools aren't installed".into(),
-                    Some(format!(
-                        "Not installed: {}. They are only needed for HTML graphics, captions from speech or reframing.",
-                        d.missing_optional.join(", ")
-                    )),
+                    Some(optional_tools_text(&d.missing_optional)),
                     FixLink::target("settings", "cutline"),
                 );
             }
         }
     }
+}
+
+/// What each missing optional tool is for, and only that (TASK-honest-cedar-A73E): with only
+/// whisper missing, HTML graphics and reframing aren't mentioned.
+pub fn optional_tools_text(missing: &[String]) -> String {
+    let purpose = |m: &str| -> (String, &'static str) {
+        let name = m.split(" (").next().unwrap_or(m).trim().to_string();
+        let lower = m.to_lowercase();
+        let what = if lower.starts_with("chrome") {
+            "to render HTML graphics"
+        } else if lower.starts_with("whisper") {
+            "to make captions from speech when no transcript is supplied"
+        } else if lower.starts_with("face model") {
+            "to follow faces when reframing"
+        } else {
+            ""
+        };
+        (name, what)
+    };
+    let items: Vec<(String, &str)> = missing.iter().map(|m| purpose(m)).collect();
+    let names: Vec<&str> = items.iter().map(|(n, _)| n.as_str()).collect();
+    let uses: Vec<String> = items
+        .iter()
+        .filter(|(_, w)| !w.is_empty())
+        .map(|(n, w)| if items.len() == 1 { format!("It's only needed {w}") } else { format!("{n} only {w}") })
+        .collect();
+    let mut text = format!("Not installed: {}.", names.join(", "));
+    if !uses.is_empty() {
+        let mut u = uses.join("; ");
+        if items.len() > 1 {
+            // "Chrome is only needed to …; whisper only to …"
+            u = u.replacen(" only ", " is only needed ", 1);
+        }
+        text.push(' ');
+        text.push_str(&u);
+        text.push('.');
+    }
+    text
 }
 
 fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
@@ -1771,6 +1806,19 @@ mod tests {
         f.env.doctor =
             Some(DoctorSummary { ok: true, missing_optional: vec!["tool chrome".into()], ..Default::default() });
         assert!(has(&f.run(), "cutline_optional", Severity::Info));
+        f.env.doctor = Some(DoctorSummary {
+            ok: true,
+            missing_optional: vec!["whisper (captions from speech)".into()],
+            ..Default::default()
+        });
+        let r = f.run();
+        let opt = r.issues.iter().find(|i| i.rule == "cutline_optional").unwrap();
+        assert_eq!(
+            opt.detail.as_deref(),
+            Some(
+                "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied."
+            )
+        );
         f.env = FakeEnv::default();
         f.env.free = Some(1_000);
         assert!(has(&f.run(), "disk_space", Severity::Blocker));
@@ -2119,5 +2167,18 @@ mod tests {
         r.add_dry_run(&readiness);
         assert_eq!(r.warnings, 3, "adding again replaces the old findings");
         assert!(!r.has_blockers());
+    }
+
+    #[test]
+    fn optional_tools_say_what_each_is_for() {
+        assert_eq!(
+            optional_tools_text(&["whisper (captions from speech)".into()]),
+            "Not installed: whisper. It's only needed to make captions from speech when no transcript is supplied."
+        );
+        assert_eq!(
+            optional_tools_text(&["Chrome (HTML graphics)".into(), "face model (reframing)".into()]),
+            "Not installed: Chrome, face model. Chrome is only needed to render HTML graphics; face model only to follow faces when reframing."
+        );
+        assert_eq!(optional_tools_text(&["tool chrome".into()]), "Not installed: tool chrome.");
     }
 }

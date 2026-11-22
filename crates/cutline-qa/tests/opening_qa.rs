@@ -177,3 +177,50 @@ fn near_black_card_versus_a_black_gap() {
     let s = black.measured[0][0].as_f64().unwrap();
     assert!((s - 3.0).abs() < 0.1, "{black:?}");
 }
+
+/// TASK-honest-cedar-A73E step D: review said "No visual change" from 4.0 to 11.5 s on a card
+/// whose words fade in at 3.9 and 5.8 s. The card's own animation now counts as a change: no
+/// reported static interval spans the fade at 5.8 s.
+#[test]
+fn an_animated_html_card_is_a_visual_change() {
+    let Some(tc) = test_toolchain() else { return };
+    if cutline_html::chrome().is_none() {
+        eprintln!("SKIP: no Chrome");
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    sources(tc, d.path());
+    std::fs::write(
+        d.path().join("fade.html"),
+        "<!doctype html><html><head><style>
+           body{margin:0;width:100vw;height:100vh;background:#0D0D0F;color:#F2EDE4;font:600 44px sans-serif;
+                display:flex;flex-direction:column;align-items:center;justify-content:center}
+           p{opacity:0;animation:in 0.5s linear forwards}
+           #a{animation-delay:3.9s} #b{animation-delay:5.8s}
+           @keyframes in{to{opacity:1}}
+         </style></head><body><p id='a'>He quoted half a verse.</p><p id='b'>Then stopped.</p></body></html>",
+    )
+    .unwrap();
+    let pp = d.path().join("fade.json5");
+    std::fs::write(
+        &pp,
+        "{version: 1, name: 'fade', target: 'custom', width: 540, height: 960, fps: 30, brand_bumpers: false, watermark: false,
+          assets: {card: {path: 'fade.html', duration: 12}, vo: {path: 'voice.wav', role: 'voice'}},
+          main: [{id: 'card', clip: 'card'}], layers: [{type: 'audio', asset: 'vo', role: 'voice', start: 0}],
+          audio: {voice_chain: 'raw'}}",
+    )
+    .unwrap();
+    let l = cutline_render::pipeline::load(&pp).unwrap();
+    let r = cutline_qa::review::review_with(&l, &d.path().join("review"), Some("off")).unwrap();
+    let still: Vec<&String> = r.suggestions.iter().filter(|s| s.starts_with("No visual change")).collect();
+    // the edit alone sees one 12 s gap
+    let (name, e) = cutline_render::pipeline::exports(&l.project).remove(0);
+    let pr = cutline_render::pipeline::prepare(&l, name, &e, true).unwrap();
+    assert_eq!(cutline_qa::review::static_gaps(&pr, 5.0), vec![(0.0, 12.0)]);
+    // looking at the picture splits it at the fades
+    let seen = cutline_qa::review::static_gaps_seen(&pr, 5.0, tc, &r.preview);
+    eprintln!("static intervals seen: {seen:?}; suggestions: {still:?}");
+    assert!(seen.iter().all(|(a, b)| !(*a < 5.8 && *b > 6.3)), "{seen:?}");
+    assert!(seen.iter().all(|(a, b)| !(*a < 3.9 && *b > 4.4)), "{seen:?}");
+    assert!(still.iter().all(|s| !s.contains("00:00.000") || !s.contains("00:12")), "{still:?}");
+}

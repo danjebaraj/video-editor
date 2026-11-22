@@ -607,9 +607,21 @@ impl Backend for WinBackend {
                 std::thread::sleep(Duration::from_millis(80));
                 send(&[mouse_input(to_x, to_y, MOUSEEVENTF_LEFTUP, 0)])
             }
-            Pointer::Scroll { x, y, lines } => {
+            Pointer::Scroll { x, y, lines, over: None } => {
                 glide(x, y)?;
                 send(&[mouse_input(x, y, MOUSEEVENTF_WHEEL, lines * WHEEL_DELTA as i32)])
+            }
+            Pointer::Scroll { x, y, lines, over: Some(over) } => {
+                glide(x, y)?;
+                // fractions of a notch (high-resolution wheel deltas), evenly over `over` seconds
+                let (steps, gap) = super::scroll_plan(lines, over, WHEEL_DELTA as i32);
+                for (k, d) in steps.iter().enumerate() {
+                    if k > 0 {
+                        std::thread::sleep(gap);
+                    }
+                    send(&[mouse_input(x, y, MOUSEEVENTF_WHEEL, *d)])?;
+                }
+                Ok(())
             }
         }
     }
@@ -766,20 +778,7 @@ fn error_marker(out: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{out}.error"))
 }
 
-/// ffmpeg as cutline installs it: `cutline deps path ffmpeg` for the configured cutline.
-pub fn ffmpeg() -> Option<Utf8PathBuf> {
-    let settings = crate::settings::Settings::load(&crate::paths::library_dir());
-    let cutline = crate::eleven::HelperContext::from_env().ok().and_then(|c| c.cutline).or_else(|| {
-        crate::claude::locate::find_cutline(&settings.cutline_path, &settings.cutline_repo).map(|c| c.path.into())
-    })?;
-    let (code, out, _) = crate::platform::run_capture(
-        Command::new(cutline.as_str()).args(["deps", "path", "ffmpeg"]),
-        Duration::from_secs(20),
-    )
-    .ok()?;
-    let p = Utf8PathBuf::from(out.trim());
-    (code == 0 && p.is_file()).then_some(p)
-}
+pub use super::ffmpeg;
 
 // MARK: The recording worker
 

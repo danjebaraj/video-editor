@@ -191,6 +191,9 @@ fn alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
+/// Pixels in one scroll line, for timed scrolls in pixel units.
+const PIXELS_PER_LINE: i32 = 10;
+
 pub struct MacBackend;
 
 impl Backend for MacBackend {
@@ -318,13 +321,25 @@ impl Backend for MacBackend {
                 pause(120);
                 mouse(LEFT_UP, to_x, to_y, 0, 1);
             }
-            Pointer::Scroll { x, y, lines } => {
+            Pointer::Scroll { x, y, lines, over: None } => {
                 glide(x, y, MOVED);
                 let step = if lines < 0 { -1 } else { 1 };
                 for _ in 0..lines.abs() {
                     // SAFETY: one wheel, line units; the event is released in `post`.
                     post(unsafe { CGEventCreateScrollWheelEvent(std::ptr::null(), 1, 1, step) });
                     pause(25);
+                }
+            }
+            Pointer::Scroll { x, y, lines, over: Some(over) } => {
+                glide(x, y, MOVED);
+                // pixel units (0), the system's 10 points a line, evenly over `over` seconds
+                let (steps, gap) = super::scroll_plan(lines, over, PIXELS_PER_LINE);
+                for (k, d) in steps.iter().enumerate() {
+                    if k > 0 {
+                        std::thread::sleep(gap);
+                    }
+                    // SAFETY: one wheel, pixel units; the event is released in `post`.
+                    post(unsafe { CGEventCreateScrollWheelEvent(std::ptr::null(), 0, 1, *d) });
                 }
             }
         }

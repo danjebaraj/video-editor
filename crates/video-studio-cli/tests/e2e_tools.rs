@@ -1054,3 +1054,44 @@ fn the_windows_media_host_keeps_one_jpeg_per_version_of_a_photo() {
     assert_eq!(viewable::cached_copy(&broken, &cache, cutline).unwrap_err(), "E_IMAGE_DECODE: bad file");
     assert!(!std::fs::read_dir(&cache).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains(".tmp.")));
 }
+
+/// TASK-honest-cedar-A73E step B: `capture scroll … --over <seconds>` spreads a scroll over time.
+#[test]
+fn a_timed_scroll_is_parsed_and_bounded() {
+    let w = World::new();
+    let (run, ctx) = helper_context(&w, "http://127.0.0.1:9", 1000, Mode::Production);
+    let fake = w.root.join("capture.ndjson");
+    let capture = |args: &[&str]| {
+        let mut full = vec!["capture"];
+        full.extend_from_slice(args);
+        w.command(&full)
+            .env("VIDEO_STUDIO_RUN_CONTEXT", ctx.as_str())
+            .env(video_studio_core::capture::FAKE_ENV, fake.as_str())
+            .current_dir(&run)
+            .output()
+            .unwrap()
+    };
+    assert_eq!(capture(&["open", "Notes"]).status.code(), Some(0));
+    let ok = capture(&["scroll", "566", "700", "-12", "--over", "10"]);
+    assert_eq!(ok.status.code(), Some(0), "{}", stderr(&ok));
+    assert_eq!(stdout(&ok).trim(), "Scrolled down 12 lines at 566,700 over 10 s.");
+    let log = ndjson(&fake);
+    let last = log.last().unwrap();
+    assert_eq!(
+        (last["do"].as_str(), last["lines"].as_i64(), last["over"].as_f64()),
+        (Some("scroll"), Some(-12), Some(10.0))
+    );
+    // without --over: as before
+    let plain = capture(&["scroll", "566", "700", "-3"]);
+    assert_eq!(stdout(&plain).trim(), "Scrolled down 3 lines at 566,700.");
+    assert!(ndjson(&fake).last().unwrap()["over"].is_null());
+    // a missing value is a usage error; out of range is refused
+    let missing = capture(&["scroll", "566", "700", "-12", "--over"]);
+    assert_eq!(missing.status.code(), Some(2), "{}", stderr(&missing));
+    assert!(stderr(&missing).contains("--over"), "{}", stderr(&missing));
+    for bad in ["0", "0.05", "61", "abc"] {
+        let o = capture(&["scroll", "566", "700", "-12", "--over", bad]);
+        assert_ne!(o.status.code(), Some(0), "{bad}");
+        assert!(stderr(&o).contains("--over"), "{bad}: {}", stderr(&o));
+    }
+}

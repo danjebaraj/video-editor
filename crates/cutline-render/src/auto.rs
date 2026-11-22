@@ -181,7 +181,8 @@ pub fn script_check(
         let bare = cutline_core::model::Asset { script: None, ..a.clone() };
         let Ok(Some(t)) = load_transcript(&l.dir, id, Some(&bare), lang.as_deref(), false) else { continue };
         let Ok(text) = std::fs::read_to_string(l.dir.join(script)) else { continue };
-        let (_, st) = cutline_transcribe::align::align(&t, &text);
+        // spoken units after the same cleanup on both sides ("One-oh-eight" is "108")
+        let st = check::coverage(&t, &text, &opts);
         if st.match_ratio() < 0.7 {
             out.push(
                 Diagnostic::warning(
@@ -190,9 +191,9 @@ pub fn script_check(
                     format!(
                         "only {:.0}% of the script's {} words were heard in `{id}` ({} missing, {} extra in the audio)",
                         st.match_ratio() * 100.0,
-                        st.script_words,
-                        st.inserted + st.substituted,
-                        st.dropped
+                        st.script_units,
+                        st.missing,
+                        st.extra
                     ),
                 )
                 .hint("check that the script file is the text of this take"),
@@ -249,7 +250,8 @@ pub fn script_check(
 
 /// A voice-over made one passage at a time can come back at a different pace in each: one
 /// rushed, the next slow. Compare how fast each voice asset is spoken (letters per second,
-/// pauses included, from transcripts already made) and report the ones far from the rest
+/// pauses included, timed by transcripts already made; the script's words when the asset has a
+/// script, else the recognised words) and report the ones far from the rest
 /// (`W_VOICE_PACE`). Needs three or more passages of five or more words.
 pub fn voice_pace(l: &Loaded, p: &Project) -> Vec<Diagnostic> {
     const OFF_BY: f64 = 0.22;
@@ -263,11 +265,21 @@ pub fn voice_pace(l: &Loaded, p: &Project) -> Vec<Diagnostic> {
         let Ok(Some(t)) = load_transcript(&l.dir, id, Some(&bare), lang.as_deref(), false) else { continue };
         let (Some(first), Some(last)) = (t.words.first(), t.words.last()) else { continue };
         let span = last.end - first.start;
-        if t.words.len() < 5 || span < 1.0 {
+        // What was said: the script's words when there is one. The recogniser writes "108" for
+        // "one-oh-eight" and "thinkask.ai" for "thinkask dot A I", which makes the passage look
+        // slow (TASK-honest-cedar-A73E). Timing still comes from the transcript.
+        let said: Vec<String> = a
+            .script
+            .as_ref()
+            .and_then(|s| std::fs::read_to_string(l.dir.join(s)).ok())
+            .map(|text| cutline_transcribe::align::script_words(&text))
+            .filter(|w| !w.is_empty())
+            .unwrap_or_else(|| t.words.iter().map(|w| w.w.clone()).collect());
+        if said.len() < 5 || span < 1.0 {
             continue;
         }
-        let letters = t.words.iter().map(|w| w.w.chars().filter(|c| c.is_alphanumeric()).count()).sum::<usize>();
-        paces.push((id, letters as f64 / span, t.words.len() as f64 / span * 60.0));
+        let letters = said.iter().map(|w| w.chars().filter(|c| c.is_alphanumeric()).count()).sum::<usize>();
+        paces.push((id, letters as f64 / span, said.len() as f64 / span * 60.0));
     }
     if paces.len() < 3 {
         return vec![];
