@@ -1142,6 +1142,35 @@ pub fn resolve(p: &Project, look: &dyn MediaLookup, ctx: &Context) -> (Option<Ti
                 }
             }
         }
+        if let Layer::Audio { gain_keys, .. } = &layer {
+            let span = fps.frames_to_secs(end - start);
+            for (k, g) in gain_keys.iter().enumerate() {
+                let kp = format!("{base}/gain_keys/{k}");
+                if !g.db.is_finite() || g.db.abs() > 60.0 {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{kp}/db"),
+                        "db must be a finite gain within ±60 dB",
+                    ));
+                }
+                if !g.at.is_finite() || g.at < 0.0 || g.at > span + 1e-6 {
+                    d.push(
+                        Diagnostic::error(
+                            "E_BAD_VALUE",
+                            format!("{kp}/at"),
+                            format!("at must be within the layer: 0 to {span:.3}s from its start"),
+                        )
+                        .hint("gain key times are seconds from the layer's start, not timeline times"),
+                    );
+                } else if k > 0 && gain_keys[k - 1].at.is_finite() && g.at <= gain_keys[k - 1].at {
+                    d.push(Diagnostic::error(
+                        "E_BAD_VALUE",
+                        format!("{kp}/at"),
+                        format!("gain key times must increase: {} is not after {}", g.at, gain_keys[k - 1].at),
+                    ));
+                }
+            }
+        }
         layers.push(TLayer { index: li, start, end, z, layer });
     }
 

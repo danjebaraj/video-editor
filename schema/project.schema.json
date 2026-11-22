@@ -1893,6 +1893,27 @@
         "light"
       ]
     },
+    "GainKey": {
+      "description": "One point of an audio layer's gain curve.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "Seconds from the layer's start.",
+          "type": "number",
+          "format": "double"
+        },
+        "db": {
+          "description": "Gain in dB at that time, added to the layer's `gain_db`.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "db"
+      ]
+    },
     "HighlightStyle": {
       "type": "string",
       "enum": [
@@ -3109,6 +3130,13 @@
                 "null"
               ],
               "format": "double"
+            },
+            "gain_keys": {
+              "description": "Gain over time: `[{at, db}]`, `at` in seconds from the layer's start (looped\nsources included). Linear in dB between keys, the nearest key's value outside them,\nadded to `gain_db` before ducking and loudness. For a swell or a dip under one line\nwithout splitting the layer.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/GainKey"
+              }
             },
             "loop": {
               "description": "Loop the asset to fill the span.",

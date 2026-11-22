@@ -426,6 +426,69 @@ pub fn review(l: &Loaded, out_dir: &Path) -> Result<ReviewReport> {
 
 /// `review`, with a text recognition engine chosen on the command line (`--ocr`).
 pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<ReviewReport> {
+    review_opts(l, out_dir, ocr, None)
+}
+
+/// One side of a shot comparison.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+pub struct ShotSample {
+    pub clip: String,
+    /// Timeline seconds of the sampled frame.
+    pub at: f64,
+    /// Mean normalized BT.709 luma (0–1) of the graded picture, before captions and overlays.
+    pub mean_luma: f64,
+}
+
+/// `--compare-shots LEFT,RIGHT`: two clips' graded frames side by side, with their luma.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+pub struct ShotComparison {
+    pub left: ShotSample,
+    pub right: ShotSample,
+    /// Right minus left.
+    pub difference: f64,
+    pub image: PathBuf,
+}
+
+/// Where a main clip can be sampled: the middle of the part of it that is on screen alone (outside
+/// the transitions into and out of it), in timeline frames. `Err` names the clip and why.
+pub fn clean_sample_frame(tl: &Timeline, id: &str) -> std::result::Result<i64, String> {
+    let Some(c) = tl.clips.iter().find(|c| c.id == id) else {
+        let ids: Vec<&str> = tl.clips.iter().map(|c| c.id.as_str()).collect();
+        return Err(format!("--compare-shots: no main clip `{id}` in this export (clips: {})", ids.join(", ")));
+    };
+    let mut from = c.start;
+    let mut to = c.start + c.frames;
+    for t in &tl.transitions {
+        if t.after + 1 == c.index {
+            from = from.max(t.start + t.frames);
+        }
+        if t.after == c.index {
+            to = to.min(t.start);
+        }
+    }
+    if to <= from {
+        return Err(format!(
+            "--compare-shots: clip `{id}` is never on screen alone (its transitions cover all of it), so it has no clean frame to sample"
+        ));
+    }
+    Ok((from + to) / 2)
+}
+
+/// Mean normalized BT.709 luma (0–1) of an RGB frame.
+pub fn mean_luma(img: &RgbImage) -> f64 {
+    let n = (img.width() * img.height()).max(1) as f64;
+    img.pixels().map(|p| 0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64).sum::<f64>() / n / 255.0
+}
+
+/// Like [`review_with`]; `compare` names two main clips whose graded frames are put side by side
+/// (`shots/compare_<left>_<right>.png` and `.json`). The comparison is information only: it
+/// changes neither the project nor QA.
+pub fn review_opts(
+    l: &Loaded,
+    out_dir: &Path,
+    ocr: Option<&str>,
+    compare: Option<(&str, &str)>,
+) -> Result<ReviewReport> {
     let tc = cutline_deps::toolchain()?;
     std::fs::create_dir_all(out_dir)?;
     for sub in ["cuts", "captions", "reframe", "annotations"] {
@@ -435,9 +498,59 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     }
     let (name, e) = pipeline::exports(&l.project).remove(0);
     let pr = pipeline::prepare(l, name.clone(), &e, true)?;
+    let compare_frames = match compare {
+        Some((a, b)) => Some((
+            (a, clean_sample_frame(&pr.timeline, a).map_err(anyhow::Error::msg)?),
+            (b, clean_sample_frame(&pr.timeline, b).map_err(anyhow::Error::msg)?),
+        )),
+        None => None,
+    };
     let preview = out_dir.join("preview_540p.mp4");
     let opts = RenderOptions { draft: true, out: Some(preview.clone()), ..Default::default() };
     let (plan, _exec) = pipeline::render(l, &pr, &opts)?;
+    // ---- shot comparison (graded clip segments: no captions or overlays yet)
+    let mut shot_outputs: Option<(PathBuf, PathBuf)> = None;
+    if let Some(((a, fa), (b, fb))) = compare_frames {
+        let tlr = &pr.timeline;
+        let sample = |id: &str, f: i64| -> Result<(ShotSample, RgbImage)> {
+            let c = tlr.clips.iter().find(|c| c.id == id).context("clip")?;
+            let seg = plan.segments.iter().find(|s| s.clip_id == id).context("the clip's segment")?;
+            let img = grab(tc, &seg.mezzanine, tlr.fps.frames_to_secs(f - c.start))?;
+            Ok((ShotSample { clip: id.to_string(), at: tlr.secs(f), mean_luma: mean_luma(&img) }, img))
+        };
+        let (ls, li) = sample(a, fa)?;
+        let (rs, ri) = sample(b, fb)?;
+        let h = li.height().min(ri.height()).min(720);
+        let rl = image::imageops::resize(&li, li.width() * h / li.height(), h, image::imageops::FilterType::Triangle);
+        let rr = image::imageops::resize(&ri, ri.width() * h / ri.height(), h, image::imageops::FilterType::Triangle);
+        let mut img = hstack(&rl, &rr, 8);
+        let p = Painter::new();
+        p.label(
+            &mut img,
+            8,
+            8,
+            16.0,
+            &format!("{}  {}  luma {:.3}", ls.clip, format_tc(ls.at), ls.mean_luma),
+            [255, 255, 255],
+        );
+        p.label(
+            &mut img,
+            rl.width() as i32 + 16,
+            8,
+            16.0,
+            &format!("{}  {}  luma {:.3}", rs.clip, format_tc(rs.at), rs.mean_luma),
+            [255, 255, 255],
+        );
+        let dir = out_dir.join("shots");
+        std::fs::create_dir_all(&dir)?;
+        let stem = format!("compare_{}_{}", sanitize(a), sanitize(b));
+        let png = dir.join(format!("{stem}.png"));
+        img.save(&png)?;
+        let cmp = ShotComparison { difference: rs.mean_luma - ls.mean_luma, left: ls, right: rs, image: png.clone() };
+        let jp = dir.join(format!("{stem}.json"));
+        std::fs::write(&jp, serde_json::to_vec_pretty(&cmp)?)?;
+        shot_outputs = Some((png, jp));
+    }
     // prefer an up-to-date final render for stills and QA
     let final_path = l.dir.join("out").join(format!("{}.mp4", cutline_render::output_name(&l.project, &l.path)));
     let proj_mtime = std::fs::metadata(&l.path).and_then(|m| m.modified()).ok();
@@ -446,8 +559,11 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
     let tl = &pr.timeline;
     let dur = tl.duration();
     let painter = Painter::new();
-    let mut images: Vec<PathBuf> = vec![];
-    let mut files: Vec<PathBuf> = vec![];
+    // the shot comparison first, so the image limit never drops it
+    let (mut images, mut files): (Vec<PathBuf>, Vec<PathBuf>) = match shot_outputs {
+        Some((png, json)) => (vec![png], vec![json]),
+        None => (vec![], vec![]),
+    };
 
     // ---- QA
     let mut ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);

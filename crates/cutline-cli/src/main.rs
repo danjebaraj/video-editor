@@ -174,6 +174,11 @@ enum Cmd {
         /// Default: CUTLINE_OCR, else the project's `qa.ocr`, else auto.
         #[arg(long)]
         ocr: Option<String>,
+        /// Put two main clips of the export side by side (`shots/compare_LEFT_RIGHT.png`) with
+        /// the mean luma of each graded frame (before captions and overlays) and the difference,
+        /// to match exposure between shots. Information only: QA is unchanged.
+        #[arg(long, value_name = "LEFT,RIGHT")]
+        compare_shots: Option<String>,
     },
     /// Thumbnail (1280×720, or 1080×1920 for Shorts) with template text.
     Thumbnail {
@@ -385,7 +390,9 @@ fn dispatch(cli: Cli) -> CmdResult {
             edit::preview(&project, &at, range.as_deref(), safe_zones, out)
         }
         Cmd::Templates { cmd: TemplatesCmd::List } => templates_list(),
-        Cmd::Review { project, out, ocr } => edit::review(&project, out.as_deref(), ocr.as_deref()),
+        Cmd::Review { project, out, ocr, compare_shots } => {
+            edit::review(&project, out.as_deref(), ocr.as_deref(), compare_shots.as_deref())
+        }
         Cmd::Thumbnail { project, at, text, template, out } => {
             edit::thumbnail(&project, &at, text.as_deref(), &template, out)
         }

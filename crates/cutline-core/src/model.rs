@@ -1248,6 +1248,12 @@ pub enum Layer {
         /// Override the asset role (voice/music/sfx).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<Role>,
+        /// Gain over time: `[{at, db}]`, `at` in seconds from the layer's start (looped
+        /// sources included). Linear in dB between keys, the nearest key's value outside them,
+        /// added to `gain_db` before ducking and loudness. For a swell or a dip under one line
+        /// without splitting the layer.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        gain_keys: Vec<GainKey>,
         #[serde(flatten)]
         at: Placement,
     },
@@ -1740,6 +1746,16 @@ impl Default for ScriptCheck {
     fn default() -> Self {
         Self { enabled: true, similarity: None, min_span_words: None, ignore: vec![] }
     }
+}
+
+/// One point of an audio layer's gain curve.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GainKey {
+    /// Seconds from the layer's start.
+    pub at: f64,
+    /// Gain in dB at that time, added to the layer's `gain_db`.
+    pub db: f64,
 }
 
 /// How an audio layer's asset lines up with the layer span.

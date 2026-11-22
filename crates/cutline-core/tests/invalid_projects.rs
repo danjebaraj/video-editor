@@ -465,3 +465,21 @@ fn missing_font_lists_the_bundled_fonts() {
     assert_eq!(f.path, "/captions/font");
     assert_eq!(f.hint.as_deref(), Some("bundled: Anton, Inter"));
 }
+
+/// FEAT-magic-alpaca-JPD6: gain keys must be finite, increase, and lie inside the layer.
+#[test]
+fn gain_keys_are_checked() {
+    let layer = |keys: &str| {
+        format!("{OK_MAIN}, layers: [{{type: \"audio\", asset: \"music\", start: 1, end: 5, gain_keys: [{keys}]}}]")
+    };
+    let ok = check(&layer("{at: 0, db: 0}, {at: 2, db: -12}, {at: 4, db: -3}"));
+    assert!(ok.is_empty(), "{ok:?}");
+    expect(&layer("{at: 1, db: 0}, {at: 1, db: -6}"), "E_BAD_VALUE", "/layers/0/gain_keys/1/at");
+    expect(&layer("{at: 3, db: 0}, {at: 2, db: -6}"), "E_BAD_VALUE", "/layers/0/gain_keys/1/at");
+    expect(&layer("{at: -0.5, db: 0}"), "E_BAD_VALUE", "/layers/0/gain_keys/0/at");
+    expect(&layer("{at: 4.5, db: 0}"), "E_BAD_VALUE", "/layers/0/gain_keys/0/at");
+    expect(&layer("{at: 1, db: 100}"), "E_BAD_VALUE", "/layers/0/gain_keys/0/db");
+    // not a number at all never reaches the timeline
+    assert!(!check(&layer("{at: 1, db: Infinity}")).is_empty());
+    assert!(!check(&layer("{at: 1, gain: 3}")).is_empty());
+}

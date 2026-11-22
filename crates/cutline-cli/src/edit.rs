@@ -599,10 +599,21 @@ pub fn review_dir(l: &Loaded) -> PathBuf {
     l.dir.join("review").join(folder_name(&cutline_render::output_name(&l.project, &l.path)))
 }
 
-pub fn review(path: &Path, out: Option<&Path>, ocr: Option<&str>) -> CmdResult {
+pub fn review(path: &Path, out: Option<&Path>, ocr: Option<&str>, compare: Option<&str>) -> CmdResult {
     if let Some(o) = ocr {
         cutline_qa::ocr::setting(Some(o), None).map_err(CliError::usage)?;
     }
+    let compare = match compare {
+        None => None,
+        Some(v) => match v.split_once(',').map(|(a, b)| (a.trim(), b.trim())) {
+            Some((a, b)) if !a.is_empty() && !b.is_empty() && a != b => Some((a, b)),
+            _ => {
+                return Err(CliError::usage(anyhow::anyhow!(
+                    "--compare-shots takes two different main clip ids: LEFT,RIGHT (got `{v}`)"
+                )))
+            }
+        },
+    };
     let l = load_or_return!(path);
     if has_errors(&l.diags) {
         return Ok(diag_output(&l.diags));
@@ -613,7 +624,7 @@ pub fn review(path: &Path, out: Option<&Path>, ocr: Option<&str>) -> CmdResult {
         Some(o) => std::env::current_dir().map(|d| d.join(o)).unwrap_or_else(|_| o.to_path_buf()),
         None => review_dir(&l),
     };
-    let r = cutline_qa::review::review_with(&l, &out, ocr).map_err(classify)?;
+    let r = cutline_qa::review::review_opts(&l, &out, ocr, compare).map_err(classify)?;
     let mut h = format!(
         "review pack: {}\nsource: {}\nQA: {}\n",
         r.dir.display(),
