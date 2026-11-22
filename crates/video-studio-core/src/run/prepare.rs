@@ -251,7 +251,16 @@ fn copy_tree(from: &Utf8Path, to: &Utf8Path) {
 }
 
 /// Builds the run folder and everything in it. Nothing is launched yet.
+/// What a run or assistant session says when Codex is the chosen provider: the readiness check
+/// and transport exist (`crate::codex`), the Codex-driven assistant and runs don't yet, and
+/// nothing falls back to Claude without the user choosing it.
+pub const CODEX_NOT_WIRED: &str = "Codex is selected in Settings › Assistant, but this version still runs the assistant and productions with Claude Code only. Choose Claude there to continue.";
+
 pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
+    // the provider is captured at run start: changing Settings later affects only later runs
+    if env.settings.provider == crate::codex::Provider::Codex {
+        return Err(Error::Environment(CODEX_NOT_WIRED.into()));
+    }
     let mut project = Project::load(&request.project_path)?;
     let rc = project.run_config(&request.run_config).cloned().ok_or_else(|| {
         let names: Vec<&str> = project.run_configs.iter().map(|r| r.name.as_str()).collect();

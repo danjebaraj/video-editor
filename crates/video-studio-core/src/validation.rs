@@ -215,6 +215,14 @@ pub trait EnvProbe {
     fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
         None
     }
+    /// The provider chosen in Settings › Assistant.
+    fn provider(&self) -> crate::codex::Provider {
+        crate::codex::Provider::Claude
+    }
+    /// Codex's readiness, when Codex is the provider.
+    fn codex_status(&self) -> Option<crate::codex::CodexStatus> {
+        None
+    }
 }
 
 /// The real machine.
@@ -226,6 +234,12 @@ pub struct SystemEnv<'a> {
 }
 
 impl EnvProbe for SystemEnv<'_> {
+    fn provider(&self) -> crate::codex::Provider {
+        self.settings.provider
+    }
+    fn codex_status(&self) -> Option<crate::codex::CodexStatus> {
+        Some(crate::codex::check(&self.settings.codex_path))
+    }
     fn claude(&self) -> Option<ClaudeInfo> {
         locate::find_claude(&self.settings.claude_path)
     }
@@ -444,8 +458,37 @@ pub fn optional_tools_text(missing: &[String]) -> String {
     text
 }
 
+/// The provider check for Codex (FEAT-spry-alpaca-5RQZ): missing, incompatible and signed out are
+/// separate blockers, each with its remedy. Claude isn't needed then.
+fn check_codex(c: &mut Ctx, env: &dyn EnvProbe) {
+    let status = env.codex_status().unwrap_or(crate::codex::CodexStatus::Missing);
+    if let Some((rule, title, fix)) = status.finding() {
+        c.add(rule, None, Severity::Blocker, "environment", title, Some(fix), FixLink::target("settings", "assistant"));
+        return;
+    }
+    // The transport and readiness are in place; the assistant and runs still drive Claude Code.
+    c.add(
+        "codex_runs_unavailable",
+        None,
+        Severity::Blocker,
+        "environment",
+        "Runs with Codex aren't available in this build yet".into(),
+        Some("Codex is installed and signed in, but this version still produces videos with Claude Code only. Choose Claude in Settings › Assistant to run.".into()),
+        FixLink::target("settings", "assistant"),
+    );
+}
+
 fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
     let env = input.env;
+    if env.provider() == crate::codex::Provider::Codex {
+        check_codex(c, env);
+    } else {
+        check_claude(c, env);
+    }
+    check_cutline_env(c, input, est, needs_audio);
+}
+
+fn check_claude(c: &mut Ctx, env: &dyn EnvProbe) {
     match env.claude() {
         None => c.add(
             "claude_missing",
@@ -495,6 +538,10 @@ fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, ne
             }
         }
     }
+}
+
+fn check_cutline_env(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
+    let env = input.env;
     match env.cutline() {
         None => c.add(
             "cutline_missing",
@@ -1456,6 +1503,8 @@ pub struct FakeEnv {
     pub cartesia_key: bool,
     pub eleven_remaining: Option<u64>,
     pub capture: Option<crate::capture::Permissions>,
+    pub provider: crate::codex::Provider,
+    pub codex: Option<crate::codex::CodexStatus>,
 }
 
 impl Default for FakeEnv {
@@ -1479,6 +1528,8 @@ impl Default for FakeEnv {
             cartesia_key: false,
             eleven_remaining: Some(1_000_000),
             capture: Some(crate::capture::Permissions { screen_recording: true, accessibility: true, supported: true }),
+            provider: Default::default(),
+            codex: None,
         }
     }
 }
@@ -1513,6 +1564,12 @@ impl EnvProbe for FakeEnv {
     }
     fn capture_permissions(&self) -> Option<crate::capture::Permissions> {
         self.capture
+    }
+    fn provider(&self) -> crate::codex::Provider {
+        self.provider
+    }
+    fn codex_status(&self) -> Option<crate::codex::CodexStatus> {
+        self.codex.clone()
     }
 }
 
@@ -1772,6 +1829,22 @@ mod tests {
         f.env = FakeEnv::default();
         f.env.signed_in = Some(false);
         assert!(has(&f.run(), "claude_signed_out", Severity::Blocker));
+        // Codex as the provider: Claude isn't needed; each Codex problem is its own blocker
+        f.env = FakeEnv { claude: None, provider: crate::codex::Provider::Codex, ..FakeEnv::default() };
+        for (status, rule) in [
+            (crate::codex::CodexStatus::Missing, "codex_missing"),
+            (crate::codex::CodexStatus::Incompatible { detail: "x".into() }, "codex_incompatible"),
+            (crate::codex::CodexStatus::SignInRequired, "codex_signed_out"),
+        ] {
+            f.env.codex = Some(status);
+            let r = f.run();
+            assert!(has(&r, rule, Severity::Blocker), "{rule}");
+            assert!(!has(&r, "claude_missing", Severity::Blocker), "a Codex workflow doesn't need Claude");
+        }
+        f.env.codex = Some(crate::codex::CodexStatus::Ready { plan: None, models: vec![] });
+        let r = f.run();
+        assert!(!has(&r, "codex_missing", Severity::Blocker) && !has(&r, "claude_missing", Severity::Blocker));
+        assert!(has(&r, "codex_runs_unavailable", Severity::Blocker), "runs with Codex aren't wired yet");
         // Windows: no Git Bash means no shell tool for Claude
         f.env = FakeEnv::default();
         f.env.claude.as_mut().unwrap().git_bash = None;

@@ -583,6 +583,11 @@ pub fn call(method: String, args: String) -> R<String> {
         "validation.fix_prompt" => out(arg::<ReadinessReport>(&args, "readiness")?.fix_prompt()),
 
         // Runs and logs
+        // Settings › Assistant: is Codex installed, compatible and signed in, and which models?
+        "codex.check" => {
+            let path = opt::<String>(&args, "path")?.unwrap_or_else(|| Settings::load(&library()).codex_path);
+            out(core::codex::check(&path))
+        }
         "run.results" => out(core::run::collect::load_results(Utf8Path::new(&arg::<String>(&args, "folder")?))),
         "logs.export" => out(logs::export_logs(
             Utf8Path::new(&arg::<String>(&args, "folder")?),
@@ -731,6 +736,13 @@ pub fn start_assistant(request_json: String, listener: Box<dyn EventListener>) -
     let mut request: AssistantRequest =
         serde_json::from_str(&request_json).map_err(|e| bad(format!("request: {e}")))?;
     let settings = Settings::load(&library());
+    // the provider is read when the turn starts; Codex isn't wired into the assistant yet
+    if settings.provider == video_studio_core::codex::Provider::Codex {
+        return Err(CoreError::Failed {
+            code: "environment".into(),
+            message: video_studio_core::run::prepare::CODEX_NOT_WIRED.into(),
+        });
+    }
     // cutline makes the viewable copies of HEIC/HEIF photos: those in the media list before the
     // turn, and (with `cutline still`) any other one Claude finds in a folder it may read
     if request.cutline.is_none() {

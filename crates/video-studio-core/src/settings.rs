@@ -27,6 +27,14 @@ pub struct Settings {
     pub web_access_default: bool,
     /// Seconds a headless run waits on a question before Claude proceeds on its assumption.
     pub headless_question_timeout_s: u32,
+    // Assistant provider (FEAT-spry-alpaca-5RQZ)
+    /// Claude Code (default) or Codex App Server, for the assistant and runs. Settings saved
+    /// before the choice existed have no value and mean Claude.
+    pub provider: crate::codex::Provider,
+    /// Path to the `codex` CLI; empty means PATH.
+    pub codex_path: String,
+    /// The Codex model; empty means Codex's own default. Claude's model choices are kept apart.
+    pub codex_model: String,
     // cutline
     /// Path to the `cutline` binary; empty means PATH, then `bin/cutline` in `cutline_repo`.
     pub cutline_path: String,
@@ -74,6 +82,9 @@ impl Default for Settings {
             effort: String::new(),
             web_access_default: false,
             headless_question_timeout_s: 0,
+            provider: Default::default(),
+            codex_path: String::new(),
+            codex_model: String::new(),
             cutline_path: String::new(),
             cutline_repo: String::new(),
             default_quality: "final".into(),
@@ -135,5 +146,29 @@ mod tests {
         // unknown and missing keys are tolerated
         std::fs::write(lib.join("settings.json"), "{\"claude_path\": \"x\", \"future\": 1}").unwrap();
         assert_eq!(Settings::load(lib).claude_path, "x");
+    }
+
+    /// FEAT-spry-alpaca-5RQZ: settings without a provider are Claude; a Codex choice and its
+    /// model persist without touching Claude's model preferences.
+    #[test]
+    fn provider_defaults_to_claude_and_persists() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = Utf8Path::from_path(d.path()).unwrap();
+        std::fs::write(
+            lib.join("settings.json"),
+            "{\"claude_path\": \"/opt/claude\", \"default_assistant_model\": \"opus\"}",
+        )
+        .unwrap();
+        let mut s = Settings::load(lib);
+        assert_eq!(s.provider, crate::codex::Provider::Claude);
+        s.provider = crate::codex::Provider::Codex;
+        s.codex_model = "gpt-5.5-codex".into();
+        s.save(lib).unwrap();
+        let back = Settings::load(lib);
+        assert_eq!((back.provider, back.codex_model.as_str()), (crate::codex::Provider::Codex, "gpt-5.5-codex"));
+        assert_eq!(back.default_assistant_model, "opus", "Claude's model preference is kept");
+        let mut claude_again = back.clone();
+        claude_again.provider = crate::codex::Provider::Claude;
+        assert_eq!(claude_again.default_assistant_model, "opus");
     }
 }
