@@ -366,6 +366,9 @@ fn cartesia_note(input: &PromptInput) -> String {
 
 /// How a production run makes footage of an app that nobody recorded beforehand.
 fn capture_section(input: &PromptInput) -> String {
+    if input.kind == RunKind::AudioReview {
+        return "Apps aren't driven or recorded in an Audio Review: only the soundtrack is built. Where the spec has app footage that isn't attached, hold its place with `video-studio standin video --out captures/<name>.mov --seconds <n>` so the timing (and any sound tied to it) is right.\n".into();
+    }
     let cap = &input.project.app_capture;
     if !cap.enabled {
         return "App recording is turned off for this project: you cannot drive or record apps. If the spec asks for footage of an app that isn't in the media manifest, do not fake it: say exactly which shots are missing (in summary.md under Known issues, or under missing_media in a dry run) and that the user can turn on Project › App recording or attach recordings.\n".into();
@@ -455,6 +458,19 @@ pub fn system_prompt(input: &PromptInput) -> String {
             "readiness.json:\n```json\n{\n  \"ready\": true,\n  \"ambiguities\": [{\"text\": \"what is unclear\", \"spec_line\": 12, \"detail\": \"what you would need to know\"}],\n  \"assumptions\": [{\"text\": \"what you assumed in order to continue\", \"spec_line\": 20}],\n  \"missing_media\": [{\"text\": \"what is needed and not attached\", \"spec_line\": 31}],\n  \"risks\": [{\"text\": \"a choice that may disappoint, or a check that failed\", \"detail\": \"why\"}],\n  \"planned\": [{\"text\": \"a file the production run will record or generate, with its length\", \"spec_line\": 43}],\n  \"estimated_durations\": {\"<output folder name>\": 45.0},\n  \"notes\": \"anything else the user should know before paying for a full run\"\n}\n```\n\
              `spec_line` is the 1-based line of spec.md the point is about; leave it out when there is none. `missing_media` is only for media the user must supply: footage or audio the spec needs that isn't attached and that the production run can't record or generate. Files the run makes itself (app recordings, voice-over, music, sound effects) go under `planned`, one entry each, never under `missing_media` or `risks`. Use empty lists when there is nothing to report, and set `ready` to false if a production run would fail or clearly disappoint as things stand. Be specific and brief: each entry is shown to the user as one line.\n\n",
         );
+    } else if input.kind == RunKind::AudioReview {
+        let export = input.outputs.first().and_then(|o| o.exports.first()).map(|e| e.name.clone()).unwrap_or_default();
+        s.push_str(&format!(
+            "This is an AUDIO REVIEW: the user wants to hear the soundtrack of the output below before paying for a video render.\n\
+             1. Read spec.md, media-manifest.json, outputs.json and, when there is a brand, brand-preset.json.\n\
+             2. Generate the audio the spec needs (see Audio): narration, music, sound effects. Use the helper as in production; its cache reuses files whose text and settings haven't changed.\n\
+             3. Write project.json5 for the whole edit as you would for production, with every audible track: the source clips' own sound, the voice-over, music and effects, with their trims, offsets, gains, fades and ducking. Where picture-only material isn't available (app footage, generated graphics), use a stand-in of the right length so the timing holds.\n\
+             4. `cutline validate --json project.json5` until it is clean; `cutline cues project.json5` when the project uses cues.\n\
+             5. Mix the soundtrack: `cutline audio project.json5 --export {export} --out {wav}`. It uses the same audio plan as the final render and writes the WAV only when the mix succeeds. If it reports that the timeline has no audible tracks, say so in summary.md.\n\
+             6. Write summary.md: **What you will hear** (one line per track, with when it plays), **Assumptions**, **Known issues** (a missing source, a credit limit, anything that kept a track out).\n\
+             You cannot render, review or preview pictures, or drive and record apps, in an Audio Review; those commands are refused.\n\n",
+            wav = crate::run::collect::AUDIO_REVIEW_WAV,
+        ));
     } else {
         s.push_str(&format!(
             "1. Read spec.md, media-manifest.json, outputs.json and, when there is a brand, brand-preset.json.\n\
@@ -548,12 +564,19 @@ pub fn system_prompt(input: &PromptInput) -> String {
 /// The first user message of the run.
 pub fn user_prompt(kind: RunKind, revise: Option<&Revise>, previous: Option<&RunRecord>) -> String {
     match (kind, revise) {
+        (RunKind::AudioReview, Some(r)) => format!(
+            "Revise the soundtrack from the previous Audio Review.\n\nThe previous run's project.json5, audio/ and work/ have been copied into this new run folder, and its summary is in previous-summary.md{}. The previous review's WAV stays in its own folder, so the user can compare.\n\nFeedback from the user:\n\n{}\n\nMake the changes, keep everything the feedback doesn't touch, reuse the existing audio where the text hasn't changed (the helper's cache does this for unchanged requests), validate, mix again with `cutline audio` to {} and write summary.md, starting with what changed.",
+            previous.map(|p| format!(" (previous run folder: {})", p.folder)).unwrap_or_default(),
+            r.feedback.trim(),
+            crate::run::collect::AUDIO_REVIEW_WAV
+        ),
         (_, Some(r)) => format!(
             "Revise the video from the previous run.\n\nThe previous run's project.json5, audio/ and work/ have been copied into this new run folder, and its summary is in previous-summary.md{}. Outputs go to this folder's outputs/ as before.\n\nFeedback from the user:\n\n{}\n\nMake the changes, keep everything the feedback doesn't touch, reuse the existing audio where the text hasn't changed, then validate, review, render and write summary.md as usual. In summary.md, start with what changed in this revision.",
             previous.map(|p| format!(" (previous run folder: {})", p.folder)).unwrap_or_default(),
             r.feedback.trim()
         ),
         (RunKind::DryRun, None) => "Do the dry run for the video described in spec.md: write project.json5, validate and review it, then write readiness.json.".into(),
+        (RunKind::AudioReview, None) => format!("Build the soundtrack of the video described in spec.md for an Audio Review: generate the audio it needs, write project.json5, validate it, then mix it with `cutline audio project.json5 --export <name> --out {}` and write summary.md. Don't render, review or record any picture.", crate::run::collect::AUDIO_REVIEW_WAV),
         (RunKind::Production, None) => "Produce the video described in spec.md: generate the audio it needs, write project.json5, validate, review, render every output, check QA, then write summary.md.".into(),
     }
 }

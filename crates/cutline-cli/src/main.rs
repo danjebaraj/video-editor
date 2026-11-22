@@ -143,6 +143,20 @@ enum Cmd {
         #[arg(long, short)]
         out: Option<PathBuf>,
     },
+    /// The final mix of one export as a WAV (48 kHz stereo float), exactly as `render` makes it
+    /// before muxing: trims, offsets, gains, fades, ducking, silence and loudness. No picture is
+    /// rendered, captured or encoded. For listening to the soundtrack before a video render.
+    Audio {
+        project: PathBuf,
+        /// The export to mix (its name or out stem); default the first.
+        #[arg(long)]
+        export: Option<String>,
+        /// Destination WAV; written only when the mix succeeds.
+        #[arg(long, short)]
+        out: PathBuf,
+        #[arg(long)]
+        no_cache: bool,
+    },
     /// Still PNGs (`--at`) or a 540p proxy clip (`--range a-b`).
     Preview {
         project: PathBuf,
@@ -383,6 +397,7 @@ fn dispatch(cli: Cli) -> CmdResult {
             &project,
             edit::RenderArgs { export, draft, dry_run, no_cache, allow_qa_errors, hw, jobs, out },
         ),
+        Cmd::Audio { project, export, out, no_cache } => edit::audio(&project, export.as_deref(), &out, no_cache),
         Cmd::Preview { project, at, range, safe_zones, out } => {
             if at.is_empty() && range.is_none() {
                 return Err(CliError::usage(anyhow::anyhow!("preview needs --at <t>... or --range a-b")));

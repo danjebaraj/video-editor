@@ -356,10 +356,12 @@ pub fn estimate_claude_cost(
     let context = 30_000.0 + spec_tokens + project.media.len() as f64 * 120.0;
     let turns = match kind {
         RunKind::DryRun => 12.0,
+        RunKind::AudioReview => 18.0 + project.media.len() as f64 * 0.5,
         RunKind::Production => 25.0 + 10.0 * outputs as f64 + project.media.len() as f64 * 0.5,
     };
     let output_tokens = match kind {
         RunKind::DryRun => 6_000.0,
+        RunKind::AudioReview => 8_000.0 + spec_tokens * 2.0,
         RunKind::Production => 12_000.0 + 3_000.0 * outputs as f64 + spec_tokens * 2.0,
     };
     // Most input is read from the prompt cache (about a tenth of the input price).
@@ -1408,7 +1410,7 @@ pub fn validate(input: &ValidateInput) -> Report {
     }
     let model = match input.kind {
         RunKind::DryRun => p.models.dry_run_or(input.settings),
-        RunKind::Production => input
+        RunKind::Production | RunKind::AudioReview => input
             .run_config
             .map(|r| r.production_model.clone())
             .unwrap_or_else(|| input.settings.default_production_model.clone()),
@@ -1418,14 +1420,14 @@ pub fn validate(input: &ValidateInput) -> Report {
     est.claude_usd_high = hi;
 
     // A dry run generates no audio, so the key and credits aren't needed for it.
-    let needs_audio = (needs_tts || needs_music) && input.kind == RunKind::Production;
+    let needs_audio = (needs_tts || needs_music) && input.kind != RunKind::DryRun;
     check_environment(&mut c, input, &mut est, needs_audio);
     check_media(&mut c, input, &outputs);
     check_spec(&mut c, input, &est);
     check_brand(&mut c, input);
     check_run_needs(&mut c, input, &outputs);
     check_outputs(&mut c, input, &outputs, out_root.as_ref(), &mut est);
-    if input.kind == RunKind::Production {
+    if input.kind != RunKind::DryRun {
         check_budget(&mut c, input, &est, outputs.len());
     }
 

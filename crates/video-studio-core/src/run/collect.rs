@@ -96,6 +96,61 @@ pub fn read_qa(path: &Utf8Path) -> Option<(String, u64, u64, Vec<QaFinding>)> {
 
 /// Looks for each expected export in the run folder. With `finished_ok` false (cancelled or
 /// failed), files that exist are kept and flagged incomplete.
+/// Where an Audio Review's mix goes, relative to the run folder.
+pub const AUDIO_REVIEW_WAV: &str = "outputs/audio-review.wav";
+
+/// An Audio Review's one result: the WAV of the auditioned output. `incomplete` unless the run
+/// finished and the file is there, so a stopped or failed build never offers it for playback.
+pub fn collect_audio_review(folder: &Utf8Path, output: &ResolvedOutput, finished_ok: bool) -> OutputFile {
+    let path = folder.join(AUDIO_REVIEW_WAV);
+    let exists = path.is_file();
+    let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    // 48 kHz stereo float WAV: 384 000 bytes a second after the header
+    let duration_s = (bytes > 44).then(|| (bytes - 44) as f64 / 384_000.0);
+    OutputFile {
+        output_id: output.id.clone(),
+        output_name: output.name.clone(),
+        platform: output.platform.clone(),
+        export: output.exports.first().map(|e| e.name.clone()).unwrap_or_default(),
+        path: path.to_string(),
+        exists,
+        bytes,
+        width: 0,
+        height: 0,
+        incomplete: !(finished_ok && exists && bytes > 44),
+        qa_verdict: "none".into(),
+        qa_errors: 0,
+        qa_warnings: 0,
+        qa_findings: vec![],
+        qa_report: None,
+        captions_srt: None,
+        captions_vtt: None,
+        poster: None,
+        render_report: None,
+        duration_s,
+    }
+}
+
+/// Whether a float WAV holds only silence (every sample under −90 dBFS). Unreadable files aren't
+/// called silent.
+pub fn wav_is_silent(path: &Utf8Path) -> bool {
+    let Ok(b) = std::fs::read(path) else { return false };
+    if b.len() < 12 || &b[0..4] != b"RIFF" || &b[8..12] != b"WAVE" {
+        return false;
+    }
+    let mut i = 12;
+    while i + 8 <= b.len() {
+        let id = &b[i..i + 4];
+        let len = u32::from_le_bytes([b[i + 4], b[i + 5], b[i + 6], b[i + 7]]) as usize;
+        if id == b"data" {
+            let data = &b[i + 8..(i + 8 + len).min(b.len())];
+            return data.chunks_exact(4).all(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]).abs() < 3.2e-5);
+        }
+        i += 8 + len + (len & 1);
+    }
+    false
+}
+
 pub fn collect_outputs(folder: &Utf8Path, outputs: &[ResolvedOutput], finished_ok: bool) -> Vec<OutputFile> {
     let mut files = Vec::new();
     for o in outputs {
@@ -264,7 +319,12 @@ pub fn load_results(folder: &Utf8Path) -> RunResults {
     RunResults {
         folder: folder.to_string(),
         exists: folder.is_dir(),
-        outputs: collect_outputs(folder, &outputs, finished_ok),
+        // an Audio Review's result is its WAV, played again without another build
+        outputs: if run["kind"] == "audio_review" {
+            outputs.first().map(|o| vec![collect_audio_review(folder, o, finished_ok)]).unwrap_or_default()
+        } else {
+            collect_outputs(folder, &outputs, finished_ok)
+        },
         summary: std::fs::read_to_string(folder.join("logs/summary.md"))
             .or_else(|_| std::fs::read_to_string(folder.join("summary.md")))
             .ok(),

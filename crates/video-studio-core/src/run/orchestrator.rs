@@ -737,6 +737,12 @@ impl Driver {
         let outputs = match kind {
             RunKind::Production => collect::collect_outputs(&folder, &self.p.outputs, ok_so_far),
             RunKind::DryRun => Vec::new(),
+            RunKind::AudioReview => self
+                .p
+                .outputs
+                .first()
+                .map(|o| vec![collect::collect_audio_review(&folder, o, ok_so_far)])
+                .unwrap_or_default(),
         };
         if ok_so_far {
             match kind {
@@ -762,6 +768,20 @@ impl Driver {
                             "none" => self.warnings.push(format!("{}: there is no QA report.", o.output_name)),
                             _ => {}
                         }
+                    }
+                    if !folder.join("summary.md").is_file() {
+                        self.warnings.push("Claude didn't write summary.md.".into());
+                    }
+                }
+                RunKind::AudioReview => {
+                    if outputs.iter().all(|o| !o.exists || o.bytes <= 44) {
+                        failed = true;
+                        message = Some(format!(
+                            "Claude finished without mixing the soundtrack ({}). See summary.md and the cutline logs for why.",
+                            collect::AUDIO_REVIEW_WAV
+                        ));
+                    } else if outputs.iter().any(|o| collect::wav_is_silent(Utf8Path::new(&o.path))) {
+                        self.warnings.push("The timeline has no audible tracks: the mix is silence.".into());
                     }
                     if !folder.join("summary.md").is_file() {
                         self.warnings.push("Claude didn't write summary.md.".into());

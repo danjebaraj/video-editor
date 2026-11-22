@@ -203,6 +203,46 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "audio" => {
+            // a WAV of 1 s of 48 kHz stereo float: a tone, or silence for a project marked SILENT
+            let Some(text) = read() else {
+                eprintln!("error: can't read {}", file.unwrap_or("the project"));
+                std::process::exit(1);
+            };
+            let out = args.iter().position(|a| a == "--out" || a == "-o").and_then(|i| args.get(i + 1)).cloned();
+            let Some(out) = out else {
+                eprintln!("error: --out is required");
+                std::process::exit(2);
+            };
+            let silent = text.contains("SILENT");
+            let n = 48_000usize;
+            let mut data = Vec::with_capacity(n * 8);
+            for k in 0..n {
+                let v =
+                    if silent { 0f32 } else { 0.25 * (k as f32 * 2.0 * std::f32::consts::PI * 440.0 / 48_000.0).sin() };
+                data.extend_from_slice(&v.to_le_bytes());
+                data.extend_from_slice(&v.to_le_bytes());
+            }
+            let mut wav = Vec::new();
+            wav.extend_from_slice(b"RIFF");
+            wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+            wav.extend_from_slice(b"WAVEfmt ");
+            wav.extend_from_slice(&16u32.to_le_bytes());
+            wav.extend_from_slice(&3u16.to_le_bytes());
+            wav.extend_from_slice(&2u16.to_le_bytes());
+            wav.extend_from_slice(&48_000u32.to_le_bytes());
+            wav.extend_from_slice(&(48_000u32 * 8).to_le_bytes());
+            wav.extend_from_slice(&8u16.to_le_bytes());
+            wav.extend_from_slice(&32u16.to_le_bytes());
+            wav.extend_from_slice(b"data");
+            wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            wav.extend_from_slice(&data);
+            if let Some(dir) = std::path::Path::new(&out).parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&out, wav);
+            println!("audio: {out} (1.00s, 48000 Hz, 2 channels)");
+        }
         "qa" | "thumbnail" | "chapters" | "preview" | "transcribe" | "init" | "record" => println!("ok ({command})"),
         other => {
             eprintln!("error: unrecognized subcommand '{other}'");

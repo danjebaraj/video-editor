@@ -939,11 +939,20 @@
       "type": "object"
     },
     "RunKind": {
-      "enum": [
-        "dry_run",
-        "production"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "dry_run",
+            "production"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "audio_review",
+          "description": "Audio Review (FEAT-neat-osprey-DKK7): the soundtrack of one output, built from the spec\nwith the production audio steps and mixed with `cutline audio`; no picture is rendered.",
+          "type": "string"
+        }
+      ]
     },
     "RunRecord": {
       "properties": {

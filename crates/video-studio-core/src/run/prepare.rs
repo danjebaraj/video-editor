@@ -114,6 +114,10 @@ pub struct RunRequest {
     pub output: Option<Utf8PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revise: Option<Revise>,
+    /// Audio Review: the output (ID or name) whose timing and audio settings to audition;
+    /// default the run config's first output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_output: Option<String>,
     /// Headless with `--yes` or no terminal: questions aren't asked, Claude proceeds on its
     /// stated assumption and the question is logged.
     #[serde(default)]
@@ -264,7 +268,12 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     }
     let mode = match request.kind {
         RunKind::DryRun => Mode::DryRun,
-        RunKind::Production => Mode::Production,
+        // generated audio is made as in production, within the same credit cap
+        RunKind::Production | RunKind::AudioReview => Mode::Production,
+    };
+    let outputs = match request.kind {
+        RunKind::AudioReview => vec![audio_review_output(&outputs, request.audio_output.as_deref())?],
+        _ => outputs,
     };
     let run_id = ids::new_id("run");
     let stamp = timeutil::run_stamp();
@@ -273,6 +282,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     // A dry run works in a scratch folder in the library; a production run in the output folder.
     let parent = match (request.kind, &request.output) {
         (RunKind::DryRun, _) => env.library.join("dry-runs").join(&project.id),
+        (RunKind::AudioReview, _) => env.library.join("audio-reviews").join(&project.id),
         (RunKind::Production, Some(o)) => o.clone(),
         (RunKind::Production, None) => rc.output_root(&project.name, Some(&env.settings.default_output_folder)),
     };
@@ -420,7 +430,8 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         write_files: None,
         cutline: Some(Utf8PathBuf::from(&env.cutline.path)),
         helper: Some(env.helper.clone()),
-        capture: project.app_capture.enabled,
+        capture: project.app_capture.enabled && request.kind != RunKind::AudioReview,
+        audio_review: request.kind == RunKind::AudioReview,
         path_dirs: vec![bin.clone()],
         web_access: rc.web_access,
         log: Some(logs.join("permissions.ndjson")),
@@ -432,7 +443,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     let requested_model = request.model.clone().filter(|m| !m.trim().is_empty());
     let model = match request.kind {
         RunKind::DryRun => requested_model.unwrap_or_else(|| project.models.dry_run_or(&env.settings)),
-        RunKind::Production => requested_model.unwrap_or_else(|| rc.production_model.clone()),
+        RunKind::Production | RunKind::AudioReview => requested_model.unwrap_or_else(|| rc.production_model.clone()),
     };
     let mut child_env = locate::child_env(env.claude.login_path.as_deref());
     let base_path = child_env.get("PATH").cloned().unwrap_or_default();
@@ -495,7 +506,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         system_prompt_append: system,
         settings: Some(hook_settings(&env.helper, &policy_file)),
         add_dirs: read_paths.iter().map(|p| containing_dir(p)).collect::<HashSet<_>>().into_iter().collect(),
-        max_budget_usd: if request.kind == RunKind::Production { rc.max_spend_usd } else { None },
+        max_budget_usd: if request.kind != RunKind::DryRun { rc.max_spend_usd } else { None },
         log: Some(logs.join("claude.jsonl")),
     };
 
@@ -600,4 +611,15 @@ fn doctor_brief(d: &Value) -> Value {
         .unwrap_or_default();
     out.insert("missing_required".into(), Value::Array(missing));
     Value::Object(out)
+}
+
+/// The output an Audio Review auditions: the one named (by ID or name), else the first.
+pub fn audio_review_output(outputs: &[ResolvedOutput], want: Option<&str>) -> Result<ResolvedOutput> {
+    match want.map(str::trim).filter(|w| !w.is_empty()) {
+        None => Ok(outputs[0].clone()),
+        Some(w) => outputs.iter().find(|o| o.id == w || o.name == w).cloned().ok_or_else(|| {
+            let names: Vec<&str> = outputs.iter().map(|o| o.name.as_str()).collect();
+            Error::InvalidProject(format!("no output \"{w}\" to audition (outputs: {})", names.join(", ")))
+        }),
+    }
 }

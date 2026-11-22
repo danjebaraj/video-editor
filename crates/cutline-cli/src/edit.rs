@@ -429,6 +429,57 @@ fn classify(e: anyhow::Error) -> CliError {
     }
 }
 
+/// `cutline audio`: one export's final mix as a WAV, without the picture.
+pub fn audio(path: &Path, export: Option<&str>, out: &Path, no_cache: bool) -> CmdResult {
+    let l = load_or_return!(path);
+    if has_errors(&l.diags) {
+        return Ok(diag_output(&l.diags));
+    }
+    let all = pipeline::exports(&l.project);
+    let (name, e) = match export {
+        None => all.into_iter().next().unwrap(),
+        Some(want) => {
+            let names: Vec<String> =
+                all.iter().map(|(n, e)| n.clone().unwrap_or_else(|| pipeline::export_name(e))).collect();
+            match all.into_iter().find(|(n, e)| n.as_deref() == Some(want) || pipeline::export_name(e) == want) {
+                Some(x) => x,
+                None => {
+                    return Err(CliError::usage(anyhow::anyhow!("no export `{want}` (exports: {})", names.join(", "))))
+                }
+            }
+        }
+    };
+    let out = if out.is_absolute() {
+        out.to_path_buf()
+    } else {
+        std::env::current_dir().map(|d| d.join(out)).unwrap_or_else(|_| out.to_path_buf())
+    };
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| CliError::usage(anyhow::anyhow!("{}: {e}", dir.display())))?;
+    }
+    let pr = pipeline::prepare_audio(&l, name, &e).map_err(classify)?;
+    let opts = RenderOptions { no_cache, ..Default::default() };
+    let r = pipeline::render_audio(&l, &pr, &out, &opts).map_err(classify)?;
+    let mut human = format!(
+        "audio: {} ({:.2}s, {} Hz, {} channels{})\n",
+        r.output.display(),
+        r.duration,
+        r.sample_rate,
+        r.channels,
+        r.export.as_ref().map(|e| format!(", export {e}")).unwrap_or_default()
+    );
+    if !r.audible {
+        human.push_str("warning: the timeline has no audible tracks; the file is silence\n");
+    }
+    if let Some(ld) = &r.loudness {
+        human.push_str(&format!("loudness: I={:.1} LUFS, TP={:.1} dBTP\n", ld.output_i, ld.output_tp));
+    }
+    let mut j = serde_json::to_value(&r).unwrap_or(json!({}));
+    j["ok"] = json!(true);
+    j["diagnostics"] = json!(pr.diags);
+    Ok(Output::ok(j, human))
+}
+
 pub fn preview(path: &Path, at: &[String], range: Option<&str>, safe_zones: bool, out: Option<PathBuf>) -> CmdResult {
     let l = load_or_return!(path);
     if has_errors(&l.diags) {

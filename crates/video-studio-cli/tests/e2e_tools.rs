@@ -486,6 +486,7 @@ fn hook_command_applies_the_policy_file() {
         cutline: None,
         helper: None,
         capture: false,
+        audio_review: false,
         path_dirs: vec![],
         web_access: false,
         log: Some(w.root.join("perm.ndjson")),
@@ -750,6 +751,7 @@ fn a_question_answered_in_the_app_reaches_claude_and_revise_resumes_the_session(
         model: Some("claude-sonnet-5-5".into()),
         output: None,
         revise: None,
+        audio_output: None,
         assume_answers: false,
         question_timeout_s: None,
         validation: None,
@@ -799,6 +801,7 @@ fn a_question_answered_in_the_app_reaches_claude_and_revise_resumes_the_session(
     let env2 = run_env(&w, &revise_script);
     let request2 = RunRequest {
         revise: Some(Revise { previous_run: first.id.clone(), feedback: "Make the hook faster.".into() }),
+        audio_output: None,
         model: None,
         ..request.clone()
     };
@@ -847,6 +850,7 @@ fn a_question_times_out_onto_the_assumption_and_a_turn_limit_fails_the_run() {
         model: None,
         output: None,
         revise: None,
+        audio_output: None,
         assume_answers: false,
         question_timeout_s: Some(1),
         validation: None,
@@ -980,6 +984,7 @@ fn a_run_lists_viewable_copies_in_its_manifest_and_prompt() {
         model: None,
         output: None,
         revise: None,
+        audio_output: None,
         assume_answers: false,
         question_timeout_s: None,
         validation: None,
