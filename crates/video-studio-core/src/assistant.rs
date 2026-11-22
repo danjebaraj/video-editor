@@ -12,6 +12,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::agent::AgentProcess;
 use crate::claude::broker::{hook_settings, Mode, Policy};
 use crate::claude::locate::{child_env, ClaudeInfo};
 use crate::claude::process::{containing_dir, friendly_error, ClaudeOptions, ClaudeProcess, Incoming};
@@ -120,7 +121,7 @@ pub trait AssistantSink: Send + Sync {
 struct Shared {
     stop: AtomicBool,
     finished: AtomicBool,
-    process: Mutex<Option<ClaudeProcess>>,
+    process: Mutex<Option<AgentProcess>>,
     answers: Mutex<HashMap<String, Option<BTreeMap<String, String>>>>,
 }
 
@@ -157,9 +158,31 @@ pub fn spec_file(session_dir: &Utf8Path) -> Utf8PathBuf {
     session_dir.join("spec.md")
 }
 
-/// Starts one assistant turn. Events arrive on `sink` from a background thread; the last one is
-/// always `Finished`.
-pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn AssistantSink>) -> Result<AssistantHandle> {
+/// What a Codex assistant turn needs besides the request (FEAT-spry-alpaca-5RQZ).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodexSetup {
+    pub executable: Utf8PathBuf,
+    /// Settings › Assistant's Codex model; `None` for Codex's default.
+    pub model: Option<String>,
+}
+
+/// What Codex is told on top of the assistant's instructions: its tools are not Claude's, and the
+/// editor document is never its to write.
+pub const CODEX_ASSISTANT_NOTE: &str = "\n\n## Working in Codex\n\n- You run as Codex inside Syncfusion Video Studio. Your working folder is a scratch copy: edit only `spec.md` there (with apply_patch). The app shows your change to the user hunk by hunk and only the hunks they accept reach their document. Writes anywhere else are refused.\n- Media and reference folders are read-only.\n- When you need a decision from the user, ask with the request_user_input tool and wait for the answer.\n- Commands other than `cutline still` (when it is offered) are refused; don't try other tools to get around a refusal.";
+
+/// The session folder, the policy and the prompt context shared by both providers.
+struct Session {
+    dir: Utf8PathBuf,
+    spec_path: Utf8PathBuf,
+    cutline: Option<Utf8PathBuf>,
+    read_paths: Vec<Utf8PathBuf>,
+    reference_paths: Vec<Utf8PathBuf>,
+    policy: Policy,
+    policy_file: Utf8PathBuf,
+    system_prompt: String,
+}
+
+fn prepare_session(request: &AssistantRequest) -> Result<Session> {
     let dir = paths::canonical_or_normal({
         std::fs::create_dir_all(&request.session_dir)?;
         &request.session_dir
@@ -202,12 +225,31 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         web_access: request.web_access,
         log: None,
     };
-    // The policy file sits next to the session folder, outside what Claude can read.
+    // The policy file sits next to the session folder, outside what the agent can read.
     let policy_file = dir.with_file_name(format!("{}.policy.json", dir.file_name().unwrap_or("session")));
+    let system_prompt = crate::run::prompt::assistant_system_prompt(
+        &dir,
+        &project_summary,
+        &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+        &reference_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+        request.web_access,
+        match (&cutline, &old_cutline) {
+            (Some(c), _) => crate::run::prompt::HeicTool::Still(c),
+            (None, Some(c)) => crate::run::prompt::HeicTool::Outdated(c),
+            (None, None) => crate::run::prompt::HeicTool::None,
+        },
+    );
+    Ok(Session { dir, spec_path, cutline, read_paths, reference_paths, policy, policy_file, system_prompt })
+}
+
+/// Starts one assistant turn with Claude Code. Events arrive on `sink` from a background thread;
+/// the last one is always `Finished`.
+pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn AssistantSink>) -> Result<AssistantHandle> {
+    let s = prepare_session(request)?;
     let settings = match &request.helper {
         Some(helper) => {
-            paths::write_json_atomic(&policy_file, &policy)?;
-            Some(hook_settings(helper, &policy_file))
+            paths::write_json_atomic(&s.policy_file, &s.policy)?;
+            Some(hook_settings(helper, &s.policy_file))
         }
         None => None,
     };
@@ -216,12 +258,12 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     if request.web_access {
         tools.extend(["WebSearch".to_string(), "WebFetch".to_string()]);
     }
-    if cutline.is_some() {
+    if s.cutline.is_some() {
         tools.push("Bash".to_string());
     }
     let options = ClaudeOptions {
         executable: Utf8PathBuf::from(&claude.path),
-        working_dir: dir.clone(),
+        working_dir: s.dir.clone(),
         env: {
             let mut e = child_env(claude.login_path.as_deref());
             e.extend(request.extra_env.clone());
@@ -230,33 +272,98 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
         model: request.model.clone(),
         effort: request.effort.clone().filter(|e| claude.effort_levels.contains(e)),
         tools,
-        resume_session: request.resume.clone(),
-        system_prompt_append: crate::run::prompt::assistant_system_prompt(
-            &dir,
-            &project_summary,
-            &read_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
-            &reference_paths.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
-            request.web_access,
-            match (&cutline, &old_cutline) {
-                (Some(c), _) => crate::run::prompt::HeicTool::Still(c),
-                (None, Some(c)) => crate::run::prompt::HeicTool::Outdated(c),
-                (None, None) => crate::run::prompt::HeicTool::None,
-            },
-        ),
+        // a Codex thread is never resumed as a Claude session: switching providers starts a
+        // separate conversation
+        resume_session: request.resume.clone().filter(|r| crate::codex::agent::thread_of(r).is_none()),
+        system_prompt_append: s.system_prompt.clone(),
         settings,
-        add_dirs: read_paths
+        add_dirs: s
+            .read_paths
             .iter()
-            .chain(reference_paths.iter())
+            .chain(s.reference_paths.iter())
             .map(|p| containing_dir(p))
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect(),
         max_budget_usd: None,
-        log: Some(dir.join("claude-last-run.jsonl")),
+        log: Some(s.dir.join("claude-last-run.jsonl")),
     };
     // Each turn's log replaces the last one.
-    let _ = std::fs::remove_file(dir.join("claude-last-run.jsonl"));
+    let _ = std::fs::remove_file(s.dir.join("claude-last-run.jsonl"));
     let (process, rx) = ClaudeProcess::start(&options, &request.prompt)?;
+    follow(s, request, AgentProcess::Claude(process), rx, sink)
+}
+
+/// Starts one assistant turn with Codex (FEAT-spry-alpaca-5RQZ). The same session preparation,
+/// prompt context and broker as Claude; Codex works on the session's scratch `spec.md` and its
+/// change reaches the editor only through the per-hunk review.
+///
+/// The recorded thread is resumed only when `request.resume` names it (`codex:<thread>`) and it
+/// is the one recorded for this session folder (one per project conversation). A Claude session
+/// starts a separate conversation. A thread that can't be resumed is reported in the chat
+/// (an `error` event saying the earlier context is lost) and replaced by exactly one new thread,
+/// which starts from the current editor text.
+pub fn start_codex(
+    request: &AssistantRequest,
+    codex: &CodexSetup,
+    sink: Arc<dyn AssistantSink>,
+) -> Result<AssistantHandle> {
+    let s = prepare_session(request)?;
+    let token = request.resume.as_deref();
+    let recorded = crate::codex::agent::recorded_thread(&s.dir);
+    let mut lost: Option<String> = None;
+    let resume_thread = match token.and_then(crate::codex::agent::thread_of) {
+        Some(t) if recorded.as_deref() == Some(t) => Some(t.to_string()),
+        Some(t) => {
+            // not this conversation's thread: never resumed here
+            lost = Some(format!("Codex thread {t} doesn't belong to this conversation"));
+            None
+        }
+        None => None,
+    };
+    let options = crate::codex::agent::CodexOptions {
+        executable: codex.executable.clone(),
+        working_dir: s.dir.clone(),
+        env: {
+            let mut e = child_env(None);
+            e.extend(request.extra_env.clone());
+            e
+        },
+        shell_env: Default::default(),
+        model: codex.model.clone(),
+        effort: crate::codex::agent::codex_effort(request.effort.as_deref()),
+        developer_instructions: format!("{}{CODEX_ASSISTANT_NOTE}", s.system_prompt),
+        resume_thread,
+        writable_roots: vec![s.dir.clone()],
+        web_access: request.web_access,
+        log: Some(s.dir.with_file_name(format!("{}.codex-last-run.jsonl", s.dir.file_name().unwrap_or("session")))),
+    };
+    if let Some(log) = &options.log {
+        let _ = std::fs::remove_file(log);
+    }
+    let (process, rx) = crate::codex::agent::CodexProcess::start(&options, &request.prompt)?;
+    if let Some(reason) = lost {
+        sink.emit(&AssistantEvent::Error { message: lost_context_notice(&reason) });
+    }
+    follow(s, request, AgentProcess::Codex(process), rx, sink)
+}
+
+/// The chat notice for a conversation whose Codex thread couldn't be resumed.
+pub fn lost_context_notice(reason: &str) -> String {
+    format!(
+        "Codex couldn't continue the earlier conversation ({}), so what was said before is lost. A new Codex conversation starts from the spec as it is in the editor now.",
+        reason.trim().trim_end_matches('.')
+    )
+}
+
+/// Follows a turn to its end on a background thread.
+fn follow(
+    s: Session,
+    request: &AssistantRequest,
+    process: AgentProcess,
+    rx: std::sync::mpsc::Receiver<Incoming>,
+    sink: Arc<dyn AssistantSink>,
+) -> Result<AssistantHandle> {
     let shared = Arc::new(Shared {
         stop: AtomicBool::new(false),
         finished: AtomicBool::new(false),
@@ -265,6 +372,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
     });
     let thread_shared = shared.clone();
     let original = request.spec.clone();
+    let Session { dir, spec_path, policy, policy_file, .. } = s;
     let thread = std::thread::Builder::new().name("video-studio-assistant".into()).spawn(move || {
         let emit = |e: AssistantEvent| sink.emit(&e);
         let mut last_spec = original;
@@ -288,6 +396,9 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Incoming::Event(e)) => match e {
                     StreamEvent::Init { session_id, model, .. } => {
+                        if let (true, Some(t)) = (process.is_codex(), crate::codex::agent::thread_of(&session_id)) {
+                            crate::codex::agent::record_thread(&dir, t);
+                        }
                         session = Some(session_id.clone());
                         emit(AssistantEvent::Started { session_id, model });
                     }
@@ -335,9 +446,11 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
                         if session_id.is_some() {
                             session = session_id;
                         }
-                        if (is_error || subtype.as_deref().map(|s| s != "success").unwrap_or(false)) && !thread_shared.stop.load(Ordering::SeqCst) {
+                        let stopping = thread_shared.stop.load(Ordering::SeqCst);
+                        let interrupted = subtype.as_deref() == Some("interrupted");
+                        if (is_error || subtype.as_deref().map(|s| s != "success" && !(stopping && interrupted)).unwrap_or(false)) && !stopping {
                             ok = false;
-                            emit(AssistantEvent::Error { message: friendly_error(&text.unwrap_or_else(|| format!("Claude reported an error ({}).", subtype.as_deref().unwrap_or("unknown")))) });
+                            emit(AssistantEvent::Error { message: friendly_error(&text.unwrap_or_else(|| format!("{} reported an error ({}).", process.name(), subtype.as_deref().unwrap_or("unknown")))) });
                         }
                         if let Some(u) = usage {
                             emit(AssistantEvent::Usage { input_tokens: u.total_input(), output_tokens: u.output_tokens, cost_usd: u.cost_usd, duration_ms: u.duration_ms });
@@ -346,6 +459,9 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
                     }
                     StreamEvent::MessageUsage { .. } | StreamEvent::ControlResponse { .. } | StreamEvent::Ignored(_) => {}
                 },
+                Ok(Incoming::ContextLost { reason, .. }) => {
+                    emit(AssistantEvent::Error { message: lost_context_notice(&reason) });
+                }
                 Ok(Incoming::Exit { code, stderr }) => {
                     exit = Some((code, stderr));
                     break;
@@ -387,7 +503,7 @@ pub fn start(request: &AssistantRequest, claude: &ClaudeInfo, sink: Arc<dyn Assi
             ok = false;
             let (code, stderr) = exit.unwrap_or((-1, String::new()));
             let err = stderr.trim();
-            emit(AssistantEvent::Error { message: friendly_error(&if err.is_empty() { format!("Claude Code exited unexpectedly (status {code}).") } else { err.to_string() }) });
+            emit(AssistantEvent::Error { message: friendly_error(&if err.is_empty() { format!("{} exited unexpectedly (status {code}).", process.name()) } else { err.to_string() }) });
         }
         let _ = std::fs::remove_file(&policy_file);
         *thread_shared.process.lock().unwrap() = None;

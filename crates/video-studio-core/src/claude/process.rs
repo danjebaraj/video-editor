@@ -126,6 +126,12 @@ pub enum Incoming {
         code: i32,
         stderr: String,
     },
+    /// Codex only: the recorded thread (`previous`, a session token) couldn't be resumed, so its
+    /// context is lost; a new thread follows.
+    ContextLost {
+        previous: String,
+        reason: String,
+    },
 }
 
 struct Shared {

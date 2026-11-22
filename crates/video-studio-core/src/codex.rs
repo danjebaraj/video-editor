@@ -6,7 +6,9 @@
 //!
 //! This module holds the transport shared by the CLI, the FFI and the desktop shells: finding the
 //! executable, the `initialize` / `initialized` handshake, `account/read`, `model/list`, and the
-//! readiness check built on them. Tested against codex-cli 0.171.0's message shapes.
+//! readiness check built on them. [`agent`] drives a whole turn (threads, items, approvals,
+//! questions, Stop) for the assistant and runs. Message shapes follow codex-cli 0.171.0
+//! (`codex app-server generate-ts` / `generate-json-schema`).
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -18,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::{Error, Result};
+
+pub mod agent;
 
 /// The assistant and production provider (Settings › Assistant).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq, Default)]

@@ -464,18 +464,7 @@ fn check_codex(c: &mut Ctx, env: &dyn EnvProbe) {
     let status = env.codex_status().unwrap_or(crate::codex::CodexStatus::Missing);
     if let Some((rule, title, fix)) = status.finding() {
         c.add(rule, None, Severity::Blocker, "environment", title, Some(fix), FixLink::target("settings", "assistant"));
-        return;
     }
-    // The transport and readiness are in place; the assistant and runs still drive Claude Code.
-    c.add(
-        "codex_runs_unavailable",
-        None,
-        Severity::Blocker,
-        "environment",
-        "Runs with Codex aren't available in this build yet".into(),
-        Some("Codex is installed and signed in, but this version still produces videos with Claude Code only. Choose Claude in Settings › Assistant to run.".into()),
-        FixLink::target("settings", "assistant"),
-    );
 }
 
 fn check_environment(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
@@ -1844,7 +1833,7 @@ mod tests {
         f.env.codex = Some(crate::codex::CodexStatus::Ready { plan: None, models: vec![] });
         let r = f.run();
         assert!(!has(&r, "codex_missing", Severity::Blocker) && !has(&r, "claude_missing", Severity::Blocker));
-        assert!(has(&r, "codex_runs_unavailable", Severity::Blocker), "runs with Codex aren't wired yet");
+        assert!(!r.issues.iter().any(|i| i.rule.starts_with("codex_")), "a ready Codex passes the provider check");
         // Windows: no Git Bash means no shell tool for Claude
         f.env = FakeEnv::default();
         f.env.claude.as_mut().unwrap().git_bash = None;

@@ -19,9 +19,11 @@ use super::exit_code;
 use super::prepare::{prepare, Prepared, RunEnv, RunRequest};
 use super::proxy;
 use super::readiness::ReadinessReport;
+use crate::agent::AgentProcess;
 use crate::claude::process::{friendly_error, ClaudeProcess, Incoming};
 use crate::claude::stream::{self, StreamEvent, Usage};
 use crate::claude::Decision;
+use crate::codex::agent::CodexProcess;
 use crate::project::{record_run, RunKind, RunRecord, RunStatus};
 use crate::{eleven, paths, timeutil, Result};
 
@@ -48,7 +50,7 @@ struct Shared {
     cancel: AtomicBool,
     kill: AtomicBool,
     finished: AtomicBool,
-    process: Mutex<Option<ClaudeProcess>>,
+    process: Mutex<Option<AgentProcess>>,
     answers: Mutex<HashMap<String, BTreeMap<String, String>>>,
 }
 
@@ -318,6 +320,14 @@ impl Driver {
         }
     }
 
+    fn agent_name(&self) -> &'static str {
+        if self.p.codex.is_some() {
+            "Codex"
+        } else {
+            "Claude Code"
+        }
+    }
+
     fn emit(&self, kind: EventKind) {
         self.sink.emit(&Event::now(kind));
     }
@@ -422,13 +432,22 @@ impl Driver {
         let mut exit: Option<(i32, String)> = None;
         let mut turns_over = false;
 
-        match ClaudeProcess::start(&self.p.options, &self.p.prompt) {
+        // Codex or Claude Code, as chosen when the run started (FEAT-spry-alpaca-5RQZ)
+        let launched = match &self.p.codex {
+            Some(c) => CodexProcess::start(c, &self.p.prompt).map(|(p, rx)| (AgentProcess::Codex(p), rx)),
+            None => ClaudeProcess::start(&self.p.options, &self.p.prompt).map(|(p, rx)| (AgentProcess::Claude(p), rx)),
+        };
+        match launched {
             Err(e) => launch_error = Some(e.to_string()),
             Ok((process, rx)) => {
                 *self.shared.process.lock().unwrap() = Some(process.clone());
                 loop {
                     match rx.recv_timeout(Duration::from_millis(120)) {
                         Ok(Incoming::Event(e)) => self.handle(&process, e),
+                        Ok(Incoming::ContextLost { previous, reason }) => self.warn(format!(
+                            "Codex couldn't continue the revised run's conversation ({previous}: {}), so it starts a new one from this run's files.",
+                            reason.trim().trim_end_matches('.')
+                        )),
                         Ok(Incoming::Exit { code, stderr }) => {
                             exit = Some((code, stderr));
                             break;
@@ -474,7 +493,7 @@ impl Driver {
         self.finish(launch_error, exit, cancelled)
     }
 
-    fn handle(&mut self, process: &ClaudeProcess, e: StreamEvent) {
+    fn handle(&mut self, process: &AgentProcess, e: StreamEvent) {
         match e {
             StreamEvent::Init { session_id, model, .. } => {
                 self.session = Some(session_id);
@@ -549,12 +568,14 @@ impl Driver {
                 if let Some(u) = usage {
                     self.final_usage = Some(u);
                 }
-                let failed = is_error || subtype.as_deref().map(|s| s != "success").unwrap_or(false);
+                let stopping = self.shared.cancel.load(Ordering::SeqCst);
+                let failed = is_error
+                    || subtype.as_deref().map(|s| s != "success" && !(stopping && s == "interrupted")).unwrap_or(false);
                 if failed && self.result_error.is_none() && !self.shared.cancel.load(Ordering::SeqCst) {
                     let msg = match subtype.as_deref() {
                         Some("error_max_budget_usd") => "The run reached its Claude spend limit before finishing. Raise the limit in the run config.".to_string(),
                         Some("error_max_turns") => "The run reached its turn limit before finishing.".to_string(),
-                        _ => friendly_error(&text.unwrap_or_else(|| format!("Claude reported an error ({}).", subtype.as_deref().unwrap_or("unknown")))),
+                        _ => friendly_error(&text.unwrap_or_else(|| format!("{} reported an error ({}).", self.agent_name(), subtype.as_deref().unwrap_or("unknown")))),
                     };
                     self.result_error = Some(msg);
                 }
@@ -566,7 +587,7 @@ impl Driver {
         }
     }
 
-    fn decide(&mut self, process: &ClaudeProcess, request_id: String, tool: String, input: Value) {
+    fn decide(&mut self, process: &AgentProcess, request_id: String, tool: String, input: Value) {
         let decision = self.p.policy.decide(&tool, &input);
         let verdict = match &decision {
             Decision::Allow => "allow",
@@ -616,7 +637,7 @@ impl Driver {
         }
     }
 
-    fn tick(&mut self, process: &ClaudeProcess, activity: &mut Tail, eleven_log: &mut Tail) {
+    fn tick(&mut self, process: &AgentProcess, activity: &mut Tail, eleven_log: &mut Tail) {
         // Answers from the user, and questions that waited too long.
         let ids: Vec<String> = self.pending.keys().cloned().collect();
         for id in ids {
@@ -726,7 +747,7 @@ impl Driver {
             let (code, stderr) = exit.clone().unwrap_or((-1, String::new()));
             let err = stderr.trim();
             message = Some(friendly_error(&if err.is_empty() {
-                format!("Claude Code exited unexpectedly (status {code}) before finishing.")
+                format!("{} exited unexpectedly (status {code}) before finishing.", self.agent_name())
             } else {
                 err.to_string()
             }));
