@@ -204,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showSettings(pane: String?) {
         if let pane, let p = SettingsPane(rawValue: pane) { settingsState.pane = p }
         if settingsWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 520), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 520), styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "Settings"
             w.isReleasedWhenClosed = false
             w.contentView = NSHostingView(rootView: SettingsView(state: settingsState))

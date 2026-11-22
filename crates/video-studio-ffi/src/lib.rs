@@ -586,7 +586,13 @@ pub fn call(method: String, args: String) -> R<String> {
         // Settings › Assistant: is Codex installed, compatible and signed in, and which models?
         "codex.check" => {
             let path = opt::<String>(&args, "path")?.unwrap_or_else(|| Settings::load(&library()).codex_path);
-            out(core::codex::check(&path))
+            // the status, plus its finding (code, title, remedy) for Settings to show when not ready
+            let status = core::codex::check(&path);
+            let mut v = serde_json::to_value(&status).unwrap_or(Value::Null);
+            if let Some((code, title, remedy)) = status.finding() {
+                v["finding"] = json!({"code": code, "title": title, "remedy": remedy});
+            }
+            out(v)
         }
         "run.results" => out(core::run::collect::load_results(Utf8Path::new(&arg::<String>(&args, "folder")?))),
         "logs.export" => out(logs::export_logs(
@@ -817,6 +823,13 @@ mod tests {
         let mut s = c("settings.load", json!({}));
         s["words_per_minute"] = json!(170);
         assert_eq!(c("settings.save", json!({"settings": s}))["words_per_minute"], 170);
+        // Settings › Assistant: a Codex that isn't there comes back with its finding and remedy
+        let codex = c("codex.check", json!({"path": root.join("no-codex-here")}));
+        assert_eq!(
+            (codex["state"].as_str(), codex["finding"]["code"].as_str()),
+            (Some("missing"), Some("codex_missing"))
+        );
+        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Install the Codex CLI"));
         // validation with a supplied environment (no tools are run)
         let env =
             json!({"claude": null, "signed_in": null, "cutline": null, "doctor": null, "min_claude_version": "2.1.0"});

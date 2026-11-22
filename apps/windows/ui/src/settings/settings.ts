@@ -1,4 +1,5 @@
-// The Settings window (spec §18; Ctrl+,): General, Finish, Claude, cutline, ElevenLabs, Storage, Editor.
+// The Settings window (spec §18; Ctrl+,): General, Finish, Assistant, Claude, cutline, ElevenLabs,
+// Storage, Editor.
 // Settings are the library's settings.json, shared with the CLI.
 
 import { h, clear, button, iconButton, Icons, field, textInput, numberInput, select, checkbox, bytes, spinner, when } from '../dom';
@@ -9,12 +10,13 @@ import { openFolders, openFiles, confirm, toast, Filters } from '../dialogs';
 import { modelPicker, effortPicker } from '../widgets';
 import { copyable } from '../text-tools';
 import { finishEditor, filledFinish, sameFinish, DEFAULT_FINISH } from '../finish';
-import type { Settings } from '../types';
+import type { Settings, CodexStatus } from '../types';
 
-type Pane = 'general' | 'finish' | 'claude' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
+type Pane = 'general' | 'finish' | 'assistant' | 'claude' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
 const PANES: [Pane, string, string][] = [
   ['general', 'General', Icons.settings],
   ['finish', 'Finish', Icons.video],
+  ['assistant', 'Assistant', Icons.chat],
   ['claude', 'Claude', Icons.chat],
   ['cutline', 'cutline', Icons.video],
   ['elevenlabs', 'ElevenLabs', Icons.audio],
@@ -38,6 +40,9 @@ export async function mount(root: HTMLElement) {
   let cutlineOutput = '';
   let keyTest = '';
   let storage: any = null;
+  // Settings › Assistant: the last `codex.check` answer, and whether one is under way.
+  let codex: CodexStatus | null = null;
+  let codexChecking = false;
 
   effect([pane, settings, environment, keyStatus, models], () => {
     clear(nav, PANES.map(([p, label]) => h('button', { role: 'tab', id: `pane-${p}`, 'aria-selected': String(pane.value === p), class: pane.value === p ? 'selected' : '', onclick: () => (pane.value = p) }, label)));
@@ -71,6 +76,41 @@ export async function mount(root: HTMLElement) {
           finishEditor(filledFinish(s.finish), (f) => save((x) => (x.finish = f))),
           h('div', { class: 'row' }, button('Restore Defaults', () => save((x) => (x.finish = { ...DEFAULT_FINISH })), { disabled: sameFinish(s.finish, DEFAULT_FINISH), title: 'Smooth transitions of 0.4 s, cuts on the beat, a short lead-in, and gentle music fades' })));
         break;
+      case 'assistant': {
+        // FEAT-spry-alpaca-5RQZ: Claude Code or Codex drives the assistant and runs. Claude's models
+        // stay in the Claude pane; Codex has its own executable and model.
+        const radio = (value: string, label: string) => {
+          const input = h('input', { type: 'radio', name: 'provider', value, checked: (s.provider || 'claude') === value }) as HTMLInputElement;
+          input.addEventListener('change', () => input.checked && save((x) => (x.provider = value)).then(() => {
+            if (value === 'codex' && !codex) checkCodex();
+          }));
+          return h('label', { class: 'check' }, input, h('span', null, label));
+        };
+        const isCodex = s.provider === 'codex';
+        const status = codexChecking
+          ? h('p', { class: 'grow', role: 'status' }, spinner('Checking'), ' Checking…')
+          : !codex
+            ? h('p', { class: 'grow muted', role: 'status' }, 'Not checked yet.')
+            : codex.state === 'ready'
+              ? h('p', { class: 'grow ok', role: 'status' }, `Codex is ready${codex.plan ? ` (${codex.plan} plan)` : ''}.`)
+              : h('div', { class: 'grow', role: 'status' }, h('p', { class: 'warn' }, codex.finding?.title ?? codex.state), codex.finding ? copyable(h('p', { class: 'muted small' }, codex.finding.remedy), 'Copy the remedy', () => codex?.finding?.remedy ?? '') : null);
+        const models = codex?.models ?? [];
+        const modelOptions: [string, string][] = [['', 'Codex default'], ...models.map((m) => [m.id, `${m.name}${m.is_default ? ' (default)' : ''}`] as [string, string])];
+        if (s.codex_model && !models.some((m) => m.id === s.codex_model)) modelOptions.push([s.codex_model, s.codex_model]);
+        clear(body, h('h2', null, 'Assistant'),
+          h('fieldset', { class: 'plain', 'aria-label': 'Provider' }, h('legend', null, 'Assistant and runs'), radio('claude', 'Claude Code'), radio('codex', 'Codex')),
+          h('p', { class: 'muted small' }, 'Used by the spec assistant and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.'),
+          isCodex ? h('h3', null, 'Codex') : null,
+          isCodex ? h('div', { class: 'row' }, status, button('Re-check', () => checkCodex(), { glyph: Icons.refresh, disabled: codexChecking })) : null,
+          isCodex ? field('Codex path', h('div', { class: 'row' }, textInput(s.codex_path, (v) => save((x) => (x.codex_path = v)).then(() => checkCodex()), { placeholder: 'codex on PATH', class: 'grow' }), button('Browse…', async () => {
+            const [f] = await openFiles('codex.exe', [{ name: 'Codex', spec: 'codex.exe;codex.cmd' }, ...Filters.any]);
+            if (f) save((x) => (x.codex_path = f)).then(() => checkCodex());
+          }))) : null,
+          isCodex ? field('Model', select(modelOptions, s.codex_model, (v) => save((x) => (x.codex_model = v)), { 'aria-label': 'Codex model', title: 'The models come from Codex once it is ready. Claude’s model choices are kept separately in the Claude pane.' })) : null,
+          isCodex ? h('p', { class: 'muted small' }, 'Sign-in is handled by the Codex CLI (codex login). The app never asks for or stores OpenAI credentials.') : null);
+        if (isCodex && !codex && !codexChecking) checkCodex();
+        break;
+      }
       case 'claude': {
         const c = env?.claude;
         const status = !env ? 'Checking…' : !c ? 'Claude Code wasn’t found.' : !c.supported ? `${c.version_text} is too old: ${env.min_claude_version} or later is needed.` : !c.git_bash ? `${c.version_text}, but Git for Windows wasn’t found (Claude Code runs commands through Git Bash).` : env.signed_in === false ? `${c.version_text}, not signed in. Run claude in a terminal and sign in.` : `${c.version_text} — ${c.path}`;
@@ -200,6 +240,19 @@ export async function mount(root: HTMLElement) {
         break;
     }
   });
+
+  async function checkCodex() {
+    if (codexChecking) return;
+    codexChecking = true;
+    pane.emit();
+    try {
+      codex = await core<CodexStatus>('codex.check', { path: settings.value?.codex_path ?? '' });
+    } catch (e) {
+      codex = { state: 'missing', finding: { code: 'codex_check_failed', title: 'Codex couldn’t be checked', remedy: errorText(e) } };
+    }
+    codexChecking = false;
+    pane.emit();
+  }
 
   async function runCutline(action: 'doctor' | 'install_deps') {
     cutlineOutput = action === 'doctor' ? 'Running cutline doctor…' : 'Installing dependencies… this can take a few minutes.';

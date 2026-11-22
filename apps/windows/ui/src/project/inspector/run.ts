@@ -1,7 +1,7 @@
 // Inspector › Run (spec §12.3, §12.5, §15): the live run (stages, progress, cost, question,
 // transcript, Stop) or a finished run's results, summary and logs.
 
-import { h, clear, button, icon, Icons, usd, bytes, duration, elapsed, when, spinner, emptyState, select, fileName } from '../../dom';
+import { h, clear, button, iconButton, icon, Icons, usd, bytes, duration, elapsed, when, spinner, emptyState, select, fileName } from '../../dom';
 import { core, request, errorText } from '../../bridge';
 import { effect, Signal } from '../../store';
 import { claudeAvailable, modelName } from '../../app-state';
@@ -10,7 +10,8 @@ import { questionCard } from '../../widgets';
 import { copyButton, copyable, copyText, inline, markdownBlocks, markdownText, previewToggle } from '../../text-tools';
 import { STATUS_LABEL } from '../../types';
 import type { ProjectWindow } from '../window';
-import type { RunRecord, RunResults, LogFile, OutputFile } from '../../types';
+import type { RunRecord, RunResults, LogFile, OutputFile, BlockingInput } from '../../types';
+import { kindLabel } from '../runs';
 
 export function runTab(w: ProjectWindow): HTMLElement {
   const root = h('div', { class: 'run-tab' });
@@ -42,7 +43,9 @@ export function runTab(w: ProjectWindow): HTMLElement {
     }
     const rec = w.runs.selected();
     if (!rec) {
-      clear(root, emptyState('No runs yet', 'Validate the spec, then run it.', button('Run', () => w.runs.requestRun(), { appearance: 'primary', glyph: Icons.play, disabled: !claudeAvailable() })));
+      clear(root, emptyState('No runs yet', 'Validate the spec, then run it. Audio Review builds only the soundtrack, to listen to before any video is rendered.', h('div', { class: 'row' },
+        button('Run', () => w.runs.requestRun(), { appearance: 'primary', glyph: Icons.play, disabled: !claudeAvailable() }),
+        button('Audio Review', () => w.runs.requestRun(undefined, { audioReview: true }), { glyph: Icons.audio, disabled: !claudeAvailable() }))));
       return;
     }
     if (resultsFor !== rec.id + rec.status) {
@@ -108,14 +111,14 @@ export function runTab(w: ProjectWindow): HTMLElement {
     clear(
       root,
       h('div', { class: `live-details${transcriptOpen ? ' capped' : ''}` },
-        h('div', { class: 'tab-header' }, h('strong', null, l.kind === 'dry_run' ? 'Dry run' : 'Production run'), h('span', { class: 'muted' }, ` · ${modelName(l.model)} · ${elapsed(secs)}`), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, l.status)),
+        h('div', { class: 'tab-header' }, h('strong', null, kindLabel(l.kind)), h('span', { class: 'muted' }, ` · ${modelName(l.model)} · ${elapsed(secs)}`), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, l.status)),
         l.question
           ? h('div', { class: 'live-pad' }, questionCard(l.question.questions, (a) => w.runs.answer(a)), l.question.timeout_s ? h('p', { class: 'hint' }, `With no answer in ${l.question.timeout_s} s, Claude proceeds on its stated assumption.`) : null)
           : null,
         stages,
         h('dl', { class: 'estimates' },
           h('dt', null, 'Claude'), h('dd', null, usd(cost?.claude_usd, cost?.claude_estimated)),
-          l.kind === 'production' ? [h('dt', null, 'ElevenLabs'), h('dd', null, `${cost?.eleven_credits ?? 0} of ${cost?.eleven_cap ?? 0} credits`)] : null),
+          l.kind !== 'dry_run' ? [h('dt', null, 'ElevenLabs'), h('dd', null, `${cost?.eleven_credits ?? 0} of ${cost?.eleven_cap ?? 0} credits`)] : null),
         l.warnings.length ? h('ul', { class: 'warnings small live-pad' }, l.warnings.map((x) => h('li', { class: 'warn' }, x))) : null),
       h('div', { class: 'live-transcript-head' }, toggle),
       body ?? h('div', { class: 'live-spacer' }),
@@ -145,9 +148,12 @@ export function runTab(w: ProjectWindow): HTMLElement {
     const rc = w.doc.p.run_configs.find((c) => c.id === rec.run_config);
     const failed = rec.status === 'failed';
     const head = h('div', { class: 'result-head' },
-      h('div', { class: 'row' }, h('strong', { class: `status ${rec.status}` }, STATUS_LABEL[rec.status] ?? rec.status), rec.kind === 'dry_run' ? h('span', { class: 'pill' }, 'Dry run') : null),
+      h('div', { class: 'row' }, h('strong', { class: `status ${rec.status}` }, STATUS_LABEL[rec.status] ?? rec.status), rec.kind === 'dry_run' ? h('span', { class: 'pill' }, 'Dry run') : rec.kind === 'audio_review' ? h('span', { class: 'pill' }, 'Audio Review') : null),
       h('div', { class: 'muted small' }, [rc?.name ?? rec.run_config, when(rec.started), rec.model ? modelName(rec.model) : null, rec.cost_usd != null ? usd(rec.cost_usd) : null, rec.eleven_credits ? `${rec.eleven_credits} credits` : null].filter(Boolean).join(' · ')),
       results?.run?.message ? copyable(h('div', { class: failed ? 'danger small' : 'small' }, results.run.message), 'Copy the message', () => results?.run?.message ?? '') : null,
+      results?.blocking?.length ? blockingList(results.blocking) : null,
+      // An Audio Review's warnings (a silent timeline among them) come before the player.
+      rec.kind === 'audio_review' && Array.isArray(results?.run?.warnings) && results.run.warnings.length ? h('ul', { class: 'warnings small' }, (results.run.warnings as string[]).map((x) => h('li', { class: 'warn' }, x))) : null,
     );
     if (results && !results.exists) {
       clear(root, head, emptyState('The run folder has moved', rec.folder, button('Locate…', async () => {
@@ -159,7 +165,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
     const tabs = h('div', { class: 'segmented', role: 'tablist', 'aria-label': 'Run details' }, (['results', 'summary', 'logs'] as const).map((t) => h('button', { role: 'tab', 'aria-selected': String(sub.value === t), class: sub.value === t ? 'selected' : '', onclick: () => (sub.value = t) }, t[0].toUpperCase() + t.slice(1))));
     let body: HTMLElement;
     if (!results) body = h('div', { class: 'center' }, spinner('Loading'));
-    else if (sub.value === 'results') body = h('div', { class: 'outputs' }, results.outputs.length ? results.outputs.map((o) => outputCard(o)) : h('p', { class: 'muted' }, rec.kind === 'dry_run' ? 'A dry run doesn’t render outputs. See the summary.' : 'No outputs were produced.'), results.project_json5 ? button('View project.json5', () => viewText('project.json5', results!.project_json5!), { appearance: 'subtle' }) : null);
+    else if (sub.value === 'results') body = h('div', { class: 'outputs' }, results.outputs.length ? results.outputs.map((o) => (rec.kind === 'audio_review' ? audioReviewCard(o, rec.status === 'failed' || rec.status === 'cancelled') : outputCard(o))) : h('p', { class: 'muted' }, rec.kind === 'dry_run' ? 'A dry run doesn’t render outputs. See the summary.' : 'No outputs were produced.'), results.project_json5 ? button('View project.json5', () => viewText('project.json5', results!.project_json5!), { appearance: 'subtle' }) : null);
     else if (sub.value === 'summary') body = summary();
     else body = logs(rec);
     clear(
@@ -169,9 +175,74 @@ export function runTab(w: ProjectWindow): HTMLElement {
       body,
       h('div', { class: 'row end wrap' },
         button('Reveal Run Folder', () => request('shell.reveal', { path: rec.folder }), { glyph: Icons.openFolder }),
-        rec.kind === 'production' ? button('Revise…', () => revise(rec), { glyph: Icons.revise, disabled: !rec.claude_session || !claudeAvailable() || w.runs.running }) : null,
-        rec.kind === 'production' ? button('Re-run', () => w.runs.rerun(rec), { glyph: Icons.rerun, disabled: !claudeAvailable() || w.runs.running }) : null),
+        rec.kind !== 'dry_run' ? button('Revise…', () => revise(rec), { glyph: Icons.revise, disabled: !rec.claude_session || !claudeAvailable() || w.runs.running }) : null,
+        rec.kind !== 'dry_run' ? button('Re-run', () => w.runs.rerun(rec, auditioned()), { glyph: Icons.rerun, disabled: !claudeAvailable() || w.runs.running }) : null),
     );
+  }
+
+  /** The output an Audio Review auditioned, so a revision or a re-run auditions the same one. */
+  function auditioned(): string | undefined {
+    return results?.outputs[0]?.output_id;
+  }
+
+  /** What stopped a failed run: the missing audio source or the credit cap, named from its logs. */
+  function blockingList(items: BlockingInput[]): HTMLElement {
+    const title = (b: BlockingInput) => (b.kind === 'credit_cap' ? 'Over the credit cap' : b.kind === 'missing_source' ? 'Missing audio source' : b.kind);
+    return h('div', { class: 'note danger blocking', role: 'group', 'aria-label': 'Blocked by' },
+      h('strong', { class: 'small' }, 'Blocked by'),
+      h('ul', { class: 'small' }, items.map((b) => h('li', null, copyable(h('span', null, h('strong', null, title(b)), ': ', b.detail), 'Copy this', () => `${title(b)}: ${b.detail}`)))));
+  }
+
+  /** An Audio Review's result (FEAT-neat-osprey-DKK7): the auditioned output, play/pause, a seek
+   *  bar with the position and the duration. It plays the saved WAV; nothing is built again. */
+  function audioReviewCard(o: OutputFile, failedRun: boolean): HTMLElement {
+    const playable = o.exists && !o.incomplete && !failedRun;
+    const head = h('div', { class: 'row' }, h('strong', null, o.output_name), h('span', { class: 'muted small' }, ` Soundtrack of this output${o.platform ? ` · ${o.platform}` : ''}`), o.exists && !playable ? h('span', { class: 'badge warn' }, 'Incomplete') : null);
+    if (!playable) {
+      return h('article', { class: 'output-card audio-review', 'aria-label': `Audio Review of ${o.output_name}` }, head,
+        h('p', { class: 'danger' }, failedRun ? 'The soundtrack wasn’t completed, so there is nothing to play.' : 'The soundtrack wasn’t produced.'));
+    }
+    const audio = h('audio', { preload: 'metadata' }) as HTMLAudioElement;
+    request<string>('shell.allow_media', { files: [o.path], add: true }).catch(() => {});
+    request<string>('shell.media_url', { path: o.path }).then((u) => (audio.src = u)).catch(() => {});
+    const clock = (t: number) => {
+      const s = Math.max(0, Math.floor(t || 0));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    };
+    let total = o.duration_s ?? 0;
+    const play = iconButton(Icons.play, 'Play', () => (audio.paused ? audio.play().catch((e) => toast(errorText(e), 'error')) : audio.pause()));
+    const pos = h('span', { class: 'muted small mono', 'aria-label': 'Position' }, clock(0));
+    const dur = h('span', { class: 'muted small mono', 'aria-label': 'Duration' }, clock(total));
+    const seek = h('input', { type: 'range', min: '0', max: String(total || 1), step: '0.05', value: '0', class: 'grow', 'aria-label': 'Seek' }) as HTMLInputElement;
+    const sync = () => {
+      const playing = !audio.paused;
+      clear(play, icon(playing ? Icons.pause : Icons.play));
+      play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+      play.title = playing ? 'Pause' : 'Play';
+      pos.textContent = clock(audio.currentTime);
+      if (document.activeElement !== seek) seek.value = String(audio.currentTime);
+      seek.setAttribute('aria-valuetext', `${clock(audio.currentTime)} of ${clock(total)}`);
+    };
+    seek.addEventListener('input', () => {
+      audio.currentTime = Number(seek.value);
+      pos.textContent = clock(audio.currentTime);
+    });
+    audio.addEventListener('loadedmetadata', () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) total = audio.duration;
+      seek.max = String(total || 1);
+      dur.textContent = clock(total);
+    });
+    for (const ev of ['play', 'pause', 'timeupdate', 'seeked']) audio.addEventListener(ev, sync);
+    audio.addEventListener('ended', () => ((audio.currentTime = 0), sync()));
+    return h('article', { class: 'output-card audio-review', 'aria-label': `Audio Review of ${o.output_name}` },
+      head,
+      audio,
+      h('div', { class: 'row audio-controls' }, play, pos, seek, dur),
+      h('div', { class: 'muted small' }, `${duration(total)} · ${bytes(o.bytes)} · ${fileName(o.path)}`),
+      h('div', { class: 'row wrap' },
+        button('Reveal in File Explorer', () => request('shell.reveal', { path: o.path })),
+        button('Open', () => request('shell.open', { path: o.path })),
+        button('Copy Path', () => copyText(o.path))));
   }
 
   function outputCard(o: OutputFile): HTMLElement {
@@ -271,14 +342,15 @@ export function runTab(w: ProjectWindow): HTMLElement {
   }
 
   async function revise(rec: RunRecord) {
-    const s = sheet('Revise this run');
+    const review = rec.kind === 'audio_review';
+    const s = sheet(review ? 'Revise this Audio Review' : 'Revise this run');
     const box = h('textarea', { rows: 6, 'aria-label': 'What should change?', placeholder: 'For example: make the hook faster, use the logo at the end.' }) as HTMLTextAreaElement;
-    s.body.append(h('p', { class: 'hint' }, 'Claude continues its session from this run and writes a new run folder linked to it.'), box);
+    s.body.append(h('p', { class: 'hint' }, review ? 'Say what to change in the soundtrack. Claude mixes it again, reusing audio that hasn’t changed, into a new review; this take stays playable to compare.' : 'Claude continues its session from this run and writes a new run folder linked to it.'), box);
     s.footer.append(button('Cancel', () => s.close()), button('Continue…', () => s.close(box.value.trim()), { appearance: 'primary' }));
     const feedback = await s.done;
     if (!feedback) return;
     w.doc.runConfig.value = rec.run_config;
-    w.runs.requestRun({ previous_run: rec.id, feedback });
+    w.runs.requestRun({ previous_run: rec.id, feedback }, { audioReview: review, audioOutput: auditioned() });
   }
 
   return root;

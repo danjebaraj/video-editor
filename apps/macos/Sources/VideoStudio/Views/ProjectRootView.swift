@@ -120,9 +120,18 @@ struct ProjectRootView: View {
                     .help("Stop the run (⌘.)")
                     .disabled(runs.isStopping)
             } else {
-                Button { runs.requestRun() } label: { Label("Run", systemImage: "play.fill") }
-                    .help(app.claudeAvailable ? "Validate, then produce the outputs (⌘R)" : "Claude Code is required to run")
-                    .disabled(!app.claudeAvailable || runs.isPreparing)
+                Menu {
+                    Button("Run") { runs.requestRun() }
+                    Button("Audio Review…") { runs.requestRun(audioReview: true) }
+                        .help("Build and play the soundtrack from the spec, without rendering video (⇧⌘R)")
+                    Button("Dry Run") { runs.requestDryRun() }
+                } label: {
+                    Label("Run", systemImage: "play.fill")
+                } primaryAction: {
+                    runs.requestRun()
+                }
+                .help(app.claudeAvailable ? "Validate, then produce the outputs (⌘R). Hold for Audio Review (⇧⌘R) and Dry Run." : "Claude Code is required to run")
+                .disabled(!app.claudeAvailable || runs.isPreparing)
             }
             Button { document.showPreview.toggle() } label: {
                 Label(document.showPreview ? "Source" : "Preview", systemImage: document.showPreview ? "pencil" : "eye")
@@ -134,7 +143,7 @@ struct ProjectRootView: View {
 
 struct IdentifiedPlan: Identifiable {
     var value: RunPlan
-    var id: String { value.runConfig.id + (value.revise?.runID ?? "") }
+    var id: String { value.runConfig.id + value.kind + (value.revise?.runID ?? "") }
 }
 
 /// Run state and cost, shown in the toolbar.

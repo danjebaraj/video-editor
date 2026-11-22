@@ -79,7 +79,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             item.state = AppSettings.shared.lineNumbers ? .on : .off
         case #selector(stopRun(_:)):
             return doc.runs.isRunning || doc.assistant.isRunning
-        case #selector(runProject(_:)), #selector(dryRun(_:)):
+        case #selector(runProject(_:)), #selector(dryRun(_:)), #selector(audioReview(_:)):
             return !doc.runs.isRunning && AppState.shared.claudeAvailable
         case #selector(gatherInfo(_:)):
             return !doc.assistant.isRunning && AppState.shared.claudeAvailable
@@ -299,6 +299,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     @objc func dryRun(_ sender: Any?) { doc.runs.requestDryRun() }
     @objc func runProject(_ sender: Any?) { doc.runs.requestRun() }
+    @objc func audioReview(_ sender: Any?) { doc.runs.requestRun(audioReview: true) }
 
     @objc func stopRun(_ sender: Any?) {
         if doc.runs.isRunning { doc.runs.stop() } else { doc.assistant.stop() }

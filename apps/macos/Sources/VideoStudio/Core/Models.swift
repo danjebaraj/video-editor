@@ -625,6 +625,12 @@ struct CoreSettings: Codable, Equatable {
     var effort = ""
     var web_access_default = false
     var headless_question_timeout_s = 0
+    /// Who drives the assistant and runs: `claude` (default) or `codex` (FEAT-spry-alpaca-5RQZ).
+    var provider = "claude"
+    /// Path to the `codex` CLI; empty means PATH.
+    var codex_path = ""
+    /// The Codex model; empty means Codex's own default. Claude's models are kept apart.
+    var codex_model = ""
     var cutline_path = ""
     var cutline_repo = ""
     var default_quality = "final"
@@ -920,6 +926,38 @@ struct RunResults: Codable, Equatable {
     var readiness: ReadinessReport?
     var project_json5: String?
     var logs: [LogFile] = []
+    /// What stopped a failed run, when its logs name it (a missing audio source, the credit cap).
+    var blocking: [BlockingInput]? = nil
+}
+
+/// One input or limit that stopped a run: `missing_source` or `credit_cap`.
+struct BlockingInput: Codable, Equatable, Hashable {
+    var kind: String
+    var detail: String
+
+    var title: String { kind == "credit_cap" ? "Over the credit cap" : kind == "missing_source" ? "Missing audio source" : kind }
+}
+
+/// FFI `codex.check` (Settings › Assistant): `missing`, `incompatible`, `sign_in_required` or
+/// `ready`, the models Codex offers, and what to do when it isn't ready.
+struct CodexStatus: Codable, Equatable {
+    struct Model: Codable, Equatable, Identifiable, Hashable {
+        var id: String
+        var name: String
+        var is_default: Bool
+    }
+    struct Finding: Codable, Equatable {
+        var code: String
+        var title: String
+        var remedy: String
+    }
+    var state: String
+    var plan: String?
+    var models: [Model]?
+    var detail: String?
+    var finding: Finding?
+
+    var ready: Bool { state == "ready" }
 }
 
 struct RunOutcome: Codable, Equatable {

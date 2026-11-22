@@ -365,7 +365,7 @@ export class ProjectDocument {
 
   // MARK: Validation
 
-  async validate(kind: 'production' | 'dry_run' = 'production', readiness?: Readiness | null): Promise<Report | null> {
+  async validate(kind: 'production' | 'dry_run' | 'audio_review' = 'production', readiness?: Readiness | null): Promise<Report | null> {
     this.validating.value = true;
     try {
       await this.save().catch(() => {});
