@@ -49,7 +49,7 @@ Video Studio users can select their locally authenticated Croduction run. Claude
 
 This extends the Claude-only assistant and production model in `ui/spec.md` and the Claude-driven cutline workflow in `spec.md`. Put the Codex transport in the shared Rust core so the CLI, FFI and desktop shells use the same protocol handling.
 
-The reference project at `/Users/danieljebaraj/Documents/git/gitea/Just Notes` documents its tested protocol baseline as codex-cli 0.171.0. Use `Sources/MarkdownCore/CodexProtocol.swift` for message shapes, `Sources/JustNotes/Claude/CodexRunner.swift` for process and account handling, and `Tests/MarkdownCoreTests/CodexProtocolTests.swift` for fixtures. Just Notes lets Codex apply accepted patches itself. Video Studio must target the scratch copy so the user retains per-hunk control over the editor document.
+The reference project at `/Users/danieljebaraj/Documents/git/Just Notes` documents its tested protocol baseline as codex-cli 0.171.0. Use `Sources/MarkdownCore/CodexProtocol.swift` for message shapes, `Sources/JustNotes/Claude/CodexRunner.swift` for process and account handling, and `Tests/MarkdownCoreTests/CodexProtocolTests.swift` for fixtures. Just Notes lets Codex apply accepted patches itself. Video Studio must target the scratch copy so the user retains per-hunk control over the editor document.
 
 ## Implementation log
 
