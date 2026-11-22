@@ -20,10 +20,10 @@ Video Studio users can select their locally authenticated Croduction run. Claude
 
 ## Requirements
 
-- [ ] Expose Claude and Codex in Settings on macOS and Windows. Persist the choice in `crates/video-studio-core/src/settings.rs`. Settings without a provider field resolve to Claude. Capture the choice at session or run start so changing Settings only affects subsequent work.
+- [x] Expose Claude and Codex in Settings on macOS and Windows. Persist the choice in `crates/video-studio-core/src/settings.rs`. Settings without a provider field resolve to Claude. Capture the choice at session or run start so changing Settings only affects subsequent work.
   - [x] `Settings.provider` (`claude` | `codex`, default Claude for settings without the field), `codex_path`, `codex_model`, persisted in `settings.rs` (unit tested, Claude's model preferences untouched).
   - [x] Captured at start: a run (`run::prepare::prepare`) and an assistant turn (FFI `start_assistant`) read the provider when they start.
-  - [ ] The choice in Settings on macOS and Windows.
+  - [x] The choice in Settings on macOS and Windows.
 - [ ] Resolve Codex from its configured executable path or, when unset, from PATH. Check the selected provider during readiness validation. For Codex, report missing executable, incompatible protocol and sign-in required as distinct findings with a remedy. A Codex workflow can start on a machine without Claude.
   - [x] `codex::find_codex` (configured path, else PATH). With Codex as the provider, readiness validation checks Codex instead of Claude: `codex_missing`, `codex_incompatible` and `codex_signed_out` are separate blockers, each with a remedy, and `claude_missing` isn't raised. FFI `codex.check` gives the same answer for the Settings page.
   - [ ] A Codex workflow actually starting without Claude: until the assistant and runs use Codex, readiness reports `codex_runs_unavailable` and runs and assistant turns refuse with a clear message rather than falling back to Claude.
@@ -47,7 +47,7 @@ Video Studio users can select their locally authenticated Croduction run. Claude
 
 ## Design notes
 
-This extends the Claude-only assistant and production model in `ui/spec.md` and the Claude-driven cutline workflow in `spec.md`. Put the Codex transport in the shared Rust core so the CLI, FFI and desktop shells use the same protocol handling.
+This extends the Claude-only assistant and production model in `ui/spec.md` and the Claude-driven cutline workflow in `spec.md`. Put the Codex transport in the shared Rust core so the CLI, FFI and desktop shells use the same protocol handling. Settings gains an Assistant pane (provider, Codex path, Codex model) next to the panes listed in `ui/spec.md` §18.
 
 The reference project at `/Users/danieljebaraj/Documents/git/Just Notes` documents its tested protocol baseline as codex-cli 0.171.0. Use `Sources/MarkdownCore/CodexProtocol.swift` for message shapes, `Sources/JustNotes/Claude/CodexRunner.swift` for process and account handling, and `Tests/MarkdownCoreTests/CodexProtocolTests.swift` for fixtures. Just Notes lets Codex apply accepted patches itself. Video Studio must target the scratch copy so the user retains per-hunk control over the editor document.
 
@@ -86,3 +86,19 @@ The reference project at `/Users/danieljebaraj/Documents/git/Just Notes` documen
   These need a protocol design for turns, items and approvals, which the reference project (`/Users/danieljebaraj/Documents/git/gitea/Just Notes`, not on this machine) was meant to supply, plus the desktop GUIs, so they were left for a follow-up.
 - Files: `crates/video-studio-core/src/{codex.rs,lib.rs,settings.rs,validation.rs,run/prepare.rs}`, `crates/video-studio-ffi/src/lib.rs`, `crates/video-studio-cli/{Cargo.toml,src/bin/fake_codex.rs,tests/codex.rs}`.
 - Commit/PR: "Implement FEAT-spry-alpaca-5RQZ (partial): Codex provider setting, transport and readiness" on branch `implement-approved-plans-2026-11-22`.
+
+### 2026-11-22 (Settings UI)
+
+- Implemented: **The choice in Settings on macOS and Windows**, in a new Settings › Assistant pane on both apps:
+  - A provider choice: Claude Code (the default) or Codex.
+  - For Codex: its executable path (empty means PATH) and its model. "Codex default" is empty; the other entries are the models FFI `codex.check` returns.
+  - Codex's status with Re-check. When Codex isn't ready, the pane shows the finding's title and remedy. FFI `codex.check` now adds `finding: {code, title, remedy}` from `CodexStatus::finding()`.
+  - Claude's model preferences stay in Settings › Claude, untouched.
+  - The macOS `CoreSettings` now carries `provider`, `codex_path` and `codex_model`. Before, saving any setting from the Mac app dropped them, so a Codex choice fell back to Claude. The Windows `Settings` type has them too.
+- Verified:
+  - `cargo test -p video-studio-ffi`: the dispatcher test checks that a missing Codex path returns `state: missing` with the `codex_missing` finding and its remedy.
+  - The macOS debug build and the Windows UI build (`tsc` and vite) pass.
+- Not observed: the pane wasn't opened in either running app, and `codex.check` wasn't run against a signed-in Codex from the UI.
+- Not done: everything else listed in the previous entry: the assistant and runs over Codex, permissions, Stop and disconnects, and every acceptance criterion.
+- Files: `apps/macos/Sources/VideoStudio/{Views/SettingsView.swift,Core/Models.swift,App/AppDelegate.swift}`, `apps/windows/ui/src/{settings/settings.ts,types.ts}`, `crates/video-studio-ffi/src/lib.rs`.
+- Commit/PR: "Implement FEAT-neat-osprey-DKK7 and FEAT-spry-alpaca-5RQZ desktop UI: Audio Review player, Codex settings".

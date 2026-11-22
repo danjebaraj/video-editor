@@ -2,12 +2,13 @@ import SwiftUI
 import AppKit
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, finish, claude, cutline, elevenlabs, storage, editor
+    case general, finish, assistant, claude, cutline, elevenlabs, storage, editor
     var id: String { rawValue }
     var title: String {
         switch self {
         case .general: return "General"
         case .finish: return "Finish"
+        case .assistant: return "Assistant"
         case .claude: return "Claude"
         case .cutline: return "cutline"
         case .elevenlabs: return "ElevenLabs"
@@ -19,6 +20,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .finish: return "wand.and.stars"
+        case .assistant: return "person.crop.circle.badge.questionmark"
         case .claude: return "sparkles"
         case .cutline: return "scissors"
         case .elevenlabs: return "waveform"
@@ -47,7 +49,7 @@ struct SettingsView: View {
                             Image(systemName: pane.symbol).font(.system(size: 18))
                             Text(pane.title).font(.caption)
                         }
-                        .frame(width: 80, height: 46)
+                        .frame(width: 76, height: 46)
                         .foregroundStyle(state.pane == pane ? Color.accentColor : Color.secondary)
                         .background(state.pane == pane ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
                         .contentShape(Rectangle())
@@ -64,6 +66,7 @@ struct SettingsView: View {
                     switch state.pane {
                     case .general: GeneralSettings()
                     case .finish: FinishSettings()
+                    case .assistant: AssistantSettings()
                     case .claude: ClaudeSettings()
                     case .cutline: CutlineSettings()
                     case .elevenlabs: ElevenSettings()
@@ -75,7 +78,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(width: 680, height: 520)
+        .frame(width: 720, height: 520)
         .onChange(of: app.settings) { app.saveSettings() }
     }
 }
@@ -125,6 +128,78 @@ struct GeneralSettings: View {
             }
         }
         .textFieldStyle(.roundedBorder)
+    }
+}
+
+/// Settings › Assistant (FEAT-spry-alpaca-5RQZ): who drives the spec assistant and runs, Claude
+/// Code or Codex, and for Codex its executable and model. Claude's models stay in Settings › Claude.
+struct AssistantSettings: View {
+    @ObservedObject private var app = AppState.shared
+    @State private var codex: CodexStatus?
+    @State private var checking = false
+
+    var body: some View {
+        Form {
+            Section("Provider") {
+                Picker("Assistant and runs", selection: $app.settings.provider) {
+                    Text("Claude Code").tag("claude")
+                    Text("Codex").tag("codex")
+                }
+                .pickerStyle(.radioGroup)
+                .accessibilityLabel("Provider")
+                Text("Used by the spec assistant and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if app.settings.provider == "codex" {
+                Section("Codex") {
+                    HStack(alignment: .top) {
+                        if checking {
+                            ProgressView().controlSize(.small)
+                            Text("Checking…")
+                        } else if let c = codex {
+                            Image(systemName: c.ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(c.ready ? Color.green : Color.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                if c.ready {
+                                    Text("Codex is ready" + (c.plan.map { " (\($0) plan)" } ?? ""))
+                                } else if let f = c.finding {
+                                    Text(f.title)
+                                    Text(f.remedy).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                                } else {
+                                    Text(c.state)
+                                }
+                            }
+                        } else {
+                            Text("Not checked yet").foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Re-check") { check() }.disabled(checking)
+                    }
+                    TextField("Codex path", text: $app.settings.codex_path, prompt: Text("codex on PATH"))
+                        .onSubmit { check() }
+                    Picker("Model", selection: $app.settings.codex_model) {
+                        Text("Codex default").tag("")
+                        ForEach(codex?.models ?? []) { m in Text(m.name + (m.is_default ? " (default)" : "")).tag(m.id) }
+                        if !app.settings.codex_model.isEmpty, !(codex?.models ?? []).contains(where: { $0.id == app.settings.codex_model }) {
+                            Text(app.settings.codex_model).tag(app.settings.codex_model)
+                        }
+                    }
+                    .help("The models come from Codex once it is ready. Claude's model choices are kept separately in Settings › Claude.")
+                    Text("Sign-in is handled by the Codex CLI (`codex login`). The app never asks for or stores OpenAI credentials.").font(.caption).foregroundStyle(.secondary)
+                }
+                .task { if codex == nil { check() } }
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+    }
+
+    private func check() {
+        guard !checking else { return }
+        checking = true
+        let path = app.settings.codex_path
+        Task {
+            codex = try? await Core.async("codex.check", ["path": path])
+            checking = false
+        }
     }
 }
 
@@ -475,7 +550,7 @@ struct StorageSettings: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
                             Text((r.folder as NSString).lastPathComponent).lineLimit(1).truncationMode(.middle)
-                            Text([r.kind == "dry_run" ? "Dry run" : "Production", Fmt.when(r.started)].joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                            Text([r.kind == "dry_run" ? "Dry run" : r.kind == "audio_review" ? "Audio Review" : "Production", Fmt.when(r.started)].joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Text(Fmt.bytes(r.total_bytes)).monospacedDigit().foregroundStyle(.secondary)

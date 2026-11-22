@@ -54,6 +54,7 @@ export function icon(glyph: string, cls = ''): HTMLElement {
 
 export const Icons = {
   play: '',
+  pause: '\uE769',
   stop: '',
   check: '',
   checkCircle: '',

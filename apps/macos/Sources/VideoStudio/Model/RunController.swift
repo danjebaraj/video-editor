@@ -35,8 +35,14 @@ struct RunPlan: Equatable {
     var model: String
     var dryRunFirst: Bool
     var revise: (runID: String, feedback: String)?
+    /// `production`, or `audio_review` for an Audio Review (FEAT-neat-osprey-DKK7).
+    var kind = "production"
+    /// Audio Review: the output (ID) whose timing and audio settings are auditioned.
+    var audioOutput: String?
 
-    static func == (a: RunPlan, b: RunPlan) -> Bool { a.runConfig == b.runConfig && a.model == b.model && a.dryRunFirst == b.dryRunFirst && a.revise?.runID == b.revise?.runID }
+    var isAudioReview: Bool { kind == "audio_review" }
+
+    static func == (a: RunPlan, b: RunPlan) -> Bool { a.runConfig == b.runConfig && a.model == b.model && a.dryRunFirst == b.dryRunFirst && a.revise?.runID == b.revise?.runID && a.kind == b.kind && a.audioOutput == b.audioOutput }
 }
 
 /// Drives runs for one project (spec §12): validate, confirm, optional dry run, production,
@@ -46,7 +52,7 @@ final class RunController: ObservableObject {
     unowned let document: ProjectDocument
 
     @Published private(set) var isRunning = false
-    /// `dry_run` or `production` while running.
+    /// `dry_run`, `production` or `audio_review` while running.
     @Published private(set) var kind = "production"
     @Published private(set) var stages: [StageState] = RunController.freshStages()
     @Published private(set) var currentStage: String?
@@ -85,13 +91,24 @@ final class RunController: ObservableObject {
     init(document: ProjectDocument) { self.document = document }
 
     static func freshStages() -> [StageState] {
-        [("prepare", "Prepare"), ("audio", "Audio"), ("capture", "Recording"), ("authoring", "Authoring"), ("validate", "Validate"), ("review", "Review"), ("render", "Render"), ("qa", "QA"), ("done", "Done")].map { StageState(id: $0.0, label: $0.1) }
+        [("prepare", "Prepare"), ("audio", "Audio"), ("capture", "Recording"), ("authoring", "Authoring"), ("validate", "Validate"), ("review", "Review"), ("mix", "Mix"), ("render", "Render"), ("qa", "QA"), ("done", "Done")].map { StageState(id: $0.0, label: $0.1) }
+    }
+
+    /// The stages a run of this kind goes through: a dry run renders nothing and makes no audio;
+    /// an Audio Review makes audio and mixes it, but records, reviews and renders no picture.
+    static func shows(stage: String, kind: String) -> Bool {
+        switch kind {
+        case "dry_run": return !["audio", "mix", "render", "qa"].contains(stage)
+        case "audio_review": return !["capture", "review", "render", "qa"].contains(stage)
+        default: return stage != "mix"
+        }
     }
 
     // MARK: Starting
 
-    /// Run (⌘R): validates, then shows the confirmation sheet.
-    func requestRun(revise: (runID: String, feedback: String)? = nil) {
+    /// Run (⌘R): validates, then shows the confirmation sheet. With `audioReview`, the sheet starts
+    /// an Audio Review instead: the soundtrack of one output, with no dry run and no picture.
+    func requestRun(revise: (runID: String, feedback: String)? = nil, audioReview: Bool = false, audioOutput: String? = nil) {
         guard !isRunning, !isPreparing else { return }
         guard let rc = document.selectedRunConfig else {
             Prompt.error("There is no run config.", detail: "Add one in the Outputs inspector.")
@@ -104,14 +121,20 @@ final class RunController: ObservableObject {
         isPreparing = true
         Task {
             defer { isPreparing = false }
-            guard let report = await document.validate(kind: "production", show: false) else { return }
+            guard let report = await document.validate(kind: audioReview ? "audio_review" : "production", show: false) else { return }
             if report.blockers > 0 {
                 document.inspectorTab = .validation
                 NSSound.beep()
                 return
             }
             let outputs = document.resolvedOutputs.filter { rc.outputs.contains($0.id) }
-            plan = RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: document.outputRoot(for: rc), model: rc.production_model, dryRunFirst: rc.dry_run_first && revise == nil, revise: revise)
+            if audioReview {
+                // Allowed as a project's first run: no dry run, and the review goes in the library.
+                let pick = outputs.first { $0.id == audioOutput }?.id ?? outputs.first?.id
+                plan = RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: "", model: rc.production_model, dryRunFirst: false, revise: revise, kind: "audio_review", audioOutput: pick)
+            } else {
+                plan = RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: document.outputRoot(for: rc), model: rc.production_model, dryRunFirst: rc.dry_run_first && revise == nil, revise: revise)
+            }
         }
     }
 
@@ -119,7 +142,9 @@ final class RunController: ObservableObject {
     func confirm(_ plan: RunPlan) {
         self.plan = nil
         document.acknowledged.formUnion(plan.report.issues.filter { $0.severity == "warning" }.map(\.id))
-        if plan.dryRunFirst {
+        if plan.isAudioReview {
+            launch(plan, kind: "audio_review")
+        } else if plan.dryRunFirst {
             continuation = plan
             launch(plan, kind: "dry_run")
         } else {
@@ -161,8 +186,9 @@ final class RunController: ObservableObject {
             "assume_answers": false,
             "validation": Core.arg(plan.report),
         ]
-        if kind == "production", plan.model != plan.runConfig.production_model { request["model"] = plan.model }
-        if let r = plan.revise, kind == "production" { request["revise"] = ["previous_run": r.runID, "feedback": r.feedback] }
+        if kind != "dry_run", plan.model != plan.runConfig.production_model { request["model"] = plan.model }
+        if let r = plan.revise, kind != "dry_run" { request["revise"] = ["previous_run": r.runID, "feedback": r.feedback] }
+        if kind == "audio_review", let o = plan.audioOutput { request["audio_output"] = o }
         if let t = plan.runConfig.question_timeout_s, t > 0 { request["question_timeout_s"] = t }
         var options: [String: Any] = ["helper": Helper.path, "eleven_key_present": AppState.shared.keyStatus.present,
                                       "cartesia_key_present": AppState.shared.cartesiaKeyStatus.present]
@@ -171,7 +197,7 @@ final class RunController: ObservableObject {
         let forwarder = EventForwarder { [weak self] line in self?.handle(line) }
 
         reset(kind: kind, cap: plan.runConfig.eleven_credit_cap)
-        statusLine = kind == "dry_run" ? "Starting the dry run…" : "Starting…"
+        statusLine = kind == "dry_run" ? "Starting the dry run…" : kind == "audio_review" ? "Starting the Audio Review…" : "Starting…"
         isRunning = true
         AppState.shared.activeRuns.insert(document.project.id)
         document.inspectorTab = .run
@@ -309,7 +335,7 @@ final class RunController: ObservableObject {
         guard let outcome else { return }
         document.selectedRunID = outcome.run_id
         statusLine = RunStatus.label(outcome.status)
-        let title = wasKind == "dry_run" ? "Dry run: \(RunStatus.label(outcome.status).lowercased())" : "\(plan.runConfig.name): \(RunStatus.label(outcome.status).lowercased())"
+        let title = wasKind == "dry_run" ? "Dry run: \(RunStatus.label(outcome.status).lowercased())" : wasKind == "audio_review" ? "Audio Review: \(RunStatus.label(outcome.status).lowercased())" : "\(plan.runConfig.name): \(RunStatus.label(outcome.status).lowercased())"
         notify(title: title, body: outcome.message ?? "\(document.displayName) — \(outcome.outputs.filter(\.exists).count) output(s)")
         if !NSApp.isActive { NSApp.dockTile.badgeLabel = outcome.status == "failed" ? "!" : "✓" }
 

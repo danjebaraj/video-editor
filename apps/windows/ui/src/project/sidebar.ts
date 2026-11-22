@@ -237,7 +237,7 @@ export function sidebar(w: ProjectWindow): { el: HTMLElement; tab: Signal<Sideba
         h(
           'span',
           { class: 'grow' },
-          h('span', { class: 'name' }, rc?.name ?? r.run_config, r.kind === 'dry_run' ? h('span', { class: 'pill' }, 'Dry run') : null, r.previous_run ? icon(Icons.revise, 'muted') : null),
+          h('span', { class: 'name' }, rc?.name ?? r.run_config, r.kind === 'dry_run' ? h('span', { class: 'pill' }, 'Dry run') : r.kind === 'audio_review' ? h('span', { class: 'pill' }, 'Audio Review') : null, r.previous_run ? icon(Icons.revise, 'muted') : null),
           h('span', { class: 'muted small' }, when(r.started), r.cost_usd != null ? ` · ${usd(r.cost_usd)}` : ''),
         ),
       ),
