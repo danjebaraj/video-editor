@@ -7,6 +7,7 @@
 //! Platform rule (spec §3): no OS-specific API outside [`platform`]. Paths are `camino` UTF-8
 //! paths, nothing assumes `/`, and files are written with LF line endings.
 
+pub mod agent;
 pub mod assistant;
 pub mod brand;
 pub mod capture;
