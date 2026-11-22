@@ -20,10 +20,10 @@ Video Studio users can select their locally authenticated Croduction run. Claude
 
 ## Requirements
 
-- [x] Expose Claude and Codex in Settings on macOS and Windows. Persist the choice in `crates/video-studio-core/src/settings.rs`. Settings without a provider field resolve to Claude. Capture the choice at session or run start so changing Settings only affects subsequent work.
+- [ ] Expose Claude and Codex in Settings on macOS and Windows. Persist the choice in `crates/video-studio-core/src/settings.rs`. Settings without a provider field resolve to Claude. Capture the choice at session or run start so changing Settings only affects subsequent work.
   - [x] `Settings.provider` (`claude` | `codex`, default Claude for settings without the field), `codex_path`, `codex_model`, persisted in `settings.rs` (unit tested, Claude's model preferences untouched).
   - [x] Captured at start: a run (`run::prepare::prepare`) and an assistant turn (FFI `start_assistant`) read the provider when they start.
-  - [x] The choice in Settings on macOS and Windows.
+  - [ ] The choice in Settings on macOS and Windows (Settings › Assistant). Implemented; the app builds, not yet checked in the running app.
 - [ ] Resolve Codex from its configured executable path or, when unset, from PATH. Check the selected provider during readiness validation. For Codex, report missing executable, incompatible protocol and sign-in required as distinct findings with a remedy. A Codex workflow can start on a machine without Claude.
   - [x] `codex::find_codex` (configured path, else PATH). With Codex as the provider, readiness validation checks Codex instead of Claude: `codex_missing`, `codex_incompatible` and `codex_signed_out` are separate blockers, each with a remedy, and `claude_missing` isn't raised. FFI `codex.check` gives the same answer for the Settings page.
   - [ ] A Codex workflow actually starting without Claude: until the assistant and runs use Codex, readiness reports `codex_runs_unavailable` and runs and assistant turns refuse with a clear message rather than falling back to Claude.
@@ -102,3 +102,9 @@ The reference project at `/Users/danieljebaraj/Documents/git/Just Notes` documen
 - Not done: everything else listed in the previous entry: the assistant and runs over Codex, permissions, Stop and disconnects, and every acceptance criterion.
 - Files: `apps/macos/Sources/VideoStudio/{Views/SettingsView.swift,Core/Models.swift,App/AppDelegate.swift}`, `apps/windows/ui/src/{settings/settings.ts,types.ts}`, `crates/video-studio-ffi/src/lib.rs`.
 - Commit/PR: "Implement FEAT-neat-osprey-DKK7 and FEAT-spry-alpaca-5RQZ desktop UI: Audio Review player, Codex settings".
+
+### 2026-11-22 (review of the desktop UI pass)
+
+- The desktop UI boxes were unchecked again: they are built but nobody has used them in a running app, and a box needs "fully implemented and tested". Check them once each control has been tried on macOS and Windows.
+- The Windows shell (`video-studio-win`, including the new menu entry) type-checks and is clippy-clean for `x86_64-pc-windows-msvc`, using stub C and resource compilers since a type-check never links.
+- Commit/PR: desktop UI in `10d2f4c`, merged into branch `implement-approved-plans-2026-11-22-pass2`.

@@ -20,23 +20,24 @@ Before committing to a video render, the user can build the soundtrack from the 
 
 ## Requirements
 
-- [x] Offer **Audio Review** alongside the existing run choices on macOS and Windows. Allow it as the first run for a project. If the project has multiple outputs, let the user select the output whose timing and audio settings to audition.
+- [ ] Offer **Audio Review** alongside the existing run choices on macOS and Windows. Allow it as the first run for a project. If the project has multiple outputs, let the user select the output whose timing and audio settings to audition.
   - [x] Core and CLI: `RunKind::AudioReview` (`audio_review`), allowed as a project's first run (no dry run first); `RunRequest.audio_output` picks the output by ID or name, default the first; `video-studio run --audio-review [--audio-output NAME]`.
-  - [x] The run choice and output picker in the macOS app.
-  - [x] The run choice and output picker in the Windows app.
+  - [ ] The run choice and output picker in the macOS app. Implemented; the app builds, not yet checked in the running app.
+  - [ ] The run choice and output picker in the Windows app. Implemented; the app builds, not yet checked in the running app. The Windows shell type-checks for `x86_64-pc-windows-msvc`.
 - [x] Prepare a timeline and resolve the selected output's audio inputs from the spec, brand settings and attached media. Include audible source-clip tracks as well as voice-over, music and effects. Use the existing generation helper, cost confirmation, cache and credit cap when generated audio is needed.
 - [x] Provide a cutline audio-only entry point that accepts a project JSON5 file, the selected export and a destination WAV. Use the production audio plan for that export, including trims, offsets, gains, fades, ducking, silence and loudness processing. Preserve its start time and duration. Skip visual asset generation, screen recording, frame rendering and final video encoding.
-- [x] Save the playable WAV in the audio review run folder. Show the selected output, play/pause, seek position and duration in the run result. Reopening that result plays the saved file without starting another build.
+- [ ] Save the playable WAV in the audio review run folder. Show the selected output, play/pause, seek position and duration in the run result. Reopening that result plays the saved file without starting another build.
   - [x] Core: the mix is saved as `outputs/audio-review.wav` in the run folder (under the library's `audio-reviews/<project>/`), and `run.results` (`load_results`) returns it as the run's one output with its duration, so reopening needs no build.
-  - [x] macOS run result: selected output, play/pause, seek position and duration.
-  - [x] Windows run result: the same.
+  - [ ] macOS run result: selected output, play/pause, seek position and duration. Implemented; the app builds, not yet checked in the running app.
+  - [ ] Windows run result: the same. Implemented; the app builds, not yet checked in the running app.
 - [ ] Accept revision feedback from an audio review and build a new review using the revised instructions. Reuse eligible cached audio inputs and retain the prior playable result so the user can compare takes.
   - [x] Core: a revised Audio Review gets its own user prompt (mix again with `cutline audio`, reuse unchanged audio through the helper's cache). The previous run's project.json5, audio/ and work/ are copied as for production, and the earlier WAV stays in its own folder.
-  - [x] Revise… on an Audio Review result in both apps.
+  - [ ] Revise… on an Audio Review result in both apps. Implemented; the app builds, not yet checked in the running app.
   - [ ] An end-to-end check of a revised review.
-- [x] When the timeline contains no audible tracks, report that outcome before offering playback. For a missing required audio source or exceeded credit cap, identify the blocking input or limit. A stopped or failed build must not expose a partial WAV as a completed review.
+- [ ] When the timeline contains no audible tracks, report that outcome before offering playback. For a missing required audio source or exceeded credit cap, identify the blocking input or limit. A stopped or failed build must not expose a partial WAV as a completed review.
   - [x] `cutline audio` reports a silent timeline (`audible: false`, "the timeline has no audible tracks"), and the run adds the warning "The timeline has no audible tracks: the mix is silence." `cutline audio` writes its WAV only when the whole mix succeeded. A run that stops or fails without the mix is `failed` and its result is `incomplete`, so nothing is offered for playback.
-  - [x] Naming a missing audio source or an exceeded credit cap as the blocking input in the app's result view. Today they reach the user through `cutline validate`'s `E_ASSET_NOT_FOUND` and the helper's credit-cap refusal in Claude's summary.
+  - [x] Core: a failed run's `RunResults.blocking` names a missing audio source (`E_ASSET_NOT_FOUND` from the last `cutline validate`/`cutline audio` log) or a credit-cap refusal (`logs/eleven.ndjson`); unit tested.
+  - [ ] The "Blocked by" list in both apps' result views. Implemented; the app builds, not yet checked in the running app.
 
 ## Acceptance criteria
 
@@ -98,3 +99,9 @@ This extends the run choices and revision flow in `ui/spec.md` and exposes the f
 - Not done: an end-to-end check of a revised review, and acceptance criteria 1, 3 and 4. All need the apps (or a revised run counting narration generations) to be exercised.
 - Files: `apps/macos/Sources/VideoStudio/{Model/RunController.swift,Views/RunViews.swift,Views/ProjectRootView.swift,Views/SidebarViews.swift,App/MainMenu.swift,App/ProjectWindowController.swift,Core/Models.swift}`, `apps/windows/ui/src/{project/runs.ts,project/sheets.ts,project/window.ts,project/sidebar.ts,project/document.ts,project/inspector/run.ts,types.ts,dom.ts,styles/app.css}`, `apps/windows/src/menu.rs`, `crates/video-studio-core/src/run/{collect.rs,events.rs}`.
 - Commit/PR: "Implement FEAT-neat-osprey-DKK7 and FEAT-spry-alpaca-5RQZ desktop UI: Audio Review player, Codex settings".
+
+### 2026-11-22 (review of the desktop UI pass)
+
+- The desktop UI boxes were unchecked again: they are built but nobody has used them in a running app, and a box needs "fully implemented and tested". Check them once each control has been tried on macOS and Windows.
+- The Windows shell (`video-studio-win`, including the new menu entry) type-checks and is clippy-clean for `x86_64-pc-windows-msvc`, using stub C and resource compilers since a type-check never links.
+- Commit/PR: desktop UI in `10d2f4c`, merged into branch `implement-approved-plans-2026-11-22-pass2`.
