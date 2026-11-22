@@ -261,6 +261,16 @@ Segments are cached: changing captions, text or music does not re-render clips.
   `window.__cutline_seek = async (t) => {...}` for JS-driven animation. Asset `params` arrive as
   `window.__cutline_params`. Network is blocked (only local files next to the page / in the project).
 - HTML variants of templates: `hook_title_html`, `lower_third_html`, `end_card_html`.
+- Put an HTML / SVG / Lottie graphic over the picture with an `html` layer, never a `video`,
+  `broll` or `image` layer (those are for files ffmpeg decodes; validation rejects the mix with
+  `E_WRONG_ASSET_KIND` at `/layers/N/type`):
+
+  ```json5
+  assets: { ov04: { path: "graphics/ov04.html", duration: 4 } },   // duration: how long the page runs
+  layers: [ { type: "html", asset: "ov04", start: 2, end: 6 } ],  // transparent where the page is
+  ```
+
+  As a full-screen card in `main`, use the asset as a clip: `{id: "card", clip: "ov04"}`.
 
 ## Fixing common errors
 

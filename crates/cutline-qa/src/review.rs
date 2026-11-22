@@ -116,25 +116,117 @@ pub fn text_background_detail(on: &RgbImage, off: &RgbImage, bbox: (u32, u32, u3
     (n > 0).then(|| sum / n as f64)
 }
 
+/// One frame of `path` near `t` (seconds) as RGB: the first stored frame at or after `t`.
+///
+/// A variable-rate screen recording stores a frame only when the screen changes, so a seek can
+/// land after the last stored frame while still inside the file's duration; ffmpeg then writes
+/// nothing and prints nothing (TASK-silver-cherry-R3MZ, TASK-honest-cedar-A73E). When the fast
+/// seek gives no frame this tries an accurate seek (`-ss` after `-i`), then the last frame at or
+/// before `t`. If all fail, the error names the file, `t`, the duration, the frame count and
+/// ffmpeg's messages.
 pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
     let still =
         cutline_core::timeline::default_kind_from_ext(&path.to_string_lossy()) == cutline_core::model::AssetKind::Image;
-    let mut cmd = std::process::Command::new(&tc.ffmpeg);
-    cmd.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
-    if !still {
-        cmd.args(["-ss", &format!("{:.6}", t.max(0.0))]);
+    let ts = format!("{:.6}", t.max(0.0));
+    let mut errs = String::new();
+    // 1. fast input seek; 2. accurate output seek
+    for accurate in [false, true] {
+        if still && accurate {
+            break;
+        }
+        let mut cmd = std::process::Command::new(&tc.ffmpeg);
+        cmd.args(["-hide_banner", "-nostdin", "-loglevel", "error"]);
+        if !still && !accurate {
+            cmd.args(["-ss", &ts]);
+        }
+        cmd.arg("-i").arg(path);
+        if accurate {
+            cmd.args(["-ss", &ts]);
+        }
+        let o = cmd
+            .args(["-frames:v", "1", "-vf", cutline_testkit::analyze::CONV, "-f", "image2pipe", "-c:v", "png", "-"])
+            .output()?;
+        if o.status.success() && !o.stdout.is_empty() {
+            return Ok(image::load_from_memory(&o.stdout)?.to_rgb8());
+        }
+        errs.push_str(String::from_utf8_lossy(&o.stderr).trim());
     }
-    let o = cmd
+    // 3. the frame on screen at `t`: the last one stored at or before it
+    if !still {
+        match grab_held(tc, path, t) {
+            Ok(img) => return Ok(img),
+            Err(e) => {
+                let e = e.to_string();
+                if !e.is_empty() && !errs.contains(&e) {
+                    if !errs.is_empty() {
+                        errs.push('\n');
+                    }
+                    errs.push_str(&e);
+                }
+            }
+        }
+    }
+    let (dur, frames) = frame_facts(tc, path);
+    anyhow::bail!(
+        "frame grab at {t:.3}s failed: {} (duration {}, {} frames): {}",
+        path.display(),
+        dur.map(|d| format!("{d:.3}s")).unwrap_or_else(|| "unknown".into()),
+        frames.map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()),
+        if errs.trim().is_empty() { "(ffmpeg printed nothing)".to_string() } else { errs }
+    )
+}
+
+/// The frame on screen at `t`: the last stored frame whose time is at or before `t`. Decodes from
+/// the start of the file, so use it for sparse, variable-rate recordings (or as a fallback),
+/// where the first frame after a seek can be seconds later than the one being shown.
+pub fn grab_held(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
+    let dir = tempfile::tempdir()?;
+    let out = dir.path().join("held.png");
+    let o = std::process::Command::new(&tc.ffmpeg)
+        .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-t", &format!("{:.6}", t.max(0.0) + 0.0005)])
         .arg("-i")
         .arg(path)
-        .args(["-frames:v", "1", "-vf", cutline_testkit::analyze::CONV, "-f", "image2pipe", "-c:v", "png", "-"])
+        .args([
+            "-an",
+            "-vf",
+            cutline_testkit::analyze::CONV,
+            "-fps_mode",
+            "passthrough",
+            "-update",
+            "1",
+            "-c:v",
+            "png",
+            "-y",
+        ])
+        .arg(&out)
         .output()?;
-    anyhow::ensure!(
-        o.status.success() && !o.stdout.is_empty(),
-        "frame grab at {t:.3}s failed: {}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-    Ok(image::load_from_memory(&o.stdout)?.to_rgb8())
+    match std::fs::read(&out) {
+        Ok(b) if o.status.success() && !b.is_empty() => Ok(image::load_from_memory(&b)?.to_rgb8()),
+        _ => anyhow::bail!("{}", String::from_utf8_lossy(&o.stderr).trim()),
+    }
+}
+
+/// The frame shown at `t` in a source: the held frame for a sparse recording, else [`grab`].
+pub fn grab_source(tc: &cutline_deps::Toolchain, path: &Path, t: f64, sparse: bool) -> Result<RgbImage> {
+    if sparse {
+        if let Ok(img) = grab_held(tc, path, t) {
+            return Ok(img);
+        }
+    }
+    grab(tc, path, t)
+}
+
+/// Duration and stored video frame count, for error messages.
+fn frame_facts(tc: &cutline_deps::Toolchain, path: &Path) -> (Option<f64>, Option<u64>) {
+    let o = std::process::Command::new(&tc.ffprobe)
+        .args(["-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries"])
+        .args(["format=duration:stream=nb_read_packets", "-of", "default=nw=1"])
+        .arg(path)
+        .output();
+    let Ok(o) = o else { return (None, None) };
+    let text = String::from_utf8_lossy(&o.stdout);
+    let field = |k: &str| text.lines().find_map(|l| l.strip_prefix(k)).map(str::trim).map(str::to_string);
+    (field("duration=").and_then(|v| v.parse().ok()), field("nb_read_packets=").and_then(|v| v.parse().ok()))
 }
 
 fn clip_label(tl: &Timeline, t: f64) -> String {
@@ -282,6 +374,7 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
 
     // ---- QA
     let mut ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);
+    ctx.ocr = crate::ocr::setting(ocr, pr.project.qa.as_ref().and_then(|q| q.ocr))?;
     let mut target = tl.target.clone();
     if !use_final {
         target.width = plan.geometry.width;
@@ -402,7 +495,7 @@ pub fn review_with(l: &Loaded, out_dir: &Path, ocr: Option<&str>) -> Result<Revi
         for frac in [0.1, 0.5, 0.9] {
             let i = ((path.len() as f64 - 1.0) * frac) as usize;
             let src_t = c.src_in + (i as f64 / path.fps) * c.speed;
-            let mut f = grab(tc, &m.path, src_t)?;
+            let mut f = grab_source(tc, &m.path, src_t, m.sparse())?;
             let s = f.width() as f64 / path.src_w as f64;
             stroke_rect(
                 &mut f,

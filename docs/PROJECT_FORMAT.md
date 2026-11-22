@@ -400,7 +400,7 @@ others until the end. Visual layers take: `position` (preset `center`, `top`, `b
 | `video` | `asset`, `src_in`, `src_out`, `audio` (false), `gain_db` — alpha video overlays |
 | `broll` | same as video + `ken_burns`; full-frame cover unless `scale` is set (PiP) |
 | `image` | `asset`, `ken_burns` |
-| `html` | `asset` (HTML/SVG/Lottie) |
+| `html` | `asset` (HTML/SVG/Lottie): rendered in headless Chrome with alpha. The only layer type for these assets: `video`, `broll`, `image` and `presenter` layers need a file ffmpeg can decode (`E_WRONG_ASSET_KIND` at `/layers/N/type`) |
 | `progress_bar` | `style` (`brand` or color), `edge` (top/bottom), `height` |
 | `audio` | `asset`, `src_in`, `gain_db`, `fade_in`, `fade_out`, `loop`, `role`, `align` (`end`: backtime so the asset's own ending lands on the layer end — default the timeline end; the head is trimmed, or a shorter asset starts later; not with `src_in`/`loop`) |
 | `sfx` | `asset` (or brand alias), `at` or `anchor`+`offset`, `gain_db`, `pick_from` |

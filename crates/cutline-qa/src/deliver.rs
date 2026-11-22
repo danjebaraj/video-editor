@@ -57,7 +57,18 @@ pub fn qa_context(p: &Project, tl: &Timeline, extras: &cutline_render::PlanExtra
     }
     c.caption_boxes = extras_caption_boxes(extras);
     c.first_text_at = extras_first_text(extras);
+    c.html_opening = html_at(tl, 0.5);
+    c.ocr = crate::ocr::setting(None, p.qa.as_ref().and_then(|q| q.ocr)).unwrap_or_default();
     c
+}
+
+/// Whether an HTML / Lottie / SVG clip or layer is on screen at `t` (edit seconds).
+pub fn html_at(tl: &Timeline, t: f64) -> bool {
+    use cutline_core::model::{AssetKind, Layer};
+    let f = (t * tl.fps.as_f64()).round() as i64;
+    let drawn = |k: AssetKind| matches!(k, AssetKind::Html | AssetKind::Lottie | AssetKind::Svg);
+    tl.clips.iter().any(|c| drawn(c.kind) && c.start <= f && f < c.start + c.frames)
+        || tl.layers.iter().any(|l| matches!(l.layer, Layer::Html { .. }) && l.start <= f && f < l.end)
 }
 
 /// QA expectations for one export: `qa_context`, moved onto the delivered file's own clock
@@ -98,6 +109,7 @@ pub fn qa_context_for(pr: &Prepared, d: &cutline_render::Delivery) -> QaContext 
             .iter()
             .map(|b| b.start.max(0.0))
             .fold(None, |a: Option<f64>, s| Some(a.map_or(s, |a| a.min(s))));
+        c.html_opening = html_at(tl, off + 0.5);
         if d.loop_frames > 0 {
             // the dissolve at the end is meant to look like one
             c.intended_freeze.push((len - tl.secs(d.loop_frames) - 0.1, len));
