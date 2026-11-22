@@ -1,4 +1,4 @@
 # This folder is managed by the Planner app. See AGENTS.md for the rules.
-# kind: features | bugs | mixed
+# kind: features | bugs | tasks | mixed
 kind = "mixed"
-format = 4
+format = 6
