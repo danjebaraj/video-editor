@@ -4067,6 +4067,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "video-studio-core",
+ "video-studio-ffi",
  "windows",
 ]
 

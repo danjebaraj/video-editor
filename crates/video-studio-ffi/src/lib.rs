@@ -752,12 +752,10 @@ pub fn start_assistant(request_json: String, listener: Box<dyn EventListener>) -
     // token is `codex:<thread>`; a Claude session token starts a separate Codex conversation and
     // the other way round.
     if settings.provider == video_studio_core::codex::Provider::Codex {
-        let executable =
-            video_studio_core::codex::find_codex(&settings.codex_path).ok_or_else(|| CoreError::Failed {
-                code: "environment".into(),
-                message: "Codex isn't installed. Install the Codex CLI, or set its path in Settings › Assistant."
-                    .into(),
-            })?;
+        let executable = match video_studio_core::codex::resolve_codex(&settings.codex_path) {
+            video_studio_core::codex::CodexLookup::Found(p) => p,
+            other => return Err(CoreError::Failed { code: "environment".into(), message: other.problem() }),
+        };
         let setup =
             assistant::CodexSetup { executable, model: video_studio_core::codex::model_for(&settings.codex_model) };
         let handle = assistant::start_codex(&request, &setup, Arc::new(ChatSink(listener)))?;
@@ -832,12 +830,16 @@ mod tests {
         s["words_per_minute"] = json!(170);
         assert_eq!(c("settings.save", json!({"settings": s}))["words_per_minute"], 170);
         // Settings › Assistant: a Codex that isn't there comes back with its finding and remedy
+        // (a configured path that isn't there is named, with how to fix it)
         let codex = c("codex.check", json!({"path": root.join("no-codex-here")}));
         assert_eq!(
             (codex["state"].as_str(), codex["finding"]["code"].as_str()),
-            (Some("missing"), Some("codex_missing"))
+            (Some("bad_path"), Some("codex_path_invalid"))
         );
-        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Install the Codex CLI"));
+        assert!(codex["finding"]["title"].as_str().unwrap().contains("no-codex-here"));
+        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Settings › Assistant"));
+        let missing = core::codex::CodexStatus::Missing.finding().unwrap();
+        assert!(missing.0 == "codex_missing" && missing.2.contains("Install the Codex CLI"));
         // validation with a supplied environment (no tools are run)
         let env =
             json!({"claude": null, "signed_in": null, "cutline": null, "doctor": null, "min_claude_version": "2.1.0"});

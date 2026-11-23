@@ -53,8 +53,10 @@ impl RunEnv {
         let settings = Settings::load(library);
         // With Codex as the provider Claude Code isn't needed (FEAT-spry-alpaca-5RQZ).
         let codex = settings.provider == crate::codex::Provider::Codex;
-        if codex && crate::codex::find_codex(&settings.codex_path).is_none() {
-            return Err(Error::Environment(CODEX_MISSING.into()));
+        if codex {
+            if let Some(problem) = codex_problem(&settings.codex_path) {
+                return Err(Error::Environment(problem));
+            }
         }
         let claude = match locate::find_claude(&settings.claude_path) {
             Some(c) => c,
@@ -272,6 +274,15 @@ fn copy_tree(from: &Utf8Path, to: &Utf8Path) {
 /// What a run says when Codex is the provider and can't be found.
 pub const CODEX_MISSING: &str = "Codex is selected in Settings › Assistant, but it isn't installed. Install the Codex CLI (it provides `codex app-server`) or set its path in Settings › Assistant, then try again.";
 
+/// Why the selected Codex can't be used: a bad configured path (named) or no Codex at all.
+pub fn codex_problem(configured: &str) -> Option<String> {
+    match crate::codex::resolve_codex(configured) {
+        crate::codex::CodexLookup::Found(_) => None,
+        crate::codex::CodexLookup::NotFound => Some(CODEX_MISSING.into()),
+        bad => Some(bad.problem()),
+    }
+}
+
 /// What Codex is told on top of the production instructions (FEAT-spry-alpaca-5RQZ): its tools
 /// aren't Claude's, and the app checks every command and write.
 pub const CODEX_RUN_NOTE: &str = "\n\n## Working in Codex\n\n- You run as Codex inside Syncfusion Video Studio. Your working folder is this run's folder; write only there (with apply_patch). Media, brand and reference folders are read-only. `logs/`, `.bin/`, `run.json` and `media-manifest.json` are written by the app.\n- Run `cutline …` and `video-studio eleven …` / `video-studio capture …` as plain commands by those bare names, one per command, with no pipes, redirections or substitutions. Every command is checked by the app and anything else is refused; don't try other tools to get around a refusal.\n- When you need a decision from the user, ask with the request_user_input tool.";
@@ -280,10 +291,9 @@ pub const CODEX_RUN_NOTE: &str = "\n\n## Working in Codex\n\n- You run as Codex 
 pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     // The provider is captured at run start: changing Settings later affects only later runs.
     let codex_exe = match env.settings.provider {
-        crate::codex::Provider::Codex => Some(
-            crate::codex::find_codex(&env.settings.codex_path)
-                .ok_or_else(|| Error::Environment(CODEX_MISSING.into()))?,
-        ),
+        crate::codex::Provider::Codex => Some(crate::codex::find_codex(&env.settings.codex_path).ok_or_else(|| {
+            Error::Environment(codex_problem(&env.settings.codex_path).unwrap_or_else(|| CODEX_MISSING.into()))
+        })?),
         crate::codex::Provider::Claude => None,
     };
     let mut project = Project::load(&request.project_path)?;
@@ -524,7 +534,14 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         platforms: &env.platforms,
         finish: &finish,
     });
-    let prompt = super::prompt::user_prompt(request.kind, request.revise.as_ref(), previous.as_ref());
+    let mut prompt = super::prompt::user_prompt(request.kind, request.revise.as_ref(), previous.as_ref());
+    // A revision under the other provider can't continue the earlier conversation: it starts a
+    // fresh session from the run's files (FEAT-spry-alpaca-5RQZ).
+    let previous_session = previous.as_ref().and_then(|p| p.claude_session.clone());
+    let previous_was_codex = previous_session.as_deref().map(|s| crate::codex::agent::thread_of(s).is_some());
+    if request.revise.is_some() && previous_was_codex.is_some_and(|was| was != codex_exe.is_some()) {
+        prompt.push_str(super::prompt::PROVIDER_SWITCH_NOTE);
+    }
     // What Claude was told, kept with the logs: the instructions are half of any run that went
     // wrong, and they change between versions of the app.
     paths::write_atomic(&logs.join("prompt-system.md"), system.as_bytes())?;
@@ -543,7 +560,8 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
             .or_else(|| Some(env.settings.effort.clone()).filter(|e| !e.is_empty()))
             .filter(|e| env.claude.effort_levels.contains(e)),
         tools,
-        resume_session: previous.as_ref().and_then(|p| p.claude_session.clone()),
+        // only a Claude session from the revised run is resumed
+        resume_session: previous_session.clone().filter(|s| crate::codex::agent::thread_of(s).is_none()),
         system_prompt_append: system,
         settings: Some(hook_settings(&env.helper, &policy_file)),
         add_dirs: read_paths.iter().map(|p| containing_dir(p)).collect::<HashSet<_>>().into_iter().collect(),

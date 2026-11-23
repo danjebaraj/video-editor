@@ -1100,3 +1100,91 @@ fn a_timed_scroll_is_parsed_and_bounded() {
         assert!(stderr(&o).contains("--over"), "{bad}: {}", stderr(&o));
     }
 }
+
+/// FEAT-spry-alpaca-5RQZ: a revision under the other provider starts a fresh session with the
+/// project and run context, and never resumes the other provider's session.
+#[test]
+fn a_revision_under_the_other_provider_starts_fresh_with_the_runs_context() {
+    let w = World::new();
+    let steps: Vec<Value> =
+        happy_script().as_array().unwrap().iter().filter(|s| !s.to_string().contains("eleven")).cloned().collect();
+    w.set_script(Value::Array(steps));
+    let env = run_env(&w, &w.script);
+    let request = RunRequest {
+        project_path: w.project.clone(),
+        run_config: "rc_social".into(),
+        kind: RunKind::Production,
+        model: None,
+        output: None,
+        revise: None,
+        audio_output: None,
+        assume_answers: true,
+        question_timeout_s: None,
+        validation: None,
+    };
+    let first = start_run(&request, &env, Arc::new(MemorySink::default())).unwrap().wait();
+    assert_eq!(first.status, RunStatus::Succeeded, "{:?}", first.message);
+    let claude_session = first.record.claude_session.clone().unwrap();
+    assert!(!claude_session.starts_with("codex:"));
+
+    // Revise the Claude run with Codex selected.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let codex_script = w.root.join("codex-revise.json");
+    std::fs::write(
+        &codex_script,
+        json!([[
+            {"command": "cutline render project.json5"},
+            {"write": {"path": "summary.md", "content": "## What changed\nFaster hook.\n"}}
+        ]])
+        .to_string(),
+    )
+    .unwrap();
+    let codex_log = w.root.join("codex-revise.ndjson");
+    let mut env2 = run_env(&w, &w.script);
+    env2.settings.provider = video_studio_core::codex::Provider::Codex;
+    env2.settings.codex_path = env!("CARGO_BIN_EXE_vs-fake-codex").to_string();
+    env2.extra_env.insert("FAKE_CODEX_SCRIPT".into(), codex_script.to_string());
+    env2.extra_env.insert("FAKE_CODEX_LOG".into(), codex_log.to_string());
+    let request2 = RunRequest {
+        revise: Some(Revise { previous_run: first.record.id.clone(), feedback: "Make the hook faster.".into() }),
+        ..request.clone()
+    };
+    let second = start_run(&request2, &env2, Arc::new(MemorySink::default())).unwrap().wait();
+    assert_eq!(second.status, RunStatus::Succeeded, "{:?}", second.message);
+    let sent = ndjson(&codex_log);
+    assert!(sent.iter().any(|m| m["method"] == "thread/start"), "a fresh Codex thread");
+    assert!(!sent.iter().any(|m| m["method"] == "thread/resume"), "the Claude session isn't resumed");
+    let turn = sent.iter().find(|m| m["method"] == "turn/start").unwrap();
+    let prompt = turn["params"]["input"][0]["text"].as_str().unwrap();
+    assert!(prompt.contains("Make the hook faster.") && prompt.contains("previous-summary.md"), "{prompt}");
+    assert!(prompt.contains("new session without its conversation"), "{prompt}");
+    let codex_session = second.record.claude_session.clone().unwrap();
+    assert!(codex_session.starts_with("codex:"), "{codex_session}");
+
+    // Revise the Codex run with Claude selected again: no `--resume` of the Codex token.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let _ = std::fs::remove_file(&w.trace);
+    let claude_script = w.root.join("claude-revise.json");
+    std::fs::write(
+        &claude_script,
+        json!([
+            {"tool": "Bash", "input": {"command": "cutline render project.json5"}},
+            {"tool": "Write", "input": {"file_path": "summary.md", "content": "## What changed\nSlower hook.\n"}},
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let env3 = run_env(&w, &claude_script);
+    let request3 = RunRequest {
+        revise: Some(Revise { previous_run: second.record.id.clone(), feedback: "Slow the hook down.".into() }),
+        ..request.clone()
+    };
+    let third = start_run(&request3, &env3, Arc::new(MemorySink::default())).unwrap().wait();
+    assert_eq!(third.status, RunStatus::Succeeded, "{:?}", third.message);
+    let trace = w.trace();
+    let args: Vec<&str> = trace[0]["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+    assert!(!args.contains(&"--resume"), "{args:?}");
+    assert!(trace.iter().any(|t| t["prompt"]
+        .as_str()
+        .is_some_and(|p| p.contains("Slow the hook down.") && p.contains("new session without its conversation"))));
+}

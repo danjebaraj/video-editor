@@ -561,6 +561,10 @@ pub fn system_prompt(input: &PromptInput) -> String {
     s
 }
 
+/// Added to a revision's prompt when it runs under a different provider than the run it
+/// revises, so there's no earlier conversation to continue.
+pub const PROVIDER_SWITCH_NOTE: &str = "\n\nThe previous run used a different assistant, so this is a new session without its conversation. Before changing anything, read previous-summary.md and this folder's project.json5 to see what was made and why.";
+
 /// The first user message of the run.
 pub fn user_prompt(kind: RunKind, revise: Option<&Revise>, previous: Option<&RunRecord>) -> String {
     match (kind, revise) {

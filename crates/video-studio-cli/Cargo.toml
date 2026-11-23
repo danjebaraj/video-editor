@@ -34,6 +34,7 @@ windows = { version = "0.62", features = [
 
 [dev-dependencies]
 tempfile = "3.27.0"
+video-studio-ffi = { path = "../video-studio-ffi" }
 
 [target.'cfg(windows)'.dev-dependencies]
 image = { version = "0.25.6", default-features = false, features = ["png"] }

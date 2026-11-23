@@ -27,18 +27,18 @@ Video Studio users can select their locally authenticated Codex CLI for assistan
   - [x] `Settings.provider` (`claude` | `codex`, default Claude for settings without the field), `codex_path`, `codex_model`, persisted in `settings.rs` (unit tested, Claude's model preferences untouched).
   - [x] Captured at start: a run (`run::prepare::prepare`) and an assistant turn (FFI `start_assistant`) read the provider when they start.
   - [ ] The choice in Settings on macOS and Windows.
-- [ ] Resolve Codex from its configured executable path or, when unset, from PATH. Check the selected provider during readiness validation. For Codex, report missing executable, incompatible protocol and sign-in required as distinct findings with a remedy. A Codex workflow can start on a machine without Claude.
+- [x] Resolve Codex from its configured executable path or, when unset, from PATH. Check the selected provider during readiness validation. For Codex, report missing executable, incompatible protocol and sign-in required as distinct findings with a remedy. A Codex workflow can start on a machine without Claude.
   - [x] `codex::find_codex` (configured path, else PATH). With Codex as the provider, readiness validation checks Codex instead of Claude: `codex_missing`, `codex_incompatible` and `codex_signed_out` are separate blockers, each with a remedy, and `claude_missing` isn't raised. FFI `codex.check` gives the same answer for the Settings page.
-  - [ ] With an empty configured path on macOS, search executable PATH candidates first, then `/opt/homebrew/bin/codex` and `/usr/local/bin/codex`, including when PATH is unset. Follow executable symlinks. If a configured path is invalid, report that path and how to fix it. Use the shared resolver for Settings, readiness, assistant turns and production runs.
-  - [ ] Verify that a Codex assistant turn and a production run both start with Claude absent.
+  - [x] With an empty configured path on macOS, search executable PATH candidates first, then `/opt/homebrew/bin/codex` and `/usr/local/bin/codex`, including when PATH is unset. Follow executable symlinks. If a configured path is invalid, report that path and how to fix it. Use the shared resolver for Settings, readiness, assistant turns and production runs.
+  - [x] Verify that a Codex assistant turn and a production run both start with Claude absent.
 - [x] Start `codex app-server` over stdio, complete `initialize` and `initialized`, and use `account/read` and `model/list` for readiness and model selection. Keep model preferences per provider and use the Codex default when no Codex model is selected.
-- [ ] In `assistant.rs`, pass the current editor text, selection, project summary and authorized attachments through the existing prompt and session preparation. Stream replies, display questions and return answers with the original request ID. Apply proposed edits to the session copy and send its diff through the existing per-hunk review.
-- [ ] Start a Codex thread for a new conversation and resume its ID only for the same project, conversation and provider. If resume fails, identify the lost context in the chat before starting a fresh thread with the current editor state.
-- [ ] In `run/orchestrator.rs`, give Codex the prepared run workspace, manifest and production instructions. Route tool progress, diagnostics and collected outputs to the existing run inspector. Determine success through the existing output checks.
+- [x] In `assistant.rs`, pass the current editor text, selection, project summary and authorized attachments through the existing prompt and session preparation. Stream replies, display questions and return answers with the original request ID. Apply proposed edits to the session copy and send its diff through the existing per-hunk review.
+- [x] Start a Codex thread for a new conversation and resume its ID only for the same project, conversation and provider. If resume fails, identify the lost context in the chat before starting a fresh thread with the current editor state.
+- [x] In `run/orchestrator.rs`, give Codex the prepared run workspace, manifest and production instructions. Route tool progress, diagnostics and collected outputs to the existing run inspector. Determine success through the existing output checks.
 - [ ] Enforce the existing assistant and run permissions for Codex, including read-only reference media, workspace write limits, command allowlists, web access settings and ElevenLabs helper credit limits. Disable inherited tools that bypass these controls. Deny unsupported permission requests and return a protocol error for unknown server requests.
   - [x] Unknown server requests get a JSON-RPC error (−32601) carrying the request's own ID (`AppServer::request`).
   - [ ] Mapping the broker's permissions (read-only media, workspace writes, command allowlist, web access, credit limits) onto Codex approvals and sandbox settings, and disabling tools that bypass them.
-- [ ] On Stop, send `turn/interrupt` for the active thread and turn and use existing process-tree cleanup if it fails to stop. On disconnect or protocol failure, release pending questions and approvals, record a terminal error and allow a new operation to start.
+- [x] On Stop, send `turn/interrupt` for the active thread and turn and use existing process-tree cleanup if it fails to stop. On disconnect or protocol failure, release pending questions and approvals, record a terminal error and allow a new operation to start.
 
 ## Acceptance criteria
 
@@ -48,11 +48,11 @@ Video Studio users can select their locally authenticated Codex CLI for assistan
 - [ ] On macOS, launch Video Studio from Finder with Codex installed at `/opt/homebrew/bin/codex`, the Codex path field blank, and Homebrew absent from the app's PATH. Re-check in Settings, start an assistant turn, then run a fixture project. All three must use the Homebrew executable. Add deterministic resolver tests for missing PATH, configured-path and PATH precedence, a valid symlink, a broken symlink and a non-executable candidate.
 
 - [ ] On each desktop platform, load legacy Claude settings, select Codex, restart and verify the choice persists. With Claude absent and a signed-in Codex available, both assistant and run readiness pass the provider check. Switching back to Claude restores its model preference.
-- [ ] A fake app server records initialization before thread creation, streams a reply, requests user input with a string ID and proposes two independent edits. Verify the answer carries that ID and accepting one hunk changes only that hunk in the saved spec.
-- [ ] A second turn resumes the recorded thread. Switching projects or providers starts a separate conversation. A rejected resume produces a visible notice and exactly one new thread.
-- [ ] Run a fixture project with Codex and a cutline fixture. Verify the expected output appears in results and the inspector shows tool progress. Repeat with a missing required output and verify the run reports failure.
-- [ ] Exercise denied command, out-of-workspace write and unsupported tool requests with a fake server. Verify the command never executes, the external file retains its contents and each request receives a terminal response.
-- [ ] Exercise Stop during a pending question, unexpected server exit and failed sign-in. Verify the appropriate stopped or failed state, actionable feedback and cleanup before retry. Run the existing Claude assistant and production fixtures as regression checks.
+- [x] A fake app server records initialization before thread creation, streams a reply, requests user input with a string ID and proposes two independent edits. Verify the answer carries that ID and accepting one hunk changes only that hunk in the saved spec.
+- [x] A second turn resumes the recorded thread. Switching projects or providers starts a separate conversation. A rejected resume produces a visible notice and exactly one new thread.
+- [x] Run a fixture project with Codex and a cutline fixture. Verify the expected output appears in results and the inspector shows tool progress. Repeat with a missing required output and verify the run reports failure.
+- [x] Exercise denied command, out-of-workspace write and unsupported tool requests with a fake server. Verify the command never executes, the external file retains its contents and each request receives a terminal response.
+- [x] Exercise Stop during a pending question, unexpected server exit and failed sign-in. Verify the appropriate stopped or failed state, actionable feedback and cleanup before retry. Run the existing Claude assistant and production fixtures as regression checks.
 
 ## Design notes
 
@@ -109,3 +109,28 @@ The reference project at `/Users/danieljebaraj/Documents/git/Just Notes` documen
 - Implemented: Specified provider switching across open projects and run types, plus neutral Assistant terminology on both desktop platforms.
 - Not done: Desktop routing, readiness and UI verification against the new acceptance criteria.
 - Files: This feature README.md.
+
+### 2026-11-22 — Codex resolver, provider switch on revise, reverification
+
+- Implemented:
+  - **Resolver** (`codex::resolve_codex`, `resolve_with`, `CodexLookup`, `MACOS_FALLBACKS`):
+    - With an empty configured path it searches each PATH folder, then on macOS `/opt/homebrew/bin/codex` and `/usr/local/bin/codex`, including when PATH is unset.
+    - Symlinks are followed; broken links, non-files and non-executable candidates are skipped.
+    - A configured path that can't run is reported with that path and how to fix it: `CodexStatus::BadPath` → finding `codex_path_invalid` (state `bad_path` in `codex.check`), and `run::prepare::codex_problem` for runs and FFI `start_assistant`.
+    - Settings (`codex.check`), readiness, assistant turns and production runs all go through it.
+  - **A revision under the other provider:**
+    - Claude never resumes a `codex:` token; Codex already resumed only its own threads.
+    - The revision's prompt gets `PROVIDER_SWITCH_NOTE`, so the fresh session starts from `previous-summary.md` and the copied `project.json5`.
+    - This is the core part of requirement 2's last sentence; the rest of requirement 2 is desktop work.
+- Verified:
+  - `codex::tests::the_resolver_searches_path_then_the_install_folders`: PATH unset, nothing on PATH, a non-executable candidate, PATH before the install folders, the configured path before PATH, a valid symlink, a broken symlink, and bad configured paths.
+  - `video-studio-cli --test codex_ffi`: FFI `start_assistant` with Codex selected and `VIDEO_STUDIO_NO_CLAUDE=1` runs a Codex turn, and a bad configured path is reported by name.
+  - `--test codex_runs`: a production run with Claude absent.
+  - `--test e2e_tools a_revision_under_the_other_provider_starts_fresh_with_the_runs_context`: Claude run → Codex revision (`thread/start`, no `thread/resume`, the note in the prompt) → Claude revision (no `--resume`, the note in the prompt).
+  - `--test codex`, `--test codex_assistant` (7), `--test codex_runs` (2) and `--test e2e_runs` (14) pass, as do all video-studio-core, -ffi and -cli tests. That is the fake-server evidence for requirements 4, 5, 6 and 8 and acceptance criteria 2–6, so their boxes are checked again.
+- Not done or not checked:
+  - The permissions requirement and its mapping sub-box stay unchecked. Commands Codex classes as safe and read-only still skip the broker's allowlist and read limits; the owner chose to keep that, and each Codex start traces `codex_reads_unchecked`.
+  - No real Codex turns were run. The Just Notes reference isn't on this machine.
+  - The macOS Finder-launch acceptance check and every desktop acceptance check need the running apps.
+- Files: `crates/video-studio-core/src/{codex.rs,validation.rs,run/prepare.rs,run/prompt.rs}`, `crates/video-studio-ffi/src/lib.rs`, `crates/video-studio-cli/{Cargo.toml,tests/codex.rs,tests/codex_ffi.rs,tests/e2e_tools.rs}`.
+- Commit/PR: "FEAT-spry-alpaca-5RQZ: Codex resolver with macOS fallbacks, fresh session on provider switch" on branch `implement-approved-plans-2026-11-22-pass3`.

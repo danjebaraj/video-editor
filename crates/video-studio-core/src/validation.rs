@@ -1822,6 +1822,10 @@ mod tests {
         f.env = FakeEnv { claude: None, provider: crate::codex::Provider::Codex, ..FakeEnv::default() };
         for (status, rule) in [
             (crate::codex::CodexStatus::Missing, "codex_missing"),
+            (
+                crate::codex::CodexStatus::BadPath { path: "/x/codex".into(), reason: "doesn't exist".into() },
+                "codex_path_invalid",
+            ),
             (crate::codex::CodexStatus::Incompatible { detail: "x".into() }, "codex_incompatible"),
             (crate::codex::CodexStatus::SignInRequired, "codex_signed_out"),
         ] {

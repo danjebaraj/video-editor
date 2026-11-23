@@ -56,7 +56,9 @@ fn signed_out_incompatible_and_missing_are_distinct() {
     let old = check(FAKE);
     std::env::remove_var("FAKE_CODEX_OLD");
     assert!(matches!(&old, CodexStatus::Incompatible { detail } if detail.contains("initialize")), "{old:?}");
-    assert_eq!(check("/no/such/codex"), CodexStatus::Missing);
+    let bad = check("/no/such/codex");
+    assert_eq!(bad, CodexStatus::BadPath { path: "/no/such/codex".into(), reason: "doesn't exist".into() });
+    assert!(bad.finding().unwrap().1.contains("/no/such/codex"));
     for (s, rule) in [
         (CodexStatus::Missing, "codex_missing"),
         (old, "codex_incompatible"),
