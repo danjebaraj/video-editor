@@ -1348,7 +1348,10 @@ fn check_budget(c: &mut Ctx, input: &ValidateInput, est: &Estimates, outputs: us
     if est.eleven_credits > est.eleven_cap {
         c.add("budget_eleven_cap", None, Severity::Blocker, "budget", "Generated audio is over this run's ElevenLabs credit cap".into(), Some(format!("About {} credits are needed ({} characters of voice-over) and the cap is {}. Raise the cap in the run config or shorten the script.", est.eleven_credits, est.eleven_characters, est.eleven_cap)), FixLink::target("run_config", &rc.id));
     }
-    if let Some(cap) = rc.max_spend_usd.filter(|c| *c > 0.0) {
+    // Claude's prices, models and spend limit don't apply to a Codex run (BUG-rustic-olive-U4PY):
+    // the limit isn't passed to Codex and the dry run model is a Claude choice.
+    let claude = input.settings.provider == crate::codex::Provider::Claude;
+    if let Some(cap) = rc.max_spend_usd.filter(|c| *c > 0.0 && claude) {
         if est.claude_usd_low > cap {
             c.add("budget_claude_cap", None, Severity::Blocker, "budget", "The Claude spend limit is below the estimated cost".into(), Some(format!("The estimate is about ${:.2}–${:.2} (approximate) and the limit is ${cap:.2}. The run would stop before finishing.", est.claude_usd_low, est.claude_usd_high)), FixLink::target("run_config", &rc.id));
         } else if est.claude_usd_high > cap {
@@ -1367,7 +1370,13 @@ fn check_budget(c: &mut Ctx, input: &ValidateInput, est: &Estimates, outputs: us
         }
     }
     let dry = &input.project.models.dry_run_or(input.settings);
-    if rc.dry_run_first && input.models.is_cheaper(dry, &rc.production_model) == Some(false) && outputs > 0 {
+    // the comparison is about dry runs before production, not an Audio Review
+    if claude
+        && input.kind != RunKind::AudioReview
+        && rc.dry_run_first
+        && input.models.is_cheaper(dry, &rc.production_model) == Some(false)
+        && outputs > 0
+    {
         c.add(
             "dry_run_model",
             None,
@@ -2130,6 +2139,15 @@ mod tests {
         f.project.models.dry_run = "opus".into();
         f.rc().production_model = "haiku".into();
         assert!(has(&f.run(), "dry_run_model", Severity::Info));
+        // BUG-rustic-olive-U4PY: not for an Audio Review, and Claude's choices never for Codex
+        let rules_of = |r: &Report| r.issues.iter().map(|i| i.rule.clone()).collect::<Vec<_>>();
+        assert!(!rules_of(&f.run_kind(RunKind::AudioReview)).contains(&"dry_run_model".to_string()));
+        f.settings.provider = crate::codex::Provider::Codex;
+        f.rc().max_spend_usd = Some(0.0001);
+        let codex = rules_of(&f.run());
+        assert!(!codex.iter().any(|r| r == "dry_run_model" || r == "budget_claude_cap"), "{codex:?}");
+        f.settings.provider = crate::codex::Provider::Claude;
+        f.rc().max_spend_usd = Some(hi * 2.0);
         // past runs of the same model family replace the heuristic
         f.rc().production_model = "opus".into();
         for cost in [4.0, 6.0] {

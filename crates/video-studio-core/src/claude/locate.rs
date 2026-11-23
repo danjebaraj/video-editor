@@ -412,10 +412,15 @@ pub fn summarize_doctor(report: &Value) -> DoctorSummary {
         if o.get("chrome").map(Value::is_null).unwrap_or(false) {
             s.missing_optional.push("Chrome (HTML graphics)".into());
         }
-        let no_whisper = o.get("whisper_cli").map(Value::is_null).unwrap_or(false)
-            || o.get("whisper_models").and_then(Value::as_array).map(|a| a.is_empty()).unwrap_or(false);
-        if no_whisper {
-            s.missing_optional.push("whisper (captions from speech)".into());
+        // The transcription program and its model are separate: say which one is missing
+        // (BUG-rustic-olive-U4PY).
+        let no_program = o.get("whisper_cli").map(Value::is_null).unwrap_or(false);
+        let no_model = o.get("whisper_models").and_then(Value::as_array).map(|a| a.is_empty()).unwrap_or(false);
+        match (no_program, no_model) {
+            (true, true) => s.missing_optional.push("whisper program and model (captions from speech)".into()),
+            (true, false) => s.missing_optional.push("whisper program (captions from speech)".into()),
+            (false, true) => s.missing_optional.push("whisper model (captions from speech)".into()),
+            (false, false) => {}
         }
         if o.get("face_model").and_then(Value::as_bool) == Some(false) {
             s.missing_optional.push("face model (reframing)".into());
@@ -526,7 +531,23 @@ mod tests {
         let s = summarize_doctor(&report);
         assert!(!s.ok);
         assert_eq!(s.missing_required, vec!["filter lut3d"]);
-        assert_eq!(s.missing_optional, vec!["Chrome (HTML graphics)", "whisper (captions from speech)"]);
+        assert_eq!(s.missing_optional, vec!["Chrome (HTML graphics)", "whisper model (captions from speech)"]);
+        // a model file without the program is the program missing, not whisper as a whole
+        let program_only = |cli: Value, models: Value| {
+            summarize_doctor(&serde_json::json!({"ok": true, "capabilities": [], "chrome": "/x", "whisper_cli": cli, "whisper_models": models})).missing_optional
+        };
+        assert_eq!(
+            program_only(Value::Null, serde_json::json!(["ggml-base.en.bin"])),
+            vec!["whisper program (captions from speech)"]
+        );
+        assert_eq!(
+            program_only(serde_json::json!("/bin/whisper-cli"), serde_json::json!(["ggml-base.en.bin"])),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            program_only(Value::Null, serde_json::json!([])),
+            vec!["whisper program and model (captions from speech)"]
+        );
         assert!(summarize_doctor(&serde_json::json!({"ok": true, "capabilities": [], "chrome": "/x"})).ok);
         assert!(!summarize_doctor(&serde_json::json!({"ok": false, "capabilities": []})).ok);
     }

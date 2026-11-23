@@ -199,7 +199,7 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
                     }
                 }
                 match sub? {
-                    "validate" | "expand" | "cues" | "beats" | "schema" => s("validate", "Validate"),
+                    "validate" | "expand" | "cues" | "beats" => s("validate", "Validate"),
                     "review" | "preview" => s("review", "Review"),
                     "render" | "thumbnail" | "chapters" => {
                         let export = args.iter().position(|a| *a == "--export").and_then(|i| args.get(i + 1));
@@ -211,9 +211,9 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
                     "qa" => s("qa", "QA"),
                     // Audio Review: the soundtrack is mixed without a picture (FEAT-neat-osprey-DKK7)
                     "audio" => s("mix", "Mix"),
-                    "transcribe" | "probe" | "record" | "init" | "templates" | "guide" | "doctor" => {
-                        s("authoring", "Authoring")
-                    }
+                    "transcribe" | "probe" | "record" | "init" => s("authoring", "Authoring"),
+                    // schema, help, doctor, guide: looking things up moves no stage forward
+                    // (BUG-rustic-olive-U4PY)
                     _ => None,
                 }
             } else if args.first() == Some(&"capture") {
@@ -237,6 +237,12 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
 }
 
 /// A fraction from a cutline progress line: `segment 3/12`, `frame 120/900`, or `45%`.
+/// cutline commands that only look things up (BUG-rustic-olive-U4PY): their success says nothing
+/// about the project, so they neither start a stage nor complete one.
+pub fn is_informational(sub: &str) -> bool {
+    matches!(sub, "schema" | "help" | "doctor" | "guide" | "templates" | "version" | "--help" | "-h" | "--version")
+}
+
 pub fn progress_fraction(line: &str) -> Option<f64> {
     let bytes = line.as_bytes();
     let mut i = 0;
