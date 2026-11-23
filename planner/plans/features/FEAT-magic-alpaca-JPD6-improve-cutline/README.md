@@ -4,8 +4,7 @@ type: feature
 title: Review cutline capabilities for professional video production
 status: done
 implementation: done
-approved: yes
-approved-on: 2026-11-21
+approved: no
 priority: medium
 created: 2026-11-21
 updated: 2026-11-22

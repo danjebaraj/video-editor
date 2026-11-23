@@ -3,7 +3,7 @@ id: FEAT-humble-parrot-M68S
 type: feature
 title: Transcription section scroll
 status: partial
-implementation: partial
+implementation: done
 approved: no
 priority: medium
 created: 2026-11-21
