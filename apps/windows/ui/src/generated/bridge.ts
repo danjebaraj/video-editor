@@ -26,7 +26,7 @@ topic: Topic
  * This interface was referenced by `Bridge`'s JSON-Schema
  * via the `definition` "Topic".
  */
-export type Topic = ("run" | "assistant" | "menu" | "theme" | "file_changed" | "open_files" | "close_requested" | "self_test")
+export type Topic = ("run" | "assistant" | "menu" | "theme" | "file_changed" | "open_files" | "close_requested" | "self_test" | "settings_changed")
 /**
  * This interface was referenced by `Bridge`'s JSON-Schema
  * via the `definition` "WindowKind".

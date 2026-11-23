@@ -61,6 +61,9 @@ final class RunController: ObservableObject {
     @Published private(set) var startedAt: Date?
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var claudeUSD: Double?
+    /// The provider the live run started with; a later switch in Settings doesn't change it.
+    @Published private(set) var runProvider = "claude"
+    var runProviderName: String { runProvider == "codex" ? "Codex" : "Claude Code" }
     @Published private(set) var costIsEstimate = true
     @Published private(set) var inputTokens: UInt64 = 0
     @Published private(set) var outputTokens: UInt64 = 0
@@ -186,7 +189,9 @@ final class RunController: ObservableObject {
             "assume_answers": false,
             "validation": Core.arg(plan.report),
         ]
-        if kind != "dry_run", plan.model != plan.runConfig.production_model { request["model"] = plan.model }
+        // The provider is read from Settings as the run starts; a Claude model isn't sent to Codex.
+        let provider = AppState.shared.provider
+        if kind != "dry_run", provider == "claude", plan.model != plan.runConfig.production_model { request["model"] = plan.model }
         if let r = plan.revise, kind != "dry_run" { request["revise"] = ["previous_run": r.runID, "feedback": r.feedback] }
         if kind == "audio_review", let o = plan.audioOutput { request["audio_output"] = o }
         if let t = plan.runConfig.question_timeout_s, t > 0 { request["question_timeout_s"] = t }
@@ -197,6 +202,7 @@ final class RunController: ObservableObject {
         let forwarder = EventForwarder { [weak self] line in self?.handle(line) }
 
         reset(kind: kind, cap: plan.runConfig.eleven_credit_cap)
+        runProvider = provider
         statusLine = kind == "dry_run" ? "Starting the dry run…" : kind == "audio_review" ? "Starting the Audio Review…" : "Starting…"
         isRunning = true
         AppState.shared.activeRuns.insert(document.project.id)
@@ -304,7 +310,7 @@ final class RunController: ObservableObject {
             question = PendingRunQuestion(id: id, questions: e.questions ?? [], timeout: e.timeout_s)
             statusLine = "Waiting for your answer"
             document.inspectorTab = .run
-            notify(title: "Claude has a question", body: (e.questions ?? []).first?.question ?? "The run is waiting for an answer.")
+            notify(title: "The Assistant has a question", body: (e.questions ?? []).first?.question ?? "The run is waiting for an answer.")
             NSApp.dockTile.badgeLabel = "?"
         case "question_answered":
             if question?.id == e.id { question = nil }

@@ -1,6 +1,6 @@
 # Syncfusion Video Studio: User Guide
 
-Video Studio turns a written description of a video into finished, platform-ready videos. You write the video as a Markdown **spec**, improve it with Claude, attach your footage, pick a brand and the platforms you want, and press **Run**. Claude Code then plans the edit, generates the voice-over and music, records apps if the spec asks for it, and has cutline render and check every output.
+Video Studio turns a written description of a video into finished, platform-ready videos. You write the video as a Markdown **spec**, improve it with the **Assistant**, attach your footage, pick a brand and the platforms you want, and press **Run**. The Assistant then plans the edit, generates the voice-over and music, records apps if the spec asks for it, and has cutline render and check every output.
 
 This guide covers the macOS app. Building it, signing it and the command-line tool are in [README.md](README.md).
 
@@ -11,7 +11,7 @@ This guide covers the macOS app. Building it, signing it and the command-line to
 3. [Creating and opening projects](#3-creating-and-opening-projects)
 4. [The project window](#4-the-project-window)
 5. [Writing the spec](#5-writing-the-spec)
-6. [Working with Claude](#6-working-with-claude)
+6. [Working with the Assistant](#6-working-with-the-assistant)
 7. [Media](#7-media)
 8. [Brand presets](#8-brand-presets)
 9. [Outputs and run configs](#9-outputs-and-run-configs)
@@ -32,7 +32,7 @@ This guide covers the macOS app. Building it, signing it and the command-line to
 
 | You need | Why | How |
 |---|---|---|
-| **Claude Code** 2.1.0 or later, signed in | Claude writes the edit and drives the run | Install it, then run `claude` in Terminal once and sign in. The app never asks for your Anthropic credentials. |
+| **Claude Code** 2.1.0 or later, signed in, **or Codex** | The Assistant writes the edit and drives the run, using the provider chosen in Settings › Assistant (Claude Code by default) | Claude Code: install it, then run `claude` in Terminal once and sign in. Codex: install the Codex CLI and run `codex login`. The app never asks for your Anthropic or OpenAI credentials. |
 | **cutline** with its tools | Renders and checks the videos | Install cutline, then `cutline deps install --all` (ffmpeg, models, Chrome for HTML graphics), or click **Install Dependencies** in the app |
 | **ElevenLabs API key** (optional) | Generated voice-over, music, sound effects, word timings | Settings › ElevenLabs › *Paste a new key* |
 | **Cartesia API key** (optional) | Only if Cartesia should speak the voice-over | Settings › ElevenLabs › *Voice-over by: Cartesia* |
@@ -50,7 +50,7 @@ This walkthrough takes a project from empty to finished videos. The example is a
 ```mermaid
 flowchart LR
     A[New project] --> B[Write the spec]
-    B --> C[Improve it with Claude]
+    B --> C[Improve it with the Assistant]
     C --> D[Attach media]
     D --> E[Choose brand and outputs]
     E --> F[Validate ⇧⌘V]
@@ -62,7 +62,7 @@ flowchart LR
 
 ### Step 1: Check the setup
 
-Open Video Studio. In the Welcome window, every row under **Setup** should have a green tick: Claude Code, cutline and, if you want generated voice-over, your ElevenLabs key. Fix any row that isn't green with the link beside it. [Before you start](#1-before-you-start) explains each one.
+Open Video Studio. In the Welcome window, every row under **Setup** should have a green tick: the Assistant's provider (Claude Code, or Codex if you chose it in Settings › Assistant), cutline and, if you want generated voice-over, your ElevenLabs key. Fix any row that isn't green with the link beside it. [Before you start](#1-before-you-start) explains each one.
 
 ### Step 2: Create the project
 
@@ -74,7 +74,7 @@ Choose **New Project…** (⌘N). Name the project, pick the **intent** that mat
 
 The project opens with a template for its intent. Replace the placeholders with your own scenes: how long each one lasts, what is on screen, and what the narrator says. The outline on the left lists the scenes, and the status bar at the bottom warns about problems as you type.
 
-![The project window: the outline on the left, the spec in the middle and the Claude panel on the right](images/project-window.png)
+![The project window: the outline on the left, the spec in the middle and the Assistant panel on the right](images/project-window.png)
 
 To add a scene, a voice-over, a shot or a music brief, type **/** on an empty line and choose from the list, instead of typing the structure by hand.
 
@@ -82,9 +82,9 @@ To add a scene, a voice-over, a shot or a music brief, type **/** on an empty li
 
 More in [Writing the spec](#5-writing-the-spec).
 
-### Step 4: Improve it with Claude
+### Step 4: Improve it with the Assistant
 
-Open the **Claude** tab and say what you want in plain words, for example "Make the hook shorter and punchier." Claude may ask a question first:
+Open the **Assistant** tab and say what you want in plain words, for example "Make the hook shorter and punchier." The Assistant may ask a question first:
 
 ![Claude asks how long the hook should be, with the answer chosen](images/claude-question.png)
 
@@ -92,7 +92,7 @@ Then it proposes changes. Nothing in your spec changes until you accept it:
 
 ![Claude's changes shown as before and after, each with Accept and Reject](images/claude-review.png)
 
-Choose **Accept All**, or accept and reject each change and then choose **Done**. More in [Working with Claude](#6-working-with-claude).
+Choose **Accept All**, or accept and reject each change and then choose **Done**. More in [Working with the Assistant](#6-working-with-the-assistant).
 
 ### Step 5: Add your media
 
@@ -112,7 +112,7 @@ More in [Brand presets](#8-brand-presets) and [Outputs and run configs](#9-outpu
 
 ### Step 7: Validate
 
-Press **Validate** (⇧⌘V). It checks the spec, the media, the brand and the outputs without calling any model, so it costs nothing. Fix the **blockers** first: each finding links to where it can be fixed, or choose **Ask Claude to Fix**.
+Press **Validate** (⇧⌘V). It checks the spec, the media, the brand and the outputs without calling any model, so it costs nothing. Fix the **blockers** first: each finding links to where it can be fixed, or choose **Ask Assistant to Fix**.
 
 ![The Validation tab: one blocker, three warnings and the cost estimate](images/validation.png)
 
@@ -126,7 +126,7 @@ While the run works, the **Run** tab shows each stage and the cost so far.
 
 ![A run in progress: the stages, the cost and what Claude is doing](images/run-live.png)
 
-If Claude needs a decision, a question card appears. Answer it, or the run waits.
+If the Assistant needs a decision, a question card appears. Answer it, or the run waits.
 
 ![Claude asks, during the run, whether the music should play under the whole video](images/run-question.png)
 
@@ -138,7 +138,7 @@ When the run ends, the **Run** tab shows each video with its QA verdict. Play it
 
 ![The finished run: the YouTube Shorts video with a QA pass](images/run-results.png)
 
-Not quite right? Choose **Revise…**, say what to change ("make the intro shorter"), and Claude continues from that run. More in [Results, revisions and logs](#13-results-revisions-and-logs).
+Not quite right? Choose **Revise…**, say what to change ("make the intro shorter"), and the Assistant continues from that run. More in [Results, revisions and logs](#13-results-revisions-and-logs).
 
 ### Where to go next
 
@@ -175,7 +175,7 @@ The **New Project** sheet asks for:
 
 ## 4. The project window
 
-![The project window: the sidebar (Outline, Media, Runs), the spec editor and the inspector (Claude, Project, Outputs, Validation, Run)](images/project-window.png)
+![The project window: the sidebar (Outline, Media, Runs), the spec editor and the inspector (Assistant, Project, Outputs, Validation, Run)](images/project-window.png)
 
 Switch the sidebar with ⌃⌘1, ⌃⌘2 and ⌃⌘3, and the inspector with ⌥⌘1 to ⌥⌘5.
 
@@ -192,7 +192,7 @@ Switch the sidebar with ⌃⌘1, ⌃⌘2 and ⌃⌘3, and the inspector with ⌥
 - **Media** lists the project's files (see [Media](#7-media)).
 - **Runs** lists past runs, newest first (see [Results](#13-results-revisions-and-logs)).
 
-**Inspector tab badges:** Validation shows a red dot for blockers or an orange dot for warnings. Run shows a dot while Claude is waiting for an answer. Claude shows a dot while changes are waiting for review.
+**Inspector tab badges:** Validation shows a red dot for blockers or an orange dot for warnings. Run shows a dot while the Assistant is waiting for an answer. Assistant shows a dot while changes are waiting for review.
 
 **Status bar:** *N spec notes* lists live problems in the spec, and clicking one jumps to its line. It also shows the word count and estimated spoken length (at the reading speed in Settings › General), and the cursor position.
 
@@ -278,9 +278,9 @@ As you type, the app checks the spec and lists problems in the status bar and th
 
 ![The preview: the spec as the video's plan, with media as cards and the voice-over styled](images/preview.png)
 
-### Islands: named regions for Claude
+### Islands: named regions for the Assistant
 
-An island marks part of the spec with a name, so you can point Claude at it:
+An island marks part of the spec with a name, so you can point the Assistant at it:
 
 ```markdown
 <!-- island: hook -->
@@ -290,20 +290,20 @@ An island marks part of the spec with a name, so you can point Claude at it:
 ```
 
 - Select lines, then use **Format › Insert Island** or right-click › *Wrap in Island*.
-- Mention `@hook` in a message to Claude to mean that region. Right-click an island for *Ask Claude…*, *Copy Reference*, *Rename*, *Unwrap* or *Delete*.
+- Mention `@hook` in a message to the Assistant to mean that region. Right-click an island for *Ask Assistant…*, *Copy Reference*, *Rename*, *Unwrap* or *Delete*.
 - Names use lowercase letters, digits and dashes. Islands can't be nested. When markers are broken, the app offers quick fixes.
 
 ---
 
-## 6. Working with Claude
+## 6. Working with the Assistant
 
-The **Claude** tab (⌥⌘1) is a chat with a spec assistant. Claude works on a copy of the spec, and each change comes back to you for approval. It can read your attached media notes and ask you questions.
+The **Assistant** tab (⌥⌘1) is a chat with a spec assistant. It is driven by the provider chosen in Settings › Assistant, Claude Code or Codex. The Assistant works on a copy of the spec, and each change comes back to you for approval. It can read your attached media notes and ask you questions.
 
 ### Starting points
 
 On an empty chat you'll see three suggestions:
 
-- **Gather missing info** (⌃⌘G). Claude reads the spec, interviews you a few questions at a time about what's missing (audience, length, key message…), then writes the answers in.
+- **Gather missing info** (⌃⌘G). The Assistant reads the spec, interviews you a few questions at a time about what's missing (audience, length, key message…), then writes the answers in.
 - **Tighten the script to the target length.**
 - **Check the spec against the attached media.**
 
@@ -312,13 +312,13 @@ On an empty chat you'll see three suggestions:
 - Type a request and press **⌘Return** to send. Return adds a new line.
 - **Selection, lines a–b**, when ticked, sends the text you've selected along as context.
 - **Validation findings (N)**, when ticked (the default), sends what validation found, so you can just say "fix these".
-- **Folders** adds read-only reference folders Claude may read, such as product docs or an earlier script.
-- **Web** lets Claude search and read the web for this conversation.
-- Other ways to start a conversation: right-click › *Ask Claude About Selection…*, an island's *Ask Claude…*, or **Ask Claude to Fix** in the Validation tab.
+- **Folders** adds read-only reference folders the Assistant may read, such as product docs or an earlier script.
+- **Web** lets the Assistant search and read the web for this conversation.
+- Other ways to start a conversation: right-click › *Ask Assistant About Selection…*, an island's *Ask Assistant…*, or **Ask Assistant to Fix** in the Validation tab.
 
-### Reviewing Claude's changes
+### Reviewing the Assistant's changes
 
-When Claude edits the spec, the editor switches to a review titled **"Claude changed the spec"**:
+When the Assistant edits the spec, the editor switches to a review titled **"The Assistant changed the spec"**:
 
 - Each change is a card showing removed and added lines, with **Accept** and **Reject**.
 - **Accept All**, **Reject All** and **Done** decide everything at once. *Done* keeps what you accepted and the original text for the rest.
@@ -327,16 +327,16 @@ When Claude edits the spec, the editor switches to a review titled **"Claude cha
 
 ![Reviewing Claude's changes: each one shown as before and after, with Accept and Reject](images/claude-review.png)
 
-### Questions from Claude
+### Questions from the Assistant
 
-When Claude needs a decision, a **"Claude has a question"** card appears. Pick an option or type your own answer in *Something else…*, then **Answer**, or **Skip** to let Claude use its judgment.
+When the Assistant needs a decision, a **"The Assistant has a question"** card appears. Pick an option or type your own answer in *Something else…*, then **Answer**, or **Skip** to let the Assistant use its judgment.
 
 ![A question from Claude, answered: the card shows the question and the chosen option](images/claude-question.png)
 
 ### Sessions and models
 
 - The menu at the top of the panel switches between conversations, starts a **New Session** (⇧⌘N), and renames or deletes them.
-- The assistant's model is set in **Project › Models › Spec assistant**. The default comes from Settings › Claude and is Sonnet.
+- The assistant's model is set in **Project › Models › Spec assistant**. The default comes from Settings › Claude and is Sonnet. With Codex selected, the Assistant uses the Codex model in Settings › Assistant.
 - To see each reply's token usage and cost, turn on Settings › Claude › *Show token usage and cost after each assistant reply*.
 
 ---
@@ -360,7 +360,7 @@ Media is **used by reference**: files stay where they are and nothing is copied 
 - Right-click a row for *Insert in Spec*, *Copy Reference*, *Reveal in Finder*, *Quick Look*, *Relink…*, *Accept Changed File* or *Remove from Project*.
 - Selecting a file shows its detail pane:
   - **Role:** Footage, B-roll, Screen recording, Logo, Music, Sound effect, Voice or Reference. It's guessed from the file name; correct it if needed.
-  - **Notes for Claude:** for example, "the first 10 s are a loading screen, skip them".
+  - **Notes for Assistant:** for example, "the first 10 s are a loading screen, skip them".
   - **Tags.**
 
 ![The Media sidebar, with a clip selected and its role, notes and file location below](images/media.png)
@@ -452,14 +452,14 @@ A **run config** is a named recipe for a run: which outputs, which model, and wh
   - **Model** (default Opus) and **Effort**.
   - **Quality:** *Final*, or *Draft* for faster, lighter renders.
   - **Dry run first:** on by default.
-  - **Allow web access:** lets Claude search the web during the run.
+  - **Allow web access:** lets the Assistant search the web during the run.
   - **Languages.**
 - **Output folder:** where run folders go. The default is `~/Movies/Syncfusion Video Studio`. Each run writes a new `date-time-<config>` folder inside it.
 - **Limits:**
   - **ElevenLabs credit cap:** default 20,000 per run.
-  - **Claude spend limit** in $: the run stops if it's reached.
-  - **Turn limit:** the maximum number of Claude turns.
-  - **Question timeout:** how long to wait for your answer before Claude carries on with its stated assumption. Empty means wait.
+  - **Assistant spend limit** in $: the run stops if it's reached.
+  - **Turn limit:** the maximum number of Assistant turns.
+  - **Question timeout:** how long to wait for your answer before the Assistant carries on with its stated assumption. Empty means wait.
 
 New run configs take their model, credit cap, quality and web access from Settings.
 
@@ -499,7 +499,7 @@ The **Project** tab (⌥⌘2) holds everything about this video that isn't the s
 The **Validation** tab (⌥⌘4) groups findings:
 
 - **Blockers** (red) must be fixed before a run. For example:
-  - Claude Code or cutline missing or signed out.
+  - The selected provider (Claude Code or Codex) or cutline missing or signed out.
   - No ElevenLabs key when the spec needs generated audio.
   - Not enough credits.
   - Missing or unreadable media.
@@ -509,7 +509,7 @@ The **Validation** tab (⌥⌘4) groups findings:
   - No outputs selected.
   - A target length outside a platform's limits.
   - An output folder that can't be written, or not enough disk space.
-  - An estimate over the run's ElevenLabs cap, or the run's minimum cost over its Claude spend limit.
+  - An estimate over the run's ElevenLabs cap, or the run's minimum cost over its Assistant spend limit.
 - **Warnings** (orange) can be accepted. For example:
   - Changed or low-resolution media.
   - Narration too long.
@@ -532,9 +532,9 @@ The **Validation** tab (⌥⌘4) groups findings:
 
 Each finding has a link to where it's fixed (*Line N →*, *Media →*, *Brand →*, *Outputs →*, *Project →*, *Settings →*) or a one-click fix such as *Allow Screen Recording…* or *Update to Latest*. On warnings, tick **Acknowledge** to accept them for the next run.
 
-**Ask Claude to Fix** opens the Claude tab with a request covering all findings, which you can edit before sending. The ✨ button on a single finding does the same for that one.
+**Ask Assistant to Fix** opens the Assistant tab with a request covering all findings, which you can edit before sending. The ✨ button on a single finding does the same for that one.
 
-The **Estimates** box shows the approximate Claude cost range, the ElevenLabs credits against the cap, the disk space needed, and the planned length. Once a project has runs of the same kind and model, the estimate is based on what they cost.
+The **Estimates** box shows the approximate Assistant cost range, the ElevenLabs credits against the cap, the disk space needed, and the planned length. Once a project has runs of the same kind and model, the estimate is based on what they cost.
 
 ---
 
@@ -547,7 +547,7 @@ Press **Run** (⌘R). The app validates, and if there are blockers it shows them
 - the outputs and their sizes;
 - the **model**, which you can change for this run only;
 - the quality;
-- the **estimated cost** (Claude dollars, ElevenLabs credits against the cap);
+- the **estimated cost** (Assistant dollars, ElevenLabs credits against the cap);
 - the output folder;
 - **Do a dry run first**;
 - any warnings that will be accepted.
@@ -568,7 +568,7 @@ A dry run uses a cheaper model (Haiku by default) to plan the whole edit without
   - *Assumptions the dry run made*;
   - what's *Made during the production run (nothing to do)*.
 
-  Choose **Ask Claude to Fix the Spec**, **Stop Here**, or **Run Anyway**.
+  Choose **Ask Assistant to Fix the Spec**, **Stop Here**, or **Run Anyway**.
 - You can run a dry run on its own from Project › Dry Run (⌥⌘R) or the Validation tab's ⋯ menu › *Dry Run…*.
 
 ### While it runs
@@ -578,15 +578,17 @@ A dry run uses a cheaper model (Haiku by default) to plan the whole edit without
 The **Run** tab (⌥⌘5) shows:
 
 - **Stages:** Prepare → Audio → Recording → Authoring → Validate → Review → Render → QA → Done, each with progress.
-- **Cost:** Claude's cost so far, and ElevenLabs credits used against the cap.
-- **Warnings** as they arise, and a **Transcript** of what Claude is doing. Failed steps show in orange; Claude usually retries them.
+- **Cost:** the cost so far, labelled with the provider the run started with (Claude Code or Codex), and ElevenLabs credits used against the cap.
+- **Warnings** as they arise, and a **Transcript** of what the Assistant is doing. Failed steps show in orange; the Assistant usually retries them.
 - **Reveal Folder** and **Stop**.
 
-**Questions.** When Claude needs a decision mid-run, a **"Claude has a question"** card appears in the Run tab. The app also sends a notification and puts a badge on the Dock icon. Choose or type an answer and press **Answer**. If the run config has a question timeout, Claude proceeds on its stated assumption once the timeout passes.
+**Questions.** When the Assistant needs a decision mid-run, a **"The Assistant has a question"** card appears in the Run tab. The app also sends a notification and puts a badge on the Dock icon. Choose or type an answer and press **Answer**. If the run config has a question timeout, the Assistant proceeds on its stated assumption once the timeout passes.
 
 ![A question from Claude during a run, with its options](images/run-question.png)
 
-**Stopping.** **Stop** (⌘.) interrupts Claude, then after 5 seconds stops everything it started. Partial outputs and logs are kept. A run also ends if it reaches its Claude spend limit or turn limit.
+**Stopping.** **Stop** (⌘.) interrupts the Assistant, then after 5 seconds stops everything it started. Partial outputs and logs are kept. A run also ends if it reaches its Assistant spend limit or turn limit.
+
+**Switching providers.** A run keeps the provider it started with: changing Settings › Assistant during a run doesn't affect its questions, Stop or result. The next run uses the new choice.
 
 **Several runs.** One project runs one thing at a time. Runs of different projects can go side by side, up to Settings › General › *Runs at the same time*.
 
@@ -609,7 +611,7 @@ Buttons at the bottom:
 
 - **Reveal** opens the run folder.
 - **Re-run** runs the same config again.
-- **Revise…** sends feedback such as "make the intro shorter, use a calmer voice". Claude continues from that run's own session and writes a new run folder linked to the old one. This works for production runs only.
+- **Revise…** sends feedback such as "make the intro shorter, use a calmer voice". The Assistant continues from that run and writes a new run folder linked to the old one. This works for production runs only.
 
 ### The Runs sidebar
 
@@ -650,7 +652,7 @@ During the run, Claude opens the app, looks at screenshots, and clicks, types an
 
 **To set it up:**
 
-1. In **Project › App recording**, turn on *Let Claude drive and record apps* (it's on by default). Optionally list the allowed apps in **Apps**.
+1. In **Project › App recording**, turn on *Let the Assistant drive and record apps* (it's on by default). Optionally list the allowed apps in **Apps**.
    - With no list, any app may be driven except terminals, System Settings, password managers and Finder.
 2. Allow **Screen & System Audio Recording** and **Accessibility** for Syncfusion Video Studio in System Settings › Privacy & Security. The Project tab shows both with an *Allow…* link.
    - A signed app keeps these permissions across updates. An ad-hoc-signed build needs them granted again after each rebuild.
@@ -748,6 +750,15 @@ How every video is finished. A project follows these unless Project › Finish i
 | After the last word | 2 s | Hold at the end |
 | Music fades in over / out over | 1 s / 2 s | |
 
+### Assistant
+
+Chooses who drives the Assistant and runs in every open project: **Claude Code** (the default) or **Codex**. Open project windows follow the change at once: their setup messages, enabled buttons and readiness checks switch to the new provider. Work already under way keeps the provider it started with, and run history shows the provider each run used.
+
+- **Codex** status: *Re-check* runs the same check every window uses. When Codex isn't ready, the message names the executable it looked for and what to do.
+- **Codex path:** blank looks for `codex` on PATH.
+- **Model:** the Codex model, or *Codex default*. Claude's model choices stay in Settings › Claude.
+- Sign-in is handled by the Codex CLI (`codex login`).
+
 ### Claude
 
 ![Settings, Claude](images/settings-claude.png)
@@ -823,11 +834,11 @@ How every video is finished. A project follows these unless Project › Finish i
 | Open | ⌘O | Dry Run | ⌥⌘R |
 | Save / Save As | ⌘S / ⇧⌘S | Run / Stop | ⌘R / ⌘. |
 | Add Media | ⇧⌘I | Gather Missing Info | ⌃⌘G |
-| Export Spec | ⇧⌘E | New Claude Session | ⇧⌘N |
-| Settings | ⌘, | Send to Claude | ⌘Return |
+| Export Spec | ⇧⌘E | New Assistant Session | ⇧⌘N |
+| Settings | ⌘, | Send to Assistant | ⌘Return |
 | App Library | ⇧⌘L | Source / Preview | ⌘/ |
 | Bold / Italic | ⌘B / ⌘I | Outline / Media / Runs | ⌃⌘1 / 2 / 3 |
-| Strikethrough | ⇧⌘X | Claude / Project / Outputs | ⌥⌘1 / 2 / 3 |
+| Strikethrough | ⇧⌘X | Assistant / Project / Outputs | ⌥⌘1 / 2 / 3 |
 | Inline Code / Link | ⌘E / ⌘K | Validation / Run | ⌥⌘4 / 5 |
 | Heading 1–6 / Paragraph | ⌘1–⌘6 / ⌘0 | Find / Replace | ⌘F / ⌥⌘F |
 | Numbered / Bulleted / Task list | ⇧⌘7 / 8 / 9 | Find Next / Previous | ⌘G / ⇧⌘G |
@@ -878,6 +889,6 @@ The `video-studio` command-line tool reads the same settings and projects; see [
 | The voice-over is too long for a scene | Ask Claude to *Tighten the script to the target length*, or lengthen the scene's Duration |
 | App recording fails, or nothing is recorded | Check the Project tab's permission rows; allow Screen Recording and Accessibility, then *Re-check* |
 | You must allow permissions again after every build | The app is ad-hoc signed. Sign it with your certificate (README › Signing). |
-| "The run reached its Claude spend limit" | Raise *Claude spend limit* in Outputs › Limits, or use Draft quality or a cheaper model |
+| "The run reached its Claude spend limit" | Raise *Assistant spend limit* in Outputs › Limits, or use Draft quality or a cheaper model |
 | The run stops at a question | Answer it in the Run tab, or set a *Question timeout* in the run config |
 | Something went wrong and you need help | **Export Logs…** (with placeholders ticked) and send the zip, or paste **Copy Issue Report** into an issue |

@@ -135,8 +135,9 @@ struct GeneralSettings: View {
 /// Code or Codex, and for Codex its executable and model. Claude's models stay in Settings › Claude.
 struct AssistantSettings: View {
     @ObservedObject private var app = AppState.shared
-    @State private var codex: CodexStatus?
-    @State private var checking = false
+    // The shared readiness every project window follows (FEAT-spry-alpaca-5RQZ).
+    private var codex: CodexStatus? { app.codexStatus }
+    private var checking: Bool { app.isCheckingCodex }
 
     var body: some View {
         Form {
@@ -147,7 +148,7 @@ struct AssistantSettings: View {
                 }
                 .pickerStyle(.radioGroup)
                 .accessibilityLabel("Provider")
-                Text("Used by the spec assistant and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.")
+                Text("Used by the Assistant in every open project and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if app.settings.provider == "codex" {
@@ -186,20 +187,16 @@ struct AssistantSettings: View {
                     .help("The models come from Codex once it is ready. Claude's model choices are kept separately in Settings › Claude.")
                     Text("Sign-in is handled by the Codex CLI (`codex login`). The app never asks for or stores OpenAI credentials.").font(.caption).foregroundStyle(.secondary)
                 }
-                .task { if codex == nil { check() } }
+                .task { if codex == nil && !checking { check() } }
             }
         }
         .textFieldStyle(.roundedBorder)
     }
 
     private func check() {
-        guard !checking else { return }
-        checking = true
-        let path = app.settings.codex_path
-        Task {
-            codex = try? await Core.async("codex.check", ["path": path])
-            checking = false
-        }
+        // Saved first: assistant turns and runs read the path from settings.json.
+        app.saveSettings()
+        app.checkCodex()
     }
 }
 
@@ -406,7 +403,7 @@ struct ElevenSettings: View {
                         .accessibilityLabel("Save the Cartesia key")
                     }
                     TextField("Cartesia voice ID", text: $app.settings.cartesia_default_voice, prompt: Text("Used when a brand preset has no Cartesia voice"))
-                    Text("Cartesia speaks the narration. ElevenLabs voice IDs don't apply to it: give the brand preset a Cartesia voice ID, set one here, or leave both empty and Claude chooses one by the preferences below. Music, sound effects and word timings still use the ElevenLabs key.")
+                    Text("Cartesia speaks the narration. ElevenLabs voice IDs don't apply to it: give the brand preset a Cartesia voice ID, set one here, or leave both empty and the Assistant chooses one by the preferences below. Music, sound effects and word timings still use the ElevenLabs key.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -456,7 +453,7 @@ struct ElevenSettings: View {
                     }
                     .disabled(newKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                Text("The key is stored in the Keychain and read only by the app's helper during a run. It is never shown in full, never logged, and never given to Claude.")
+                Text("The key is stored in the Keychain and read only by the app's helper during a run. It is never shown in full, never logged, and never given to the Assistant.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("Defaults") {
@@ -465,7 +462,7 @@ struct ElevenSettings: View {
                     Text("Prefer tried voices").tag("tried")
                     Text("Prefer latest voices").tag("latest")
                 }
-                .help("Used when neither the brand preset nor the default voice ID above names a voice, so Claude has to choose one. Tried voices: the ones earlier videos used come first, then the longest-standing voices in your ElevenLabs account. Latest voices: the most recently added ones come first.")
+                .help("Used when neither the brand preset nor the default voice ID above names a voice, so the Assistant has to choose one. Tried voices: the ones earlier videos used come first, then the longest-standing voices in your ElevenLabs account. Latest voices: the most recently added ones come first.")
                 Picker("Voice gender", selection: $app.settings.eleven_voice_gender) {
                     Text("Any").tag("any")
                     Text("Female").tag("female")

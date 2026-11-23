@@ -7,7 +7,9 @@ import Combine
 final class AppState: ObservableObject {
     static let shared = AppState()
 
-    @Published var settings = CoreSettings()
+    @Published var settings = CoreSettings() {
+        didSet { if oldValue.provider != settings.provider { providerChanged() } }
+    }
     @Published private(set) var environment: CoreEnvironment?
     @Published private(set) var isDetecting = false
     @Published private(set) var models = ModelList()
@@ -22,6 +24,12 @@ final class AppState: ObservableObject {
     @Published private(set) var knownRunFolders: [String] = []
 
     private var lastDetect = Date.distantPast
+    /// Codex's readiness from `codex.check`, when Codex is the provider (FEAT-spry-alpaca-5RQZ).
+    @Published private(set) var codexStatus: CodexStatus?
+    @Published private(set) var isCheckingCodex = false
+    /// Bumped by every provider switch and Codex check: a late answer from an older check is
+    /// dropped instead of overwriting the readiness of the provider selected now.
+    private var readinessGeneration = 0
 
     private init() {
         setFileRefsProvider(provider: BookmarkRefs())
@@ -31,6 +39,62 @@ final class AppState: ObservableObject {
 
     var claudeAvailable: Bool { environment?.claude?.supported == true }
     var claudeMissing: Bool { environment != nil && environment?.claude == nil }
+
+    // MARK: The selected provider (Settings › Assistant, FEAT-spry-alpaca-5RQZ)
+
+    /// The provider new assistant turns and runs start with. Every window reads this one setting;
+    /// the core reads it again from settings.json when a turn or run starts.
+    var provider: String { settings.provider == "codex" ? "codex" : "claude" }
+    var usesCodex: Bool { provider == "codex" }
+    /// The provider's product name, for provider-specific setup and diagnostics only.
+    var providerName: String { usesCodex ? "Codex" : "Claude Code" }
+    /// The executable the selected provider is looked for as: the configured path, else its name on PATH.
+    var providerExecutable: String {
+        let configured = (usesCodex ? settings.codex_path : settings.claude_path).trimmingCharacters(in: .whitespaces)
+        return configured.isEmpty ? (usesCodex ? "codex" : "claude") : configured
+    }
+    /// Whether the selected provider can start assistant turns and runs now.
+    var assistantAvailable: Bool { usesCodex ? codexStatus?.ready == true : claudeAvailable }
+    /// The selected provider was checked and its executable isn't there (the setup overlay).
+    var assistantMissing: Bool { usesCodex ? codexStatus?.state == "missing" : claudeMissing }
+    /// Whether the selected provider's check has answered.
+    var assistantChecked: Bool { usesCodex ? codexStatus != nil : environment != nil }
+    /// Why the selected provider can't be used, naming its executable, and what to do.
+    var assistantSetupProblem: (title: String, detail: String) {
+        if usesCodex {
+            if isCheckingCodex && codexStatus == nil { return ("Checking Codex…", "Looking for \(providerExecutable).") }
+            let f = codexStatus?.finding
+            return (f?.title ?? "Codex isn't ready", "Looked for \(providerExecutable). " + (f?.remedy ?? "Install the Codex CLI, or set its path in Settings › Assistant, then re-check."))
+        }
+        guard let c = environment?.claude else {
+            return ("Claude Code isn't available", "Looked for \(providerExecutable). Install the Claude Code CLI, or set its path in Settings › Claude, then re-check.")
+        }
+        return ("Claude Code isn't available", "This version of Claude Code (\(c.path)) is too old. Update it, then re-check in Settings › Claude.")
+    }
+
+    /// A provider switch: drop the old provider's readiness and check the new one, for every
+    /// open window at once. Work already running keeps the provider it started with.
+    private func providerChanged() {
+        readinessGeneration += 1
+        codexStatus = nil
+        isCheckingCodex = false
+        if usesCodex { checkCodex() } else { detect(force: true) }
+    }
+
+    /// Asks Codex whether it is ready (Settings › Assistant › Re-check, a switch, activation).
+    func checkCodex() {
+        readinessGeneration += 1
+        let generation = readinessGeneration
+        let path = settings.codex_path
+        isCheckingCodex = true
+        Task {
+            let status: CodexStatus? = try? await Core.async("codex.check", ["path": path])
+            // A newer switch or check has started since: this answer is stale.
+            guard generation == self.readinessGeneration, self.usesCodex else { return }
+            self.codexStatus = status ?? CodexStatus(state: "missing")
+            self.isCheckingCodex = false
+        }
+    }
     var cutlineAvailable: Bool { environment?.cutline != nil }
     var effortLevels: [String] { environment?.claude?.effort_levels ?? [] }
     var libraryURL: URL { URL(fileURLWithPath: (try? Core.run("library.dir", as: String.self)) ?? NSTemporaryDirectory(), isDirectory: true) }
@@ -50,9 +114,11 @@ final class AppState: ObservableObject {
     func reloadPlatforms() { platforms = (try? Core.run("platforms.list")) ?? Platforms() }
     func reloadModels() { models = (try? Core.run("models.list")) ?? ModelList() }
 
-    /// Finds Claude Code and cutline again (launch, app activation, Settings › Re-check).
+    /// Finds Claude Code and cutline again, and checks Codex when it is the provider (launch,
+    /// app activation, Settings › Re-check).
     func detect(force: Bool = false) {
         guard !isDetecting, force || Date().timeIntervalSince(lastDetect) > 20 else { return }
+        if usesCodex && !isCheckingCodex { checkCodex() }
         isDetecting = true
         lastDetect = Date()
         Task {

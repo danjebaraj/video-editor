@@ -1,10 +1,10 @@
-// Inspector › Claude (spec §4.3): sessions, the transcript with tool calls and questions, the
-// per-hunk review of Claude's edits, and the composer (Ctrl+Enter sends).
+// Inspector › Assistant (spec §4.3): sessions, the transcript with tool calls and questions, the
+// per-hunk review of the Assistant's edits, and the composer (Ctrl+Enter sends).
 
 import { h, clear, button, iconButton, icon, Icons, checkbox, emptyState, select } from '../../dom';
 import { request } from '../../bridge';
 import { effect } from '../../store';
-import { environment, claudeAvailable, modelName, settings } from '../../app-state';
+import { environment, assistantAvailable, assistantChecked, assistantSetupProblem, readiness, modelName, settings } from '../../app-state';
 import { prompt, confirm, openFolders } from '../../dialogs';
 import { questionCard } from '../../widgets';
 import { copyButton, copyable, inline, markdownText } from '../../text-tools';
@@ -19,9 +19,9 @@ const STARTERS: [string, string][] = [
 export function claudeTab(w: ProjectWindow): HTMLElement {
   const a = w.assistant;
   const header = h('div', { class: 'tab-header' });
-  const transcript = h('div', { class: 'transcript', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation with Claude' });
+  const transcript = h('div', { class: 'transcript', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation with the Assistant' });
   const composerNote = h('div', { class: 'note warn small' });
-  const box = h('textarea', { class: 'composer', rows: 4, 'aria-label': 'Message to Claude', placeholder: 'Ask Claude to improve the spec…  Ctrl+Enter to send' }) as HTMLTextAreaElement;
+  const box = h('textarea', { class: 'composer', rows: 4, 'aria-label': 'Message to the Assistant', placeholder: 'Ask the Assistant to improve the spec…  Ctrl+Enter to send' }) as HTMLTextAreaElement;
   let includeSelection = true;
   const selectionToggle = h('div', { class: 'small' });
   const sendBtn = button('Send', () => send(), { appearance: 'primary', glyph: Icons.send });
@@ -54,7 +54,7 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
     if (modelLabel.textContent !== name) modelLabel.textContent = name;
   });
 
-  effect([a.sessions, a.current, a.running, environment], () => {
+  effect([a.sessions, a.current, a.running, environment, settings, readiness], () => {
     const sessions = [...a.sessions.value].reverse();
     clear(
       header,
@@ -75,12 +75,12 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
       modelLabel,
     );
     renderTranscript();
-    sendBtn.toggleAttribute('disabled', a.running.value || !claudeAvailable());
+    sendBtn.toggleAttribute('disabled', a.running.value || !assistantAvailable());
     stopBtn.hidden = !a.running.value;
   });
 
   effect([a.review], () => {
-    composerNote.textContent = a.review.value ? 'Review Claude’s changes in the editor to continue.' : '';
+    composerNote.textContent = a.review.value ? 'Review the Assistant’s changes in the editor to continue.' : '';
     composerNote.hidden = !a.review.value;
   });
 
@@ -91,7 +91,7 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
       selectionToggle,
       sel && !w.previewOn.value ? checkbox(`Selection, lines ${sel[0]}–${sel[1]}`, includeSelection, (v) => (includeSelection = v)) : null,
       n > 0
-        ? checkbox(`Validation findings (${n})`, a.includeValidation.value, (v) => (a.includeValidation.value = v), { title: 'Send what validation found with your message, so Claude can fix it. Findings outside the spec are marked as such.' })
+        ? checkbox(`Validation findings (${n})`, a.includeValidation.value, (v) => (a.includeValidation.value = v), { title: 'Send what validation found with your message, so the Assistant can fix it. Findings outside the spec are marked as such.' })
         : null,
     );
     const folders = w.doc.p.assistant_folders ?? [];
@@ -99,9 +99,9 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
       actions,
       button('Gather missing info', () => a.gatherInfo(), { appearance: 'subtle', glyph: Icons.question }),
       button(`Folders (${folders.length})…`, async () => {
-        const c = await confirm('Folders Claude may read', folders.length ? folders.join('\n') : 'No folders yet.', ['Add Folder…', 'Remove All', 'Close']);
+        const c = await confirm('Folders the Assistant may read', folders.length ? folders.join('\n') : 'No folders yet.', ['Add Folder…', 'Remove All', 'Close']);
         if (c === 0) {
-          const dirs = await openFolders('Folders Claude may read', true);
+          const dirs = await openFolders('Folders the Assistant may read', true);
           if (dirs.length) w.doc.update((p) => (p.assistant_folders = [...new Set([...(p.assistant_folders ?? []), ...dirs])]), { outputs: false });
         } else if (c === 1) w.doc.update((p) => (p.assistant_folders = []), { outputs: false });
       }, { appearance: 'subtle', glyph: Icons.folder }),
@@ -110,16 +110,17 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
   });
 
   function renderTranscript() {
-    const env = environment.value;
-    if (env && !claudeAvailable()) {
-      clear(transcript, emptyState('Claude Code isn’t available', env.claude ? 'Check its version, sign-in and Git for Windows in Settings › Claude.' : 'Install Claude Code, then choose Re-check in Settings › Claude.', button('Open Settings…', () => request('shell.open_window', { kind: 'settings', options: { pane: 'claude' } }))));
+    if (assistantChecked() && !assistantAvailable()) {
+      // The provider selected in Settings › Assistant, named with the executable looked for.
+      const p = assistantSetupProblem();
+      clear(transcript, emptyState(p.title, p.detail, button('Open Settings…', () => request('shell.open_window', { kind: 'settings', options: { pane: p.pane } }))));
       return;
     }
     const msgs = a.session()?.messages ?? [];
     if (!msgs.length) {
       clear(
         transcript,
-        h('div', { class: 'starters' }, h('p', { class: 'muted' }, 'Ask Claude to improve the spec. Its edits come back as changes you accept or reject.'), button('Gather missing info', () => a.gatherInfo()), STARTERS.map(([label, text]) => button(label, () => a.send(text)))),
+        h('div', { class: 'starters' }, h('p', { class: 'muted' }, 'Ask the Assistant to improve the spec. Its edits come back as changes you accept or reject.'), button('Gather missing info', () => a.gatherInfo()), STARTERS.map(([label, text]) => button(label, () => a.send(text)))),
       );
       return;
     }
@@ -132,12 +133,12 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
       case 'user':
         return h('div', { class: 'msg user' }, h('div', { class: 'row top' }, copyButton('Copy your message', () => m.text), h('div', { class: 'bubble' }, m.text)), m.attachment ? h('div', { class: 'muted small' }, m.attachment) : null);
       case 'assistant':
-        return h('div', { class: 'msg assistant', 'aria-label': `Claude: ${m.text}` }, markdownText(m.text));
+        return h('div', { class: 'msg assistant', 'aria-label': `Assistant: ${m.text}` }, markdownText(m.text));
       case 'tool': {
         const detail = m.detail;
         const det = h(
           'details',
-          { class: `msg tool${m.failed ? ' failed' : ''}`, title: m.failed ? 'This step didn’t work. Claude sees the same message and usually tries again.' : '' },
+          { class: `msg tool${m.failed ? ' failed' : ''}`, title: m.failed ? 'This step didn’t work. The Assistant sees the same message and usually tries again.' : '' },
           h('summary', { class: 'md-inline' }, icon(m.failed ? Icons.warning : Icons.wrench), ' ', ...inline(m.text)),
           detail ? copyable(h('pre', null, detail), 'Copy the details', () => detail) : null,
         );

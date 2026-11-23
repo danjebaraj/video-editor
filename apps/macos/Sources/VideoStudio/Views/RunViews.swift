@@ -22,7 +22,7 @@ struct ValidationView: View {
                 if document.isValidating { ProgressView().controlSize(.small) }
                 Button("Validate") { Task { await document.validate() } }.disabled(document.isValidating).help("Run the static checks (⇧⌘V)")
                 Menu {
-                    Button("Dry Run…") { document.runs.requestDryRun() }.disabled(!app.claudeAvailable || document.runs.isRunning)
+                    Button("Dry Run…") { document.runs.requestDryRun() }.disabled(!app.assistantAvailable || document.runs.isRunning)
                 } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("A dry run has a cheaper model write the edit and run cutline's checks, without rendering finals or generating audio")
@@ -39,10 +39,10 @@ struct ValidationView: View {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             estimates(r)
                             Button { document.assistant.askToFix() } label: {
-                                Label("Ask Claude to Fix", systemImage: "sparkles").frame(maxWidth: .infinity)
+                                Label("Ask Assistant to Fix", systemImage: "sparkles").frame(maxWidth: .infinity)
                             }
-                            .help("Opens Claude with a request to fix these findings. The findings are sent along; you can edit the request before sending.")
-                            .disabled(!app.claudeAvailable || document.assistant.isRunning)
+                            .help("Opens the Assistant with a request to fix these findings. The findings are sent along; you can edit the request before sending.")
+                            .disabled(!app.assistantAvailable || document.assistant.isRunning)
                             ForEach(r.issues) { issue in IssueRow(document: document, issue: issue) }
                         }
                         .padding(12)
@@ -77,7 +77,7 @@ struct ValidationView: View {
         let e = r.estimates
         VStack(alignment: .leading, spacing: 3) {
             if e.claude_usd_high > 0 {
-                Text("Claude: about \(Fmt.money(e.claude_usd_low))–\(Fmt.money(e.claude_usd_high)) (approximate)")
+                Text("Assistant: about \(Fmt.money(e.claude_usd_low))–\(Fmt.money(e.claude_usd_high)) (approximate)")
             }
             if e.eleven_credits > 0 {
                 Text("ElevenLabs: about \(e.eleven_credits) credits of a \(e.eleven_cap) cap" + (e.eleven_remaining.map { " · \($0) left on the account" } ?? ""))
@@ -161,8 +161,8 @@ struct IssueRow: View {
             Spacer(minLength: 0)
             Button { document.assistant.askToFix(issue: issue) } label: { Image(systemName: "sparkles") }
                 .buttonStyle(.borderless)
-                .help("Ask Claude to fix this")
-                .accessibilityLabel("Ask Claude to fix this")
+                .help("Ask the Assistant to fix this")
+                .accessibilityLabel("Ask the Assistant to fix this")
                 .disabled(document.assistant.isRunning)
             CopyButton("Copy this result") { Self.text(of: issue) }
         }
@@ -217,7 +217,13 @@ struct RunConfirmSheet: View {
                 }
                 GridRow {
                     Text("Model").foregroundStyle(.secondary)
-                    ModelPicker(title: "", model: $plan.model).labelsHidden()
+                    if app.usesCodex {
+                        // Codex runs use the Codex model from Settings › Assistant.
+                        Text(app.settings.codex_model.isEmpty ? "Codex default" : app.settings.codex_model).font(.callout)
+                            .help("Codex runs use the model chosen in Settings › Assistant")
+                    } else {
+                        ModelPicker(title: "", model: $plan.model).labelsHidden()
+                    }
                 }
                 if !plan.isAudioReview {
                     GridRow {
@@ -228,7 +234,7 @@ struct RunConfirmSheet: View {
                 GridRow {
                     Text("Estimated cost").foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Claude: about \(Fmt.money(plan.report.estimates.claude_usd_low))–\(Fmt.money(plan.report.estimates.claude_usd_high)) (approximate)")
+                        Text("Assistant: about \(Fmt.money(plan.report.estimates.claude_usd_low))–\(Fmt.money(plan.report.estimates.claude_usd_high)) (approximate)")
                         if plan.report.estimates.eleven_credits > 0 { Text("ElevenLabs: about \(plan.report.estimates.eleven_credits) credits (cap \(plan.runConfig.eleven_credit_cap))") }
                     }
                     .font(.callout)
@@ -242,8 +248,8 @@ struct RunConfirmSheet: View {
                 if plan.revise == nil && !plan.isAudioReview {
                     GridRow {
                         Text("Dry run").foregroundStyle(.secondary)
-                        Toggle("Do a dry run first with \(app.models.displayName(document.dryRunModel))", isOn: $plan.dryRunFirst)
-                            .help("The dry run model is set in Project › Models, or in Settings › Claude for projects that follow the default")
+                        Toggle(app.usesCodex ? "Do a dry run first" : "Do a dry run first with \(app.models.displayName(document.dryRunModel))", isOn: $plan.dryRunFirst)
+                            .help(app.usesCodex ? "Codex dry runs use the model chosen in Settings › Assistant" : "The dry run model is set in Project › Models, or in Settings › Claude for projects that follow the default")
                     }
                 }
             }
@@ -308,7 +314,7 @@ struct DryRunFindingsSheet: View {
             }
             .frame(maxHeight: 300)
             HStack {
-                Button("Ask Claude to Fix the Spec") {
+                Button("Ask Assistant to Fix the Spec") {
                     if let r { document.assistant.askToFix(r) }
                     document.runs.dryRunFindings = nil
                 }
@@ -388,10 +394,10 @@ struct RunInspector: View {
             RunResultView(document: document, record: record).id(record.id + record.status)
         } else {
             VStack(spacing: 8) {
-                EmptyState(symbol: "play.circle", title: "No run yet", message: "Run validates the project, then Claude Code drives cutline to produce the outputs. Audio Review builds only the soundtrack, to listen to before any video is rendered. Progress, results and logs appear here.",
+                EmptyState(symbol: "play.circle", title: "No run yet", message: "Run validates the project, then the Assistant drives cutline to produce the outputs. Audio Review builds only the soundtrack, to listen to before any video is rendered. Progress, results and logs appear here.",
                            action: ("Run", { runs.requestRun() }))
                 Button("Audio Review…") { runs.requestRun(audioReview: true) }
-                    .disabled(!AppState.shared.claudeAvailable || runs.isPreparing)
+                    .disabled(!AppState.shared.assistantAvailable || runs.isPreparing)
                     .help("Build and play the soundtrack from the spec, without rendering video")
                     .padding(.bottom, 16)
             }
@@ -436,7 +442,7 @@ struct LiveRunView: View {
                 Spacer()
                 Button(role: .destructive) { runs.stop() } label: { Label(runs.isStopping ? "Stopping…" : "Stop", systemImage: "stop.fill") }
                     .disabled(runs.isStopping)
-                    .help("Interrupts Claude, then after 5 seconds stops everything it started. Partial outputs and logs are kept.")
+                    .help("Interrupts the Assistant, then after 5 seconds stops everything it started. Partial outputs and logs are kept.")
             }
             .controlSize(.small)
             .padding(10)
@@ -456,7 +462,7 @@ struct LiveRunView: View {
             }
             if let q = runs.question {
                 QuestionCard(questions: q.questions, state: .pending, answers: [:], onAnswer: { runs.answer($0) }, onDismiss: nil)
-                if let t = q.timeout { Text("With no answer in \(t) s, Claude proceeds on its stated assumption.").font(.caption).foregroundStyle(.secondary) }
+                if let t = q.timeout { Text("With no answer in \(t) s, the Assistant proceeds on its stated assumption.").font(.caption).foregroundStyle(.secondary) }
             }
             stageList
             costBox
@@ -525,11 +531,12 @@ struct LiveRunView: View {
     private var costBox: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Claude").foregroundStyle(.secondary)
+                // Attributed to the provider this run started with.
+                Text(runs.runProviderName).foregroundStyle(.secondary)
                 Spacer()
                 Text(runs.claudeUSD.map { (runs.costIsEstimate ? "about " : "") + Fmt.money($0) } ?? "—").monospacedDigit()
             }
-            .help(runs.costIsEstimate ? "Estimated from token counts while the run is in progress; the final figure comes from Claude Code." : "Reported by Claude Code")
+            .help(runs.costIsEstimate ? "Estimated from token counts while the run is in progress; the final figure comes from \(runs.runProviderName)." : "Reported by \(runs.runProviderName)")
             if runs.kind != "dry_run" {
                 HStack {
                     Text("ElevenLabs credits").foregroundStyle(.secondary)
@@ -592,11 +599,11 @@ struct TranscriptView: View {
                     MarkdownText(text: item.text).font(.callout)
                 case "tool":
                     if item.failed {
-                        // Not the run failing: a step that didn't work, which Claude reads and retries.
+                        // Not the run failing: a step that didn't work, which the Assistant reads and retries.
                         Label { Text(Self.inline(item.text)) } icon: { Image(systemName: "exclamationmark.circle") }.font(.caption)
                             .foregroundStyle(.orange).lineLimit(3).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .help("This step didn't work. Claude sees the same message and usually tries again; the run continues.\n\n" + (item.detail ?? ""))
+                            .help("This step didn't work. The Assistant sees the same message and usually tries again; the run continues.\n\n" + (item.detail ?? ""))
                             .copyable("Copy the details") { item.text + "\n\n" + (item.detail ?? "") }
                     } else {
                         Label { Text(Self.inline(item.text)) } icon: { Image(systemName: "wrench.and.screwdriver") }.font(.caption)
@@ -639,7 +646,7 @@ struct RunResultView: View {
                     if record.kind == "dry_run" { Text("Dry run").font(.caption).padding(.horizontal, 6).background(Color(nsColor: .quaternaryLabelColor), in: Capsule()) }
                     if record.kind == "audio_review" { Text("Audio Review").font(.caption).padding(.horizontal, 6).background(Color(nsColor: .quaternaryLabelColor), in: Capsule()) }
                 }
-                Text([record.run_config_name ?? "", Fmt.when(record.started), record.model.map { AppState.shared.models.displayName($0) } ?? "", record.cost_usd.map { Fmt.money($0) } ?? "",
+                Text([record.run_config_name ?? "", Fmt.when(record.started), record.providerName, record.model.map { AppState.shared.models.displayName($0) } ?? "", record.cost_usd.map { Fmt.money($0) } ?? "",
                       (record.eleven_credits ?? 0) > 0 ? "\(record.eleven_credits!) credits" : ""].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary)
                 if let m = results?.run?["message"]?.stringValue { Text(m).font(.callout).foregroundStyle(record.status == "failed" ? Color.red : Color.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
@@ -670,13 +677,13 @@ struct RunResultView: View {
                 Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: record.folder)]) }
                 Spacer()
                 if record.kind == "production" || record.kind == "audio_review" {
-                    Button("Revise…") { showRevise = true }.disabled(document.runs.isRunning || record.claude_session == nil || !AppState.shared.claudeAvailable)
-                        .help(record.kind == "audio_review" ? "Give feedback and build a new take of the soundtrack; this take stays playable" : "Give feedback and continue this run's Claude session in a new run folder")
+                    Button("Revise…") { showRevise = true }.disabled(document.runs.isRunning || record.claude_session == nil || !AppState.shared.assistantAvailable)
+                        .help(record.kind == "audio_review" ? "Give feedback and build a new take of the soundtrack; this take stays playable" : "Give feedback and continue this run with the Assistant in a new run folder")
                     Button("Re-run") {
                         if document.project.runConfig(record.run_config) != nil { document.selectedRunConfigID = record.run_config }
                         document.runs.requestRun(audioReview: record.kind == "audio_review", audioOutput: auditionedOutput)
                     }
-                    .disabled(document.runs.isRunning || !AppState.shared.claudeAvailable)
+                    .disabled(document.runs.isRunning || !AppState.shared.assistantAvailable)
                     .help("Run this run config again")
                 }
             }
@@ -687,7 +694,7 @@ struct RunResultView: View {
         .sheet(isPresented: $showRevise) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(record.kind == "audio_review" ? "Revise this Audio Review" : "Revise this run").font(.title3.weight(.semibold))
-                Text(record.kind == "audio_review" ? "Say what to change in the soundtrack. Claude mixes it again, reusing audio that hasn't changed, into a new review; this take stays playable to compare." : "Say what to change. Claude continues from this run's edit and audio, and writes a new run folder linked to this one.").font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(record.kind == "audio_review" ? "Say what to change in the soundtrack. The Assistant mixes it again, reusing audio that hasn't changed, into a new review; this take stays playable to compare." : "Say what to change. The Assistant continues from this run's edit and audio, and writes a new run folder linked to this one.").font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 TextEditor(text: $feedback).font(.body).frame(height: 120).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
                     .accessibilityLabel("Feedback")
                 HStack {
@@ -745,7 +752,7 @@ struct RunResultView: View {
                 }
                 if let p = results?.project_json5 {
                     Button { NSWorkspace.shared.open(URL(fileURLWithPath: p)) } label: { Label("View project.json5", systemImage: "doc.text") }
-                        .buttonStyle(.link).help("The cutline project Claude wrote for this run (read-only artifact)")
+                        .buttonStyle(.link).help("The cutline project the Assistant wrote for this run (read-only artifact)")
                 }
             }
             .padding(12)
@@ -756,7 +763,7 @@ struct RunResultView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 if let r = results?.readiness {
-                    Label(r.ready ? "Claude judged the spec ready for production." : "Claude judged the spec not ready yet.", systemImage: r.ready ? "checkmark.seal" : "exclamationmark.triangle")
+                    Label(r.ready ? "The Assistant judged the spec ready for production." : "The Assistant judged the spec not ready yet.", systemImage: r.ready ? "checkmark.seal" : "exclamationmark.triangle")
                         .foregroundStyle(r.ready ? Color.green : Color.orange).font(.callout)
                     if !r.estimated_durations.isEmpty {
                         Text("Estimated length: " + r.estimated_durations.sorted { $0.key < $1.key }.map { "\($0.key) \(Fmt.duration($0.value))" }.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
@@ -1064,7 +1071,7 @@ struct LogsView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([selected.map { URL(fileURLWithPath: $0) } ?? folder.appendingPathComponent("logs")])
                 }
                 Button("Export Logs…") { RunActions.exportLogs(folder: folder) }
-                    .help("A zip of everything needed to study this run: logs, the instructions Claude was given, the spec and the edit. Media paths can be redacted.")
+                    .help("A zip of everything needed to study this run: logs, the instructions the Assistant was given, the spec and the edit. Media paths can be redacted.")
                 Button("Copy Issue Report") { RunActions.copyIssueReport(folder: folder) }
                     .help("A Markdown summary of cutline errors, warnings and failed QA checks with log excerpts")
                 Spacer(minLength: 0)

@@ -49,7 +49,7 @@ struct ModelPicker: View {
                 Text("Custom model ID").font(.headline)
                 TextField("claude-…", text: $customDraft).textFieldStyle(.roundedBorder).frame(width: 260)
                     .onSubmit { apply() }
-                Text("Passed to Claude Code as it is.").font(.caption).foregroundStyle(.secondary)
+                Text("Passed to the provider as it is.").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Spacer()
                     Button("Cancel") { showCustom = false }
@@ -91,7 +91,7 @@ struct EffortPicker: View {
     }
 }
 
-// MARK: Claude panel (spec §4.3)
+// MARK: Assistant panel (spec §4.3; the type keeps its old name)
 
 struct ClaudePanel: View {
     @ObservedObject var document: ProjectDocument
@@ -120,9 +120,10 @@ struct ClaudePanel: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if !app.claudeAvailable && app.environment != nil {
-                EmptyState(symbol: "terminal", title: "Claude Code isn't available", message: app.environment?.claude == nil ? "Install the Claude Code CLI to get help with the spec." : "This version of Claude Code is too old. Update it and re-check.",
-                           action: ("Open Settings…", { AppDelegate.shared.showSettings(pane: "claude") }))
+            if !app.assistantAvailable && app.assistantChecked {
+                // The provider selected in Settings › Assistant, named with the executable looked for.
+                EmptyState(symbol: "terminal", title: app.assistantSetupProblem.title, message: app.assistantSetupProblem.detail,
+                           action: ("Open Settings…", { AppDelegate.shared.showSettings(pane: app.usesCodex ? "assistant" : "claude") }))
             } else if let session = chat.current, !session.messages.isEmpty {
                 transcript(session)
             } else {
@@ -170,8 +171,8 @@ struct ClaudePanel: View {
                 }
             }
             .buttonStyle(.borderless).controlSize(.small).fixedSize()
-            .disabled(chat.isRunning || !app.claudeAvailable || document.review.pending != nil)
-            .help("Gather missing info: Claude interviews you about gaps in the spec and folds your answers in (⌃⌘G)")
+            .disabled(chat.isRunning || !app.assistantAvailable || document.review.pending != nil)
+            .help("Gather missing info: the Assistant interviews you about gaps in the spec and folds your answers in (⌃⌘G)")
             .accessibilityLabel("Gather missing info")
             Spacer(minLength: 4)
             foldersMenu
@@ -179,21 +180,21 @@ struct ClaudePanel: View {
                 Label("Web", systemImage: "globe").font(.caption).lineLimit(1)
             }
             .toggleStyle(.checkbox).controlSize(.small).fixedSize()
-            .help("Let Claude search and fetch web pages in this project's assistant sessions")
+            .help("Let the Assistant search and fetch web pages in this project's assistant sessions")
         }
     }
 
     private var canSend: Bool {
-        !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && app.claudeAvailable && document.review.pending == nil
+        !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && app.assistantAvailable && document.review.pending == nil
     }
 
     private var foldersMenu: some View {
         let folders = document.project.assistant_folders
         return Menu {
             if folders.isEmpty {
-                Text("Claude can read only the spec and the media folders")
+                Text("The Assistant can read only the spec and the media folders")
             } else {
-                Section("Claude can read") {
+                Section("The Assistant can read") {
                     ForEach(folders, id: \.self) { path in
                         Menu((path as NSString).abbreviatingWithTildeInPath) {
                             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
@@ -208,8 +209,8 @@ struct ClaudePanel: View {
             Label(folders.isEmpty ? "Folders" : "Folders (\(folders.count))", systemImage: "folder.badge.plus").font(.caption)
         }
         .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
-        .help("Folders Claude can read while helping with the spec, such as briefs, docs or source material. Changes apply from the next message.")
-        .accessibilityLabel("Folders shared with Claude")
+        .help("Folders the Assistant can read while helping with the spec, such as briefs, docs or source material. Changes apply from the next message.")
+        .accessibilityLabel("Folders shared with the Assistant")
     }
 
     private var header: some View {
@@ -236,7 +237,7 @@ struct ClaudePanel: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel("Claude session")
+            .accessibilityLabel("Assistant session")
             Spacer()
             Text(app.models.displayName(document.assistantModel)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 .help("The spec assistant model. Change it in the Project inspector.")
@@ -250,8 +251,8 @@ struct ClaudePanel: View {
     private var starters: some View {
         VStack(spacing: 10) {
             Image(systemName: "sparkles").font(.system(size: 26)).foregroundStyle(.tertiary)
-            Text("Improve the spec with Claude").font(.headline)
-            Text("Claude edits the spec; you review each change before it is applied. It can also ask you about what's missing.")
+            Text("Improve the spec with the Assistant").font(.headline)
+            Text("The Assistant edits the spec; you review each change before it is applied. It can also ask you about what's missing.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
             VStack(spacing: 6) {
                 starter("Gather missing info", "questionmark.bubble") { chat.gatherMissingInfo() }
@@ -269,7 +270,7 @@ struct ClaudePanel: View {
             Label(title, systemImage: symbol).frame(maxWidth: .infinity, alignment: .leading)
         }
         .controlSize(.large)
-        .disabled(chat.isRunning || !app.claudeAvailable)
+        .disabled(chat.isRunning || !app.assistantAvailable)
     }
 
     private func transcript(_ session: ChatSession) -> some View {
@@ -282,7 +283,7 @@ struct ClaudePanel: View {
                     if chat.isRunning {
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.small)
-                            Text("Claude is working…").font(.caption).foregroundStyle(.secondary)
+                            Text("The Assistant is working…").font(.caption).foregroundStyle(.secondary)
                         }
                         .id("working")
                     }
@@ -310,10 +311,10 @@ struct ClaudePanel: View {
                     Label("Validation findings (\(chat.validationFindingCount))", systemImage: "checkmark.shield").font(.caption)
                 }
                 .toggleStyle(.checkbox).controlSize(.small)
-                .help("Send what validation found with your message, so Claude can fix it. Findings outside the spec are marked as such.")
+                .help("Send what validation found with your message, so the Assistant can fix it. Findings outside the spec are marked as such.")
             }
             if document.review.pending != nil {
-                Label("Review Claude's changes in the editor to continue.", systemImage: "arrow.left.circle").font(.caption).foregroundStyle(.orange)
+                Label("Review the Assistant's changes in the editor to continue.", systemImage: "arrow.left.circle").font(.caption).foregroundStyle(.orange)
             }
             HStack(alignment: .bottom, spacing: 6) {
                 // Return adds a line; ⌘Return sends (the Send button's shortcut).
@@ -326,13 +327,13 @@ struct ClaudePanel: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(composerFocused ? Color.accentColor.opacity(0.7) : Color(nsColor: .separatorColor)))
                     .overlay(alignment: .topLeading) {
                         if chat.draft.isEmpty {
-                            Text("Ask Claude to improve the spec…  ⌘Return to send").foregroundStyle(.tertiary)
+                            Text("Ask the Assistant to improve the spec…  ⌘Return to send").foregroundStyle(.tertiary)
                                 .padding(.horizontal, 7).padding(.vertical, 5).allowsHitTesting(false)
                         }
                     }
                     .focused($composerFocused)
-                    .disabled(!app.claudeAvailable)
-                    .accessibilityLabel("Message to Claude")
+                    .disabled(!app.assistantAvailable)
+                    .accessibilityLabel("Message to the Assistant")
                 if chat.isRunning {
                     Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.title2) }
                         .buttonStyle(.borderless).help("Stop (⌘.)").accessibilityLabel("Stop")
@@ -378,7 +379,7 @@ struct MessageView: View {
         case .assistant:
             MarkdownText(text: message.text)
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("Claude: \(message.text)")
+                .accessibilityLabel("Assistant: \(message.text)")
         case .tool:
             VStack(alignment: .leading, spacing: 3) {
                 Button { showDetail.toggle() } label: {
@@ -390,7 +391,7 @@ struct MessageView: View {
                     .foregroundStyle(message.failed ? Color.orange : Color.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(message.failed ? "This step didn't work. Claude sees the same message and usually tries again." : "")
+                .help(message.failed ? "This step didn't work. The Assistant sees the same message and usually tries again." : "")
                 if showDetail, let d = message.detail {
                     Text(d).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -418,7 +419,7 @@ struct MessageView: View {
     }
 }
 
-/// A question from Claude (AskUserQuestion): options to pick, or a free answer.
+/// A question from the Assistant (AskUserQuestion): options to pick, or a free answer.
 struct QuestionCard: View {
     var questions: [ClaudeQuestion]
     var state: ChatMessage.QuestionState
@@ -439,7 +440,7 @@ struct QuestionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Claude has a question", systemImage: "questionmark.bubble.fill").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
+            Label("The Assistant has a question", systemImage: "questionmark.bubble.fill").font(.caption.weight(.semibold)).foregroundStyle(Color.accentColor)
             ForEach(Array(questions.enumerated()), id: \.offset) { _, q in
                 VStack(alignment: .leading, spacing: 5) {
                     if let h = q.header, !h.isEmpty { Text(h.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
@@ -481,7 +482,7 @@ struct QuestionCard: View {
             }
             if state == .pending {
                 HStack {
-                    if let onDismiss { Button("Skip") { onDismiss() }.help("Let Claude continue with its best judgement") }
+                    if let onDismiss { Button("Skip") { onDismiss() }.help("Let the Assistant continue with its best judgement") }
                     Spacer()
                     Button("Answer") {
                         var out: [String: String] = [:]

@@ -885,6 +885,11 @@
           "const": "self_test",
           "description": "The self test asks the UI to perform a step: `{step, args}`.",
           "type": "string"
+        },
+        {
+          "const": "settings_changed",
+          "description": "Another window saved the app settings (Settings › Assistant among them): the saved\n`Settings`, so every open window follows the provider choice (FEAT-spry-alpaca-5RQZ).",
+          "type": "string"
         }
       ]
     },

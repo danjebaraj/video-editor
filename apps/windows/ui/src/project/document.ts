@@ -4,7 +4,7 @@
 import { core, request, on, errorText } from '../bridge';
 import { Signal } from '../store';
 import { debounce, fileStem, parentDir } from '../dom';
-import { settings, keyStatus, environment, brands } from '../app-state';
+import { settings, keyStatus, environment, brands, provider, codexStatus } from '../app-state';
 import { confirm } from '../dialogs';
 import type {
   Project,
@@ -377,6 +377,8 @@ export class ProjectDocument {
         eleven_key_present: keyStatus.value?.present ?? false,
         eleven_remaining: null,
         environment: environment.value,
+        // With Codex selected, validation checks the shared Codex status (FEAT-spry-alpaca-5RQZ).
+        codex: provider() === 'codex' ? codexStatus.value : null,
         readiness: readiness ?? null,
       });
       // probes are a cache worth keeping

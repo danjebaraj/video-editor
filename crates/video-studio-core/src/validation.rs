@@ -2147,6 +2147,7 @@ mod tests {
                 previous_run: None,
                 cost_usd: Some(cost),
                 eleven_credits: None,
+                provider: None,
             });
         }
         let e = f.run().estimates;

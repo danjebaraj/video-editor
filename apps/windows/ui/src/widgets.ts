@@ -1,4 +1,4 @@
-// Widgets shared by several views: the model picker, the effort picker and Claude's question card.
+// Widgets shared by several views: the model picker, the effort picker and the Assistant's question card.
 
 import { h, button, select } from './dom';
 import { models, environment, modelName } from './app-state';
@@ -44,7 +44,7 @@ export function effortPicker(value: string | undefined | null, onChange: (v: str
 }
 
 /**
- * Claude's questions (AskUserQuestion). Answers are keyed by question text; each is the chosen
+ * The Assistant's questions (AskUserQuestion). Answers are keyed by question text; each is the chosen
  * labels plus any free text, joined with ", ".
  */
 export function questionCard(questions: ClaudeQuestion[], onAnswer: (answers: Record<string, string>) => void, onSkip?: () => void): HTMLElement {
@@ -65,7 +65,7 @@ export function questionCard(questions: ClaudeQuestion[], onAnswer: (answers: Re
     if (complete) answerBtn.removeAttribute('disabled');
     else answerBtn.setAttribute('disabled', '');
   };
-  const card = h('section', { class: 'question-card', role: 'group', 'aria-label': 'Claude has a question' });
+  const card = h('section', { class: 'question-card', role: 'group', 'aria-label': 'The Assistant has a question' });
   questions.forEach((q, qi) => {
     answers[q.question] = { picked: new Set(), text: '' };
     const multi = !!(q.multiSelect ?? q.multi_select);

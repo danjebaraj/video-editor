@@ -532,6 +532,11 @@ struct RunRecord: Codable, Equatable, Identifiable {
     var previous_run: String?
     var cost_usd: Double?
     var eleven_credits: UInt64?
+    /// The provider that ran it (`claude` or `codex`); absent in runs from before the choice existed.
+    var provider: String?
+
+    /// The provider used at execution time, for run history and cost attribution.
+    var providerName: String { provider == "codex" ? "Codex" : "Claude Code" }
 }
 
 struct AssistantSessionRef: Codable, Equatable, Identifiable {

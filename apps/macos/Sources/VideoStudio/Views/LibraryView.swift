@@ -187,12 +187,12 @@ struct BrandEditor: View {
                     }
                 }
                 InspectorSection(title: "Rules") {
-                    Text("Do's and don'ts in your own words. Claude is given them verbatim.").font(.caption).foregroundStyle(.secondary)
+                    Text("Do's and don'ts in your own words. The Assistant is given them verbatim.").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $brand.rules).font(.body).frame(minHeight: 110).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
                         .accessibilityLabel("Brand rules")
                 }
                 InspectorSection(title: "Instructions") {
-                    Text("Labelled context for one product line or audience, such as “Bold Reports” or “Syncfusion WPF”. Each project chooses the ones it uses from the brand menu in its toolbar; Claude is given those verbatim when writing the spec and making the video. Rules above apply to every project.")
+                    Text("Labelled context for one product line or audience, such as “Bold Reports” or “Syncfusion WPF”. Each project chooses the ones it uses from the brand menu in its toolbar; the Assistant is given those verbatim when writing the spec and making the video. Rules above apply to every project.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     ForEach(instructions) { $set in
                         VStack(alignment: .leading, spacing: 6) {

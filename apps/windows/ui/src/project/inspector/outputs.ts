@@ -141,9 +141,9 @@ export function outputsTab(w: ProjectWindow): HTMLElement {
       h('section', null,
         h('h3', null, 'Limits'),
         field('ElevenLabs credit cap', numberInput(rc.eleven_credit_cap ?? null, (v) => upd((r) => (r.eleven_credit_cap = v ?? 0)), { min: 0 })),
-        field('Claude spend limit (USD)', numberInput(rc.max_spend_usd ?? null, (v) => upd((r) => (r.max_spend_usd = v || null)), { min: 0, step: '0.5' })),
+        field('Assistant spend limit (USD)', numberInput(rc.max_spend_usd ?? null, (v) => upd((r) => (r.max_spend_usd = v || null)), { min: 0, step: '0.5' })),
         field('Turn limit', numberInput(rc.max_turns ?? null, (v) => upd((r) => (r.max_turns = v || null)), { min: 0 })),
-        field('Question timeout (seconds)', numberInput(rc.question_timeout_s ?? null, (v) => upd((r) => (r.question_timeout_s = v || null)), { min: 0 }), 'With no answer by then, Claude proceeds on its stated assumption.'),
+        field('Question timeout (seconds)', numberInput(rc.question_timeout_s ?? null, (v) => upd((r) => (r.question_timeout_s = v || null)), { min: 0 }), 'With no answer by then, the Assistant proceeds on its stated assumption.'),
       ),
     );
   }

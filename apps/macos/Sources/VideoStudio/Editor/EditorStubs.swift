@@ -56,7 +56,7 @@ extension EditorController {
         document.textDidChange()
     }
 
-    /// Puts the selection's context in the Claude panel's composer.
+    /// Puts the selection's context in the Assistant panel's composer.
     func askAboutSelection() {
         document.inspectorTab = .claude
         document.assistant.includeSelection = true

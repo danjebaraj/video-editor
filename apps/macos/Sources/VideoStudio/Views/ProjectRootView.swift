@@ -31,7 +31,7 @@ struct ProjectRootView: View {
         .sheet(isPresented: $document.showRelinkSheet) { RelinkSheet(document: document) }
         .sheet(item: planBinding) { plan in RunConfirmSheet(document: document, plan: plan.value) }
         .sheet(isPresented: findingsBinding) { DryRunFindingsSheet(document: document) }
-        .overlay { if app.claudeMissing { ClaudeSetupOverlay() } }
+        .overlay { if app.assistantMissing { ProviderSetupOverlay().id(app.provider) } }
     }
 
     private var planBinding: Binding<IdentifiedPlan?> {
@@ -87,7 +87,7 @@ struct ProjectRootView: View {
                 Label(brandTitle, systemImage: "paintpalette")
                     .labelStyle(.titleAndIcon)
             }
-            .help("Brand preset: logos, colors, fonts, voice, rules and the instructions this project uses, given to Claude")
+            .help("Brand preset: logos, colors, fonts, voice, rules and the instructions this project uses, given to the Assistant")
             .accessibilityLabel("Brand preset")
 
             Menu {
@@ -130,8 +130,8 @@ struct ProjectRootView: View {
                 } primaryAction: {
                     runs.requestRun()
                 }
-                .help(app.claudeAvailable ? "Validate, then produce the outputs (⌘R). Hold for Audio Review (⇧⌘R) and Dry Run." : "Claude Code is required to run")
-                .disabled(!app.claudeAvailable || runs.isPreparing)
+                .help(app.assistantAvailable ? "Validate, then produce the outputs (⌘R). Hold for Audio Review (⇧⌘R) and Dry Run." : "\(app.providerName) is required to run (Settings › Assistant)")
+                .disabled(!app.assistantAvailable || runs.isPreparing)
             }
             Button { document.showPreview.toggle() } label: {
                 Label(document.showPreview ? "Source" : "Preview", systemImage: document.showPreview ? "pencil" : "eye")
@@ -159,7 +159,7 @@ struct RunStatusChip: View {
                     Text(runs.isPreparing ? "Validating…" : runs.statusLine).lineLimit(1)
                     if runs.isRunning {
                         Text(Fmt.elapsed(runs.elapsed)).monospacedDigit().foregroundStyle(.secondary)
-                        if let c = runs.claudeUSD { Text(Fmt.money(c)).monospacedDigit().foregroundStyle(.secondary).help(runs.costIsEstimate ? "Estimated from token counts while the run is in progress" : "Reported by Claude Code") }
+                        if let c = runs.claudeUSD { Text(Fmt.money(c)).monospacedDigit().foregroundStyle(.secondary).help(runs.costIsEstimate ? "Estimated from token counts while the run is in progress" : "Reported by \(runs.runProviderName)") }
                     }
                 }
                 .font(.callout)
@@ -327,7 +327,7 @@ struct PreviewHost: NSViewRepresentable {
     func updateNSView(_ view: WKWebView, context: Context) {}
 }
 
-// MARK: Review of Claude's edits (spec §4.3)
+// MARK: Review of the Assistant's edits (spec §4.3)
 
 struct ReviewView: View {
     @ObservedObject var review: SpecReview
@@ -361,14 +361,14 @@ struct ReviewView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Review Claude's changes")
+        .accessibilityLabel("Review the Assistant's changes")
     }
 
     private var reviewTitle: some View {
         HStack(spacing: 10) {
             Image(systemName: "sparkles").foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Claude changed the spec").font(.headline).lineLimit(1)
+                Text("The Assistant changed the spec").font(.headline).lineLimit(1)
                 Text("\(pending.hunks.count) change\(pending.hunks.count == 1 ? "" : "s") · \(pending.accepted) accepted · \(pending.undecided) to review")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -440,11 +440,12 @@ struct HunkCard: View {
     }
 }
 
-// MARK: Claude Code missing (spec §4.1)
+// MARK: The selected provider missing (spec §4.1, FEAT-spry-alpaca-5RQZ)
 
-/// Shown over the window when Claude Code isn't installed. The spec can still be edited after
-/// dismissing it; every Claude action, model-based validation step and run stays disabled.
-struct ClaudeSetupOverlay: View {
+/// Shown over the window when the provider chosen in Settings › Assistant isn't installed. The
+/// spec can still be edited after dismissing it; every Assistant action, model-based validation
+/// step and run stays disabled. It follows a provider switch in every open window.
+struct ProviderSetupOverlay: View {
     @ObservedObject private var app = AppState.shared
     @State private var dismissed = false
 
@@ -454,24 +455,30 @@ struct ClaudeSetupOverlay: View {
                 Color.black.opacity(0.35).ignoresSafeArea()
                 VStack(spacing: 14) {
                     Image(systemName: "terminal").font(.system(size: 40)).foregroundStyle(Color.accentColor)
-                    Text("Claude Code is required").font(.title2.weight(.semibold))
-                    Text("Syncfusion Video Studio uses the Claude Code command-line tool to help write specs and to produce videos. It wasn't found on this Mac.")
+                    Text("\(app.providerName) is required").font(.title2.weight(.semibold))
+                    Text("Syncfusion Video Studio uses the \(app.providerName) command-line tool, chosen in Settings › Assistant, to help write specs and to produce videos. It wasn't found on this Mac (looked for \(app.providerExecutable)).")
                         .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 420)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("1. Install it in Terminal:").font(.callout)
-                        Text("curl -fsSL https://claude.ai/install.sh | bash").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                            .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                        Text("2. Run `claude` once and sign in. The app never asks for your Anthropic credentials.").font(.callout)
-                        Text("3. Come back and choose Re-check. If Claude Code is installed somewhere unusual, set its path in Settings › Claude.").font(.callout)
+                        if app.usesCodex {
+                            Text("1. Install the Codex CLI, which provides `codex app-server`.").font(.callout)
+                            Text("2. Run `codex login` once and sign in. The app never asks for your OpenAI credentials.").font(.callout)
+                            Text("3. Come back and choose Re-check. If Codex is installed somewhere unusual, set its path in Settings › Assistant, or choose Claude Code there.").font(.callout)
+                        } else {
+                            Text("1. Install it in Terminal:").font(.callout)
+                            Text("curl -fsSL https://claude.ai/install.sh | bash").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
+                                .padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                            Text("2. Run `claude` once and sign in. The app never asks for your Anthropic credentials.").font(.callout)
+                            Text("3. Come back and choose Re-check. If Claude Code is installed somewhere unusual, set its path in Settings › Claude, or choose Codex in Settings › Assistant.").font(.callout)
+                        }
                     }
                     .frame(maxWidth: 440, alignment: .leading)
                     HStack {
                         Button("Edit the Spec Anyway") { dismissed = true }
-                        Button("Settings…") { AppDelegate.shared.showSettings(pane: "claude") }
+                        Button("Settings…") { AppDelegate.shared.showSettings(pane: app.usesCodex ? "assistant" : "claude") }
                         Button {
-                            app.detect(force: true)
+                            if app.usesCodex { app.checkCodex() } else { app.detect(force: true) }
                         } label: {
-                            if app.isDetecting { ProgressView().controlSize(.small) } else { Text("Re-check") }
+                            if app.isDetecting || app.isCheckingCodex { ProgressView().controlSize(.small) } else { Text("Re-check") }
                         }
                         .keyboardShortcut(.defaultAction)
                     }

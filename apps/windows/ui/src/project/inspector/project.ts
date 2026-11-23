@@ -40,7 +40,7 @@ export function projectTab(w: ProjectWindow): HTMLElement {
       ),
       h('section', null,
         h('h3', null, 'Intent'),
-        field('Intent', select(p.intent.kind === 'unset' ? [['unset', 'Choose…'], ...INTENTS] : INTENTS, p.intent.kind, (v) => d.update((x) => (x.intent.kind = v as any))), p.intent.kind === 'unset' ? 'Required: the intent sets defaults and tells Claude what the video is for.' : undefined),
+        field('Intent', select(p.intent.kind === 'unset' ? [['unset', 'Choose…'], ...INTENTS] : INTENTS, p.intent.kind, (v) => d.update((x) => (x.intent.kind = v as any))), p.intent.kind === 'unset' ? 'Required: the intent sets defaults and tells the Assistant what the video is for.' : undefined),
         p.intent.kind === 'other' ? field('Describe the intent', textInput(p.intent.other ?? '', (v) => d.update((x) => (x.intent.other = v || null)))) : null,
         field('Audience', textInput(p.intent.audience ?? '', (v) => d.update((x) => (x.intent.audience = v || null)))),
         field('Tone', textInput(p.intent.tone ?? '', (v) => d.update((x) => (x.intent.tone = v || null)), { placeholder: 'confident, friendly, technical…' })),
@@ -53,7 +53,7 @@ export function projectTab(w: ProjectWindow): HTMLElement {
       h('section', null,
         h('h3', null, 'Models'),
         field('Spec assistant', modelPicker(p.models.assistant, (v) => d.update((x) => (x.models.assistant = v), { outputs: false }), { label: 'Spec assistant model', settingsDefault: settings.value?.default_assistant_model ?? '' }), 'Used for chat, spec edits and questions'),
-        field('Dry run', modelPicker(p.models.dry_run, (v) => d.update((x) => (x.models.dry_run = v), { outputs: false }), { label: 'Dry run model', settingsDefault: settings.value?.default_dry_run_model ?? '' }), 'Rehearses the run before the production model is used. Settings default follows Settings › Claude.'),
+        field('Dry run', modelPicker(p.models.dry_run, (v) => d.update((x) => (x.models.dry_run = v), { outputs: false }), { label: 'Dry run model', settingsDefault: settings.value?.default_dry_run_model ?? '' }), 'Rehearses the run before the production model is used. Settings default follows Settings › Claude. Codex runs use the model in Settings › Assistant.'),
         (() => {
           const e = effortPicker(p.models.effort ?? null, (v) => d.update((x) => (x.models.effort = v), { outputs: false }), 'Assistant effort');
           return e ? field('Effort', e) : null;
@@ -62,7 +62,7 @@ export function projectTab(w: ProjectWindow): HTMLElement {
       ),
       h('section', null,
         h('h3', null, 'App recording'),
-        checkbox('Let Claude drive and record apps', capture.enabled, (v) => d.update((x) => (x.app_capture = { ...capture, enabled: v }), { outputs: false })),
+        checkbox('Let the Assistant drive and record apps', capture.enabled, (v) => d.update((x) => (x.app_capture = { ...capture, enabled: v }), { outputs: false })),
         capture.enabled ? field('Apps', textInput((capture.apps ?? []).join(', '), (v) => d.update((x) => (x.app_capture = { ...capture, apps: v.split(',').map((s) => s.trim()).filter(Boolean) }), { outputs: false }), { placeholder: 'Any app' }), 'Leave empty for any app except terminals, Settings, Registry Editor, Task Manager, File Explorer and password managers.') : null,
         capture.enabled
           ? perms

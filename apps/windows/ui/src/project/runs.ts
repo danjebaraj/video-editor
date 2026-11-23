@@ -4,7 +4,7 @@
 
 import { core, request, on, errorText } from '../bridge';
 import { Signal } from '../store';
-import { settings, claudeAvailable } from '../app-state';
+import { settings, assistantAvailable, assistantSetupProblem, provider } from '../app-state';
 import { toast } from '../dialogs';
 import type { ProjectDocument } from './document';
 import type { Readiness, Report, ResolvedOutput, ClaudeQuestion, RunRecord } from '../types';
@@ -73,6 +73,8 @@ export interface Live {
   runId: string;
   folder: string;
   model: string;
+  /** The provider this run started with (its cost is attributed to it); a later switch doesn't change it. */
+  provider: 'claude' | 'codex';
   started: number;
   stages: StageState[];
   fraction: number | null;
@@ -114,8 +116,10 @@ export class RunController {
       this.showTab('outputs');
       return;
     }
-    if (!claudeAvailable()) {
-      toast('Claude Code isn’t available. See Settings › Claude.', 'error');
+    // The provider selected now (Settings › Assistant); the core reads it again as the run starts.
+    if (!assistantAvailable()) {
+      const p = assistantSetupProblem();
+      toast(`${p.title} ${p.detail}`, 'error');
       return;
     }
     this.preparing.value = true;
@@ -179,7 +183,9 @@ export class RunController {
       assume_answers: false,
       validation: report,
     };
-    if (kind !== 'dry_run' && model && model !== rc.production_model) request_.model = model;
+    // A Claude model isn't sent to Codex: Codex runs use the model in Settings › Assistant.
+    const runProvider = provider();
+    if (kind !== 'dry_run' && runProvider === 'claude' && model && model !== rc.production_model) request_.model = model;
     if (kind !== 'dry_run' && revise) request_.revise = revise;
     if (kind === 'audio_review' && audioOutput) request_.audio_output = audioOutput;
     if (rc.question_timeout_s) request_.question_timeout_s = rc.question_timeout_s;
@@ -190,7 +196,8 @@ export class RunController {
         kind,
         runId: started.run_id,
         folder: started.folder,
-        model: kind === 'dry_run' ? model : model || rc.production_model,
+        model: runProvider === 'codex' ? settings.value?.codex_model || 'Codex default' : kind === 'dry_run' ? model : model || rc.production_model,
+        provider: runProvider,
         started: Date.now(),
         stages: STAGES.filter(([id]) => showsStage(id, kind)).map(([id, label]) => ({ id, label, state: 'pending', seconds: 0 })),
         fraction: null,
@@ -268,7 +275,7 @@ export class RunController {
         live.status = 'Waiting for your answer';
         this.showTab('run');
         request('shell.progress', { state: 'paused', value: live.fraction ?? 0.5 });
-        if (!document.hasFocus() && settings.value?.notifications !== false) request('shell.notify', { title: 'Claude has a question', body: e.questions?.[0]?.question ?? '' });
+        if (!document.hasFocus() && settings.value?.notifications !== false) request('shell.notify', { title: 'The Assistant has a question', body: e.questions?.[0]?.question ?? '' });
         break;
       case 'question_answered':
         live.question = null;
