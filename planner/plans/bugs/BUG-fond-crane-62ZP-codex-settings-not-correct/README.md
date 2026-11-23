@@ -2,8 +2,8 @@
 id: BUG-fond-crane-62ZP
 type: bug
 title: Codex settings not correct
-status: open
-fix: none
+status: in-progress
+fix: in-progress
 verified: no
 approved: yes
 approved-on: 2026-11-22
@@ -71,12 +71,12 @@ Settings › Assistant selects the app-wide provider. Settings › Claude and Se
 
 - [ ] Separate the three Settings destinations in `apps/macos/Sources/VideoStudio/Views/SettingsView.swift` and the corresponding Windows Settings UI. Retain saved paths, model choices and the active provider when loading existing settings.
 - [ ] Make the model picker and new-session header in `ClaudePanel.swift`, and the project and production pickers in `InspectorViews.swift`, resolve choices from the active provider. Apply the same behavior to the corresponding Windows project controls. Populate Codex choices from its model list with an explicit Codex default option, including when the list is empty.
-- [ ] Use consistent model precedence for display and dispatch: an applicable override for the active provider, its saved default, then its CLI default. Treat legacy Claude overrides as Claude-specific. Keep them available when switching back. Trace assistant dispatch in `crates/video-studio-ffi/src/lib.rs` and run preparation in `crates/video-studio-core/src/run/prepare.rs` so a visible choice takes effect.
+- [x] Use consistent model precedence for display and dispatch: an applicable override for the active provider, its saved default, then its CLI default. Treat legacy Claude overrides as Claude-specific. Keep them available when switching back. Trace assistant dispatch in `crates/video-studio-ffi/src/lib.rs` and run preparation in `crates/video-studio-core/src/run/prepare.rs` so a visible choice takes effect.
 
 ## Verification
 
 - [ ] Repeat the reproduction with two open projects. Switch providers without reopening either project. Check the Outputs picker, Project model controls and new Assistant session in each. Switch back to Claude and verify the original Fable and Opus choices return.
-- [ ] Use the fake Codex app server with Claude unavailable. Start an assistant turn and a production run from Test. For Codex default, verify the outbound requests delegate model selection to Codex. Repeat with an explicit model from the fake catalog and verify its exact ID reaches the server for the corresponding operation.
+- [x] Use the fake Codex app server with Claude unavailable. Start an assistant turn and a production run from Test. For Codex default, verify the outbound requests delegate model selection to Codex. Repeat with an explicit model from the fake catalog and verify its exact ID reaches the server for the corresponding operation.
 - [ ] Restart with Codex selected. Verify the provider choice, provider-specific overrides and both Settings panes persist. Opening Claude settings leaves the next assistant turn on Codex. Verify these flows on macOS and Windows.
 
 ## Design notes
@@ -105,3 +105,23 @@ The fix adds a Settings › Codex pane and narrows Settings › Assistant to the
 - Verified: `cargo test -p video-studio-core -p video-studio-ffi` and `cargo test -p video-studio-cli --test codex_ffi --test codex_runs --test e2e_tools` pass; macOS `VS_SKIP_CUTLINE=1 ./build.sh debug` builds; Windows UI `npm run build` (type-check and bundle) passes. The pure resolution and label logic was checked outside the apps: `ModelResolution.swift` compiled with a scratch test harness (Claude and Codex precedence, overrides, labels) and `model-resolution.ts` run under Node against the same cases as the core's unit test. New in-app self-test checks compare the local resolution with FFI `models.effective` for both providers (macOS `SelfTest.modelResolutionChecks`, Windows step "model resolution"); they were not run.
 - Not observed: neither app was run. The Settings panes, picker contents and labels, live updates across two open project windows on a provider switch, the run sheet's Codex picker, and the outbound Codex requests are unverified in the GUIs; the Verification boxes remain open.
 - Files: `apps/macos/Sources/VideoStudio/{Core/Models.swift, Model/ModelResolution.swift, Model/AppState.swift, Model/ProjectDocument.swift, Model/AssistantModel.swift, Model/RunController.swift, Views/SettingsView.swift, Views/ClaudePanel.swift, Views/InspectorViews.swift, Views/RunViews.swift, Views/ProjectRootView.swift, Views/WelcomeView.swift, App/SelfTest.swift}`; `apps/windows/ui/src/{model-resolution.ts, app-state.ts, widgets.ts, settings/settings.ts, project/inspector/project.ts, project/inspector/outputs.ts, project/inspector/claude.ts, project/assistant.ts, project/runs.ts, project/sheets.ts, start/start.ts, selftest.ts}`; `crates/video-studio-core/src/{codex.rs, validation.rs, run/prepare.rs}`; `crates/video-studio-ffi/src/lib.rs`; `docs/video-studio/USER_GUIDE.md`.
+
+### 2026-11-22 — Core model precedence and dispatch
+
+- Implemented: "Use consistent model precedence for display and dispatch".
+  - Claude's fields stay Claude-only and are kept for switching back. New Codex fields hold Codex choices: `Models.codex_assistant`, `Models.codex_dry_run` and `RunConfig.codex_production_model`, left out when empty.
+  - `project::effective_model` is the one precedence: an override for the active provider, then the project's or run config's choice for that provider, then that provider's Settings default, then its CLI default. For Codex, `None` means "Codex default".
+  - Runs use it in `run::prepare`, with a separate per-run `RunRequest.codex_model`.
+  - Assistant turns use it in FFI `start_assistant`, through `AssistantRequest.codex_model`.
+  - The apps display it through FFI `models.effective`, or through local copies checked against it.
+  - CLI `--model` overrides the selected provider's model.
+  - The schema and the generated Windows types are regenerated.
+- Verified ("Use the fake Codex app server with Claude unavailable"):
+  - `video-studio-cli --test codex_runs a_codex_run_uses_codex_models_not_claudes` runs with `VIDEO_STUDIO_NO_CLAUDE=1`. A run config with Claude's `opus` and no Codex model sends no `model` in `thread/start` or `turn/start`. With `codex_production_model: gpt-5.5-codex`, that exact ID is sent, and `production_model` stays `opus`.
+  - `--test codex_ffi`: a Codex assistant turn started through FFI with Claude absent sends no model for Codex default and `gpt-5.5-codex` when the project sets it. `models.effective` reports Codex default for a project whose Claude assistant model is Fable.
+  - `project::tests::the_effective_model_follows_the_active_provider` covers precedence for both providers, switching back, and legacy JSON.
+- Desktop: the fix steps for the Settings panes and the model pickers are in the entry above, built but not observed, so their boxes stay unchecked.
+- Checks: all workspace tests pass, clippy is clean, the macOS debug build and the Windows UI build pass, and the Windows shell type-checks.
+- Not done: the first and third Verification boxes need the running apps on macOS and Windows.
+- Files: `crates/video-studio-core/src/{project.rs,run/prepare.rs,assistant.rs}`, `crates/video-studio-ffi/src/lib.rs`, `crates/video-studio-cli/src/main.rs`, `crates/video-studio-cli/tests/{codex_runs.rs,codex_ffi.rs,codex_assistant.rs,e2e_tools.rs}`, `schema/cutproj.schema.json`, `apps/windows/ui/src/generated/project.ts`.
+- Commit/PR: `6f953b7` (core) and `5d23593` (desktop) on branch `fix-BUG-fond-crane-62ZP`.
