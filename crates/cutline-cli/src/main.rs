@@ -34,6 +34,10 @@ struct Cli {
 enum Cmd {
     /// Check tools, capabilities, fonts, models, Chrome and disk space.
     Doctor,
+    /// Version and source fingerprint of this build, so apps can tell a stale cutline from the
+    /// one they were built with (the version number alone rarely changes).
+    #[command(hide = true)]
+    BuildInfo,
     /// Manage external tools (ffmpeg, models, chrome).
     Deps {
         #[command(subcommand)]
@@ -385,6 +389,10 @@ fn dispatch(cli: Cli) -> CmdResult {
         Cmd::Still { input, out, max_side, quality } => still_cmd::run(&input, &out, max_side, quality),
         Cmd::Validate { project } => edit::validate(&project),
         Cmd::Schema => edit::schema(),
+        Cmd::BuildInfo => {
+            let (version, source) = (env!("CARGO_PKG_VERSION"), env!("CUTLINE_SOURCE"));
+            Ok(Output::ok(json!({"version": version, "source": source}), format!("cutline {version} (source {source})")))
+        }
         Cmd::Init { dir, dir_flag, target, style, assets, name } => {
             let dir = dir_flag.unwrap_or(dir);
             edit::init(&dir, target.as_deref(), &style, assets.as_deref(), name.as_deref())

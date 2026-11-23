@@ -64,7 +64,7 @@ pub fn activity(l: &Loaded, asset: &str, from: f64, to: f64) -> Result<Vec<f32>>
         let changed = w[0].iter().zip(w[1]).filter(|(a, b)| a.abs_diff(**b) > 12).count();
         v.push(changed as f32 / (W * H) as f32);
     }
-    cache.put_json(&key, &v)?;
+    cache.store_json(&key, &v);
     Ok(v)
 }
 

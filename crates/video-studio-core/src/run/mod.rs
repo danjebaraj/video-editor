@@ -8,6 +8,7 @@ pub mod prepare;
 pub mod prompt;
 pub mod proxy;
 pub mod readiness;
+pub mod relay;
 
 pub use events::{Event, EventKind, EventSink};
 pub use orchestrator::{start_run, RunHandle, RunOutcome};

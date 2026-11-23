@@ -175,6 +175,12 @@ pub fn run(command: ElevenCommand, secrets: &dyn Secrets) -> i32 {
             return 126;
         }
     };
+    // Inside Codex's sandbox the key store and the network are out of reach: the run's host
+    // makes the call instead (BUG-deft-lily-344X)
+    if let Some(dir) = ctx.relay_dir.as_ref().filter(|_| video_studio_core::run::relay::sandboxed()) {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        return video_studio_core::run::relay::forward(dir, &args);
+    }
     let result: Result<(), Error> = (|| match command {
         ElevenCommand::Tts { args, out } => generate(&ctx, tts_request(&ctx, &args)?, &out, secrets),
         ElevenCommand::Music { args, out } => {
@@ -213,10 +219,7 @@ pub fn run(command: ElevenCommand, secrets: &dyn Secrets) -> i32 {
                 eleven::VoiceProvider::Elevenlabs => {
                     let key = match &ctx.test_api_key {
                         Some(k) => k.clone(),
-                        None => secrets
-                            .get(video_studio_core::platform::ELEVEN_KEY)?
-                            .filter(|k| !k.is_empty())
-                            .ok_or_else(|| Error::Environment("No ElevenLabs API key is set.".into()))?,
+                        None => eleven::stored_key(secrets)?,
                     };
                     eleven::Client::new(&key, ctx.base_url.as_deref()).voices(search.as_deref())?
                 }

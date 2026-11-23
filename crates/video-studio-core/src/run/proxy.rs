@@ -238,6 +238,7 @@ mod tests {
             base_url: None,
             test_api_key: None,
             capture: None,
+            relay_dir: None,
         };
         let args: Vec<String> = ["--json", "validate", "project.json5"].iter().map(|s| s.to_string()).collect();
         assert_eq!(run_proxy(&ctx, &args), 3);

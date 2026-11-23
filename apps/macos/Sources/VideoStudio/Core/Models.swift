@@ -760,6 +760,10 @@ struct CutlineInfo: Codable, Equatable {
     /// when the environment goes back to the core; dropping it reported every cutline as an
     /// older build (BUG-0003).
     var still: Bool?
+    /// Whether it has `cutline audio`, which mixes an Audio Review; kept for the same reason.
+    var audio: Bool?
+    /// The source fingerprint it was built from (`cutline build-info`); kept for the same reason.
+    var source: String?
 }
 
 struct DoctorSummary: Codable, Equatable {

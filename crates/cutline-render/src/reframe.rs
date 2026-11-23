@@ -43,7 +43,7 @@ pub fn analysis(l: &Loaded, c: &TClip) -> Result<Option<Analysis>> {
         ANALYSIS_RATE,
         ANALYSIS_WIDTH,
     )?;
-    cc.put_json(&key, &a)?;
+    cc.store_json(&key, &a);
     Ok(Some(a))
 }
 

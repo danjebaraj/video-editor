@@ -171,7 +171,7 @@ enum Command {
     /// Print the JSON Schema of the .cutproj project file
     Schema,
     /// Show which cutline the app uses (Settings › cutline, PATH, then the repo), and whether
-    /// it has `cutline still` for HEIC/HEIF photos. Exits 1 when none is found.
+    /// it is the build this Video Studio expects. Exits 1 when none is found.
     Cutline {
         #[arg(long)]
         json: bool,
@@ -190,6 +190,8 @@ fn cmd_cutline(json: bool) -> i32 {
     if json {
         let v = serde_json::json!({
             "cutline": found,
+            "current": found.as_ref().is_some_and(|c| c.current()),
+            "expected_source": video_studio_core::claude::locate::EXPECTED_CUTLINE_SOURCE,
             "settings_path": settings.cutline_path,
             "settings_repo": settings.cutline_repo,
         });
@@ -200,7 +202,11 @@ fn cmd_cutline(json: bool) -> i32 {
                 "{} ({}){}",
                 c.path,
                 c.version,
-                if c.still { "" } else { " — an older build without `cutline still`" }
+                if c.current() {
+                    ""
+                } else {
+                    " — out of date: not the build this Video Studio expects; rebuild it with scripts/build-and-release.sh"
+                }
             ),
             None => println!("cutline wasn't found"),
         }
@@ -378,7 +384,9 @@ enum StandinCommand {
 fn logged_helper(run: impl FnOnce() -> i32) -> i32 {
     let started = std::time::Instant::now();
     let code = run();
-    if let Ok(ctx) = HelperContext::from_env() {
+    // a call the host makes for Codex's sandboxed helper is logged once, by that helper
+    let relayed = std::env::var(video_studio_core::run::relay::RELAYED_ENV).is_ok_and(|v| !v.is_empty());
+    if let Some(ctx) = HelperContext::from_env().ok().filter(|_| !relayed) {
         let argv: Vec<String> = std::env::args().skip(1).collect();
         ctx.log_helper(&argv, code, started.elapsed().as_secs_f64());
     }

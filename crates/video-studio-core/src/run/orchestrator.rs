@@ -192,6 +192,11 @@ struct Driver {
     first_failure: Option<String>,
     /// cutline calls (by number) that only asked for `--help` (BUG-green-cricket-P6HQ).
     help_calls: std::collections::HashSet<u64>,
+    /// Operations that failed in the current stage and weren't retried successfully: only a
+    /// success of the same operation clears its failure (BUG-deft-lily-344X).
+    stage_failures: std::collections::HashSet<String>,
+    /// ElevenLabs calls that failed and weren't later made successfully: (command, output, error).
+    eleven_failures: Vec<(String, Option<String>, String)>,
     saw_result: bool,
     warnings: Vec<String>,
     denials: u32,
@@ -231,6 +236,36 @@ pub fn tool_summary(name: &str, input: &Value, root: &Utf8Path) -> String {
 /// A one-line description of a tool call that came back as an error, for the transcript: what
 /// was tried and why it didn't work, in place of a bare "Bash failed". Claude usually reads the
 /// same message and tries again, so this is a note on the way, not the run failing.
+/// What a tool call does, for telling a retry from another call: `video-studio eleven music`,
+/// `cutline audio`, `Write summary.md`. Options and values don't count (BUG-deft-lily-344X).
+pub fn operation(name: &str, input: &Value) -> String {
+    if name != "Bash" {
+        return format!("{name} {}", input["file_path"].as_str().unwrap_or(""));
+    }
+    let command = input["command"].as_str().unwrap_or("");
+    let words: Vec<String> = command
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c| c == '\'' || c == '"').to_string())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let mut rest = words
+        .iter()
+        .skip_while(|w| matches!(w.as_str(), "bash" | "sh" | "zsh" | "-lc" | "-c" | "env") || w.contains('='));
+    let Some(program) = rest.next() else { return command.to_string() };
+    let program = program.rsplit(['/', '\\']).next().unwrap_or(program).trim_end_matches(".exe").to_string();
+    let subcommands = match program.as_str() {
+        "video-studio" => 2,
+        "cutline" => 1,
+        _ => 0,
+    };
+    let mut op = program;
+    for w in rest.filter(|w| !w.starts_with('-')).take(subcommands) {
+        op.push(' ');
+        op.push_str(w);
+    }
+    op
+}
+
 pub fn tool_failure(name: &str, input: &Value, root: &Utf8Path, content: &str) -> String {
     let rel = |p: &str| {
         let path = Utf8Path::new(p);
@@ -319,6 +354,8 @@ impl Driver {
             result_error: None,
             first_failure: None,
             help_calls: Default::default(),
+            stage_failures: Default::default(),
+            eleven_failures: Vec::new(),
             saw_result: false,
             warnings: Vec::new(),
             denials: 0,
@@ -365,6 +402,7 @@ impl Driver {
             }
         }
         self.finish_stage();
+        self.stage_failures.clear();
         self.emit(EventKind::StageStarted { stage: stage.into(), label: label.into() });
         self.stage = Some((stage.into(), label.into(), Instant::now(), true));
     }
@@ -489,6 +527,17 @@ impl Driver {
             // traced, not counted: it's true of every Codex run, so it doesn't change the outcome
             self.emit(EventKind::Warning { message: crate::codex::agent::READS_UNCHECKED_WARNING.into() });
         }
+        // Codex's sandbox can't reach the key store or the network: the host makes the
+        // ElevenLabs calls the helper hands it (BUG-deft-lily-344X)
+        let relay = match (&self.p.codex, &self.p.helper_context.relay_dir) {
+            (Some(_), Some(dir)) => Some(super::relay::HostRelay::start(super::relay::HostSetup {
+                dir: dir.clone(),
+                helper: self.p.helper.clone(),
+                context_file: self.p.context_dir.join("context.json"),
+                run_folder: self.p.folder.clone(),
+            })),
+            _ => None,
+        };
         let launched = match &self.p.codex {
             Some(c) => CodexProcess::start(c, &self.p.prompt).map(|(p, rx)| (AgentProcess::Codex(p), rx)),
             None => ClaudeProcess::start(&self.p.options, &self.p.prompt).map(|(p, rx)| (AgentProcess::Claude(p), rx)),
@@ -544,6 +593,9 @@ impl Driver {
                 self.tick_logs(&mut activity, &mut eleven_log);
                 *self.shared.process.lock().unwrap() = None;
             }
+        }
+        if let Some(r) = relay {
+            r.stop();
         }
         let cancelled = self.shared.cancel.load(Ordering::SeqCst) && !turns_over;
         self.finish(launch_error, exit, cancelled)
@@ -620,6 +672,7 @@ impl Driver {
                     if let (Some(s), Some(cur)) = (&stage, self.stage.as_mut()) {
                         if &cur.0 == s {
                             cur.3 = false;
+                            self.stage_failures.insert(operation(&name, &input));
                         }
                     }
                     let text = tool_failure(&name, &input, &self.p.folder, &content);
@@ -634,9 +687,11 @@ impl Driver {
                         failed: true,
                     });
                 } else if let (Some(s), Some(cur)) = (&stage, self.stage.as_mut()) {
-                    // a later success in the same stage clears an earlier failure (fix and retry)
+                    // a later success of the same operation clears its failure (fix and retry);
+                    // another one, such as a quote after a failed generation, doesn't
                     if &cur.0 == s {
-                        cur.3 = true;
+                        self.stage_failures.remove(&operation(&name, &input));
+                        cur.3 = self.stage_failures.is_empty();
                     }
                 }
             }
@@ -810,7 +865,13 @@ impl Driver {
         for line in eleven_log.read_new() {
             let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
             changed = true;
-            if v["ok"].as_bool() == Some(true) {
+            let command = v["command"].as_str().unwrap_or("eleven").to_string();
+            if v["ok"].as_bool() == Some(false) {
+                let error = v["error"].as_str().unwrap_or("it failed").to_string();
+                self.eleven_failures.retain(|(c, ..)| c != &command);
+                self.eleven_failures.push((command, v["out"].as_str().map(|o| self.shown(o)), error));
+            } else if v["ok"].as_bool() == Some(true) {
+                self.eleven_failures.retain(|(c, ..)| c != &command);
                 self.eleven_credits += v["credits"].as_u64().unwrap_or(0);
                 if let Some(out) = v["out"].as_str() {
                     self.emit(EventKind::Artifact {
@@ -945,11 +1006,36 @@ impl Driver {
         // Writes that never completed are named, whatever else happened (BUG-green-cricket-P6HQ).
         if let Some(paths) = self.unfinished_writes() {
             if failed {
-                if let Some(m) = message.as_mut().filter(|m| !m.contains(&paths)) {
+                // unless the failure already names each of them (the patch deadline does)
+                if let Some(m) = message.as_mut().filter(|m| !paths.split(", ").all(|p| m.contains(p))) {
                     m.push_str(&format!(" These changes never completed: {paths}."));
                 }
             } else if !cancelled {
                 self.warn(format!("{} never reported these changes complete: {paths}.", self.agent_short()));
+            }
+        }
+        // An ElevenLabs call that failed and wasn't made again is said with its own error,
+        // whatever else stopped the run (BUG-deft-lily-344X).
+        if !self.eleven_failures.is_empty() && !cancelled {
+            let said: Vec<String> = self
+                .eleven_failures
+                .iter()
+                .map(|(command, out, error)| {
+                    let what = match out {
+                        Some(o) => format!("`video-studio eleven {command}` (for `{o}`)"),
+                        None => format!("`video-studio eleven {command}`"),
+                    };
+                    format!("{what} failed: {}", error.trim().trim_end_matches('.'))
+                })
+                .collect();
+            let note = format!("ElevenLabs: {}.", said.join("; "));
+            if failed {
+                if let Some(m) = message.as_mut().filter(|m| !m.contains(&note)) {
+                    m.push(' ');
+                    m.push_str(&note);
+                }
+            } else {
+                self.warn(note);
             }
         }
         // An Audio Review that failed for another reason also says the soundtrack wasn't mixed
@@ -1164,6 +1250,17 @@ impl Driver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_operation_is_the_command_without_its_options() {
+        use serde_json::json;
+        let bash = |c: &str| operation("Bash", &json!({"command": c}));
+        assert_eq!(bash("bash -lc 'video-studio eleven music --prompt \"calm piano\" --length 49 --out music.mp3'"), "video-studio eleven music");
+        assert_eq!(bash("video-studio eleven quote music --length 49"), "video-studio eleven quote");
+        assert_eq!(bash("PATH=/x /bin/cutline audio project.json5 --export youtube-shorts"), "cutline audio");
+        assert_ne!(bash("video-studio eleven music --length 10"), bash("video-studio eleven quote music"));
+        assert_eq!(operation("Write", &json!({"file_path": "/r/summary.md"})), "Write /r/summary.md");
+    }
 
     #[test]
     fn a_failed_tool_call_says_what_was_tried_and_why() {

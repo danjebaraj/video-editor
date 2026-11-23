@@ -198,19 +198,27 @@ impl EnvProbe for ShellEnv {
 fn environment_arg(args: &Value, settings: &Settings) -> R<Environment> {
     Ok(match opt::<Environment>(args, "environment")? {
         Some(mut e) => {
-            recheck_still(&mut e);
+            recheck_cutline(&mut e);
             e
         }
         None => detect_environment(settings),
     })
 }
 
-/// A shell that doesn't know `still` (an older app build) sends the environment without it, and
-/// it reads as `false`, so every cutline looked like an old build (BUG-0003). The cutline itself
-/// is asked again before anything relies on `still: false`.
-fn recheck_still(env: &mut Environment) {
-    if let Some(c) = env.cutline.as_mut().filter(|c| !c.still) {
-        c.still = locate::has_still(Utf8Path::new(&c.path));
+/// A shell that doesn't know `still`, `audio` or `source` (an older app build) sends the
+/// environment without them, and they read as `false` or `None`, so every cutline looked like an
+/// old build (BUG-0003). The cutline itself is asked again before anything relies on them.
+fn recheck_cutline(env: &mut Environment) {
+    if let Some(c) = env.cutline.as_mut() {
+        if !c.still {
+            c.still = locate::has_still(Utf8Path::new(&c.path));
+        }
+        if !c.audio {
+            c.audio = locate::has_audio(Utf8Path::new(&c.path));
+        }
+        if c.source.is_none() {
+            c.source = locate::build_source(Utf8Path::new(&c.path));
+        }
     }
 }
 
@@ -958,10 +966,12 @@ mod tests {
         };
         let mut current = parse(&make("new", true));
         assert!(!current.cutline.as_ref().unwrap().still);
-        recheck_still(&mut current);
-        assert!(current.cutline.unwrap().still);
+        recheck_cutline(&mut current);
+        let c = current.cutline.unwrap();
+        assert!(c.still && c.audio);
         let mut old = parse(&make("old", false));
-        recheck_still(&mut old);
-        assert!(!old.cutline.unwrap().still);
+        recheck_cutline(&mut old);
+        let c = old.cutline.unwrap();
+        assert!(!c.still && !c.audio);
     }
 }

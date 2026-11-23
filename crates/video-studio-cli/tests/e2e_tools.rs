@@ -140,6 +140,7 @@ fn helper_context(w: &World, url: &str, cap: u64, mode: Mode) -> (Utf8PathBuf, U
         base_url: Some(url.to_string()),
         test_api_key: None,
         capture: Some(Default::default()),
+        relay_dir: None,
     };
     let file = w.root.join("context.json");
     std::fs::write(&file, serde_json::to_string(&ctx).unwrap()).unwrap();
@@ -719,7 +720,13 @@ fn run_env(w: &World, script: &Utf8Path) -> RunEnv {
         platforms: Platforms::bundled(),
         models: ModelList::bundled(),
         claude: fake_claude_info(),
-        cutline: CutlineInfo { path: FAKE_CUTLINE.into(), version: "0.1.0-fake".into(), still: true },
+        cutline: CutlineInfo {
+            path: FAKE_CUTLINE.into(),
+            version: "0.1.0-fake".into(),
+            still: true,
+            audio: true,
+            source: Some(video_studio_core::claude::locate::EXPECTED_CUTLINE_SOURCE.into()),
+        },
         helper: VIDEO_STUDIO.into(),
         cutline_home: None,
         cutline_doctor: None,
@@ -1194,4 +1201,35 @@ fn a_revision_under_the_other_provider_starts_fresh_with_the_runs_context() {
     assert!(trace.iter().any(|t| t["prompt"]
         .as_str()
         .is_some_and(|p| p.contains("Slow the hook down.") && p.contains("new session without its conversation"))));
+}
+
+/// BUG-deft-lily-344X: a helper that runs inside Codex's sandbox with no host to hand the call
+/// to can't read the key store; it says so instead of asking for a key the user already saved,
+/// and spends nothing. A helper with truly no key still says no key is set.
+#[test]
+fn a_sandboxed_helper_says_the_key_store_is_out_of_reach_not_that_the_key_is_missing() {
+    let w = World::new();
+    let server = fake_eleven();
+    let (run, ctx_file) = helper_context(&w, &server.url, 20_000, Mode::Production);
+    let music = |sandboxed: bool| {
+        let mut c = w.command(&["eleven", "music", "--prompt", "calm", "--length", "5", "--out", "bed.mp3"]);
+        c.env("VIDEO_STUDIO_RUN_CONTEXT", ctx_file.as_str())
+            .env("VIDEO_STUDIO_TEST_SECRETS", w.root.join("unreachable.json").as_str())
+            .current_dir(&run);
+        if sandboxed {
+            c.env("CODEX_SANDBOX", "seatbelt").env("CODEX_SANDBOX_NETWORK_DISABLED", "1");
+        }
+        c.output().unwrap()
+    };
+    let inside = music(true);
+    assert_ne!(inside.status.code(), Some(0), "{}", stderr(&inside));
+    let err = stderr(&inside);
+    assert!(err.contains("inside Codex's sandbox") && err.contains("don't ask the user to add it again"), "{err}");
+    assert!(!err.contains("Ask the user to add one"), "{err}");
+    let unset = music(false);
+    assert!(stderr(&unset).contains("No ElevenLabs API key is set"), "{}", stderr(&unset));
+    assert_eq!(server.count("/v1/music"), 0);
+    let log = ndjson(&run.join("logs/eleven.ndjson"));
+    assert_eq!(log.len(), 2);
+    assert!(log.iter().all(|l| l["credits"] == 0 && l["ok"] == false), "{log:?}");
 }

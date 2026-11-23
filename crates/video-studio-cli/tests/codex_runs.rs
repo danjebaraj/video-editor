@@ -470,3 +470,124 @@ fn a_failed_or_partly_outside_codex_patch_writes_nothing_and_says_so() {
     assert!(!folder.join("audio/inside.txt").exists() && !folder.parent().unwrap().join("outside.txt").exists());
     assert!(fin["message"].as_str().unwrap().contains("scene1.txt"), "{fin}");
 }
+
+fn sandboxed_music() -> Value {
+    json!({"command": "video-studio eleven music --prompt calm-bed --length 10 --out music.mp3", "sandboxed": true})
+}
+
+/// BUG-deft-lily-344X: Codex runs the helper in its sandbox, where the key store and the
+/// network are out of reach (the fake runs it with an empty key store). The helper hands the
+/// call to the run's host, which has the saved key: the local service gets the authenticated
+/// request and the music lands in audio/, counted once, with nothing left in the relay folder.
+#[test]
+fn a_sandboxed_codex_helper_makes_its_elevenlabs_call_through_the_host() {
+    let server = fake_eleven();
+    let mut w = codex_world(json!([
+        four_scripts("ok"),
+        sandboxed_music(),
+        {"write": {"path": "project.json5", "content": PROJECT_JSON5}},
+        {"command": "cutline audio project.json5 --export youtube-shorts --out outputs/audio-review.wav"},
+        {"write": {"path": "summary.md", "content": "## What you will hear\nFour passages over a bed.\n"}}
+    ]));
+    w.eleven_url = Some(server.url.clone());
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}\n{}", stderr(&o));
+    assert_eq!(server.count("/v1/music"), 1, "the host's call reached the service with the saved key\n{:#?}", tool_texts(&ev));
+    assert!(fin["eleven_credits"].as_u64().unwrap() > 0, "{fin}");
+    let r = w.load_project().runs.pop().unwrap();
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    assert_eq!(std::fs::read_to_string(folder.join("audio/music.mp3")).unwrap(), "FAKE-MP3 music: calm-bed");
+    let helper = std::fs::read_to_string(folder.join("logs/helper.ndjson")).unwrap();
+    assert_eq!(helper.lines().filter(|l| l.contains("\"music\"")).count(), 1, "{helper}");
+    let left: Vec<String> = std::fs::read_dir(folder.join("logs/relay"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n != "closed")
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+    assert!(folder.join("outputs/audio-review.wav").is_file());
+}
+
+/// BUG-deft-lily-344X: two accepted changes Codex never reports applied, the second accepted
+/// shortly before the first one's deadline, with a failed music call between them (a saved key
+/// the service refuses). Only the first is said to have timed out; the second is
+/// named apart with its own age; the music failure keeps its own error in the outcome and the
+/// summary; the Audio stage isn't a success.
+#[test]
+fn only_the_expired_codex_patch_times_out_and_the_music_failure_is_kept() {
+    let w = codex_world(json!([
+        four_scripts("withhold"),
+        sandboxed_music(),
+        {"sleep": 700},
+        {"patch": {"id": 7, "complete": "withhold", "files": [
+            {"path": "project.json5", "content": PROJECT_JSON5},
+            {"path": "summary.md", "content": "## What you will hear\nNothing yet.\n"}
+        ]}},
+        {"hang": true}
+    ]));
+    // a saved key the service refuses: validation passes, the generation fails
+    std::fs::write(&w.secrets, json!({"elevenlabs-api-key": "revoked-key"}).to_string()).unwrap();
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert_eq!(fin["status"], "failed", "{fin}");
+    assert_eq!(fin["eleven_credits"], 0);
+    let msg = fin["message"].as_str().unwrap();
+    let (timed_out, rest) = msg.split_once("A later change").unwrap_or_else(|| panic!("{msg}"));
+    assert!(timed_out.contains("`audio/scene1.txt`") && timed_out.contains("`audio/scene4.txt`"), "{msg}");
+    assert!(!timed_out.contains("project.json5"), "the younger change didn't time out: {msg}");
+    assert!(rest.contains("`project.json5`, `summary.md`"), "{msg}");
+    assert!(!msg.contains("nothing after them ran") && !msg.contains("These changes never completed"), "{msg}");
+    let r = w.load_project().runs.pop().unwrap();
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    let calls = ndjson(&folder.join("logs/eleven.ndjson"));
+    assert_eq!((calls.len(), &calls[0]["ok"], &calls[0]["credits"]), (1, &json!(false), &json!(0)), "{calls:?}");
+    let error = calls[0]["error"].as_str().unwrap().trim_end_matches('.').to_string();
+    assert!(msg.contains("`video-studio eleven music`") && msg.contains(&error), "{error}\n{msg}");
+    assert!(msg.contains("outputs/audio-review.wav"), "{msg}");
+    let audio_ok: Vec<bool> = ev
+        .iter()
+        .filter(|e| e["event"] == "stage_finished" && e["stage"] == "audio")
+        .filter_map(|e| e["ok"].as_bool())
+        .collect();
+    assert_eq!(audio_ok, vec![false], "{ev:#?}");
+    let summary = std::fs::read_to_string(folder.join("logs/summary.md")).unwrap();
+    assert!(summary.contains(&error), "{summary}");
+    assert!(!folder.join("outputs/audio-review.wav").exists());
+    assert!(!ev.iter().any(|e| e["event"] == "artifact" && e["kind"] == "output"), "nothing to play");
+}
+
+/// BUG-deft-lily-344X: the older change completes just before its deadline. Its timer clears
+/// and its files are written once each; the newer one keeps its own deadline and is the only
+/// one said to have timed out.
+#[test]
+fn a_codex_patch_completed_in_time_clears_only_its_own_deadline() {
+    let w = codex_world(json!([
+        four_scripts("withhold"),
+        {"sleep": 600},
+        {"patch": {"id": 7, "complete": "withhold", "files": [
+            {"path": "project.json5", "content": PROJECT_JSON5},
+            {"path": "summary.md", "content": "## What you will hear\nNothing yet.\n"}
+        ]}},
+        {"sleep": 400},
+        {"finish_patch": 2},
+        {"hang": true}
+    ]));
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert_eq!(fin["status"], "failed", "{fin}");
+    assert_eq!(ev.iter().filter(|e| e["event"] == "run_finished").count(), 1);
+    let msg = fin["message"].as_str().unwrap();
+    assert!(msg.contains("`project.json5`, `summary.md`") && !msg.contains("scene1.txt"), "{msg}");
+    assert!(!msg.contains("A later change"), "{msg}");
+    let tools = tool_texts(&ev);
+    for i in 1..=4 {
+        let wrote = format!("Wrote `audio/scene{i}.txt`");
+        assert_eq!(tools.iter().filter(|t| **t == wrote).count(), 1, "{tools:?}");
+    }
+    assert!(!tools.iter().any(|t| t.contains("project.json5") && t.starts_with("Wrote")), "{tools:?}");
+}

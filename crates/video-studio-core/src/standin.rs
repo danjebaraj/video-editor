@@ -211,6 +211,7 @@ mod tests {
             base_url: None,
             test_api_key: None,
             capture: None,
+            relay_dir: None,
         }
     }
 

@@ -96,12 +96,22 @@ impl Client {
                 v["detail"]["message"].as_str().or(v["detail"].as_str()).or(v["message"].as_str()).map(str::to_string)
             })
             .unwrap_or_else(|| text.chars().take(300).collect());
+        let message = message.trim();
+        if status == 401 {
+            if let Some(permission) = permission_in(message) {
+                // A key limited to some permissions works for everything else: saying it was
+                // rejected sent users to replace a key that was fine (BUG-deft-lily-344X).
+                return Error::Http(format!(
+                    "ElevenLabs returned 401: this API key works, but it isn't allowed `{permission}`. Turn that permission on for the key in ElevenLabs (Developers › API Keys), or save a key without restrictions in Settings › ElevenLabs. ElevenLabs said: {message}"
+                ));
+            }
+        }
         let hint = match status {
             401 => " (the API key was rejected)",
             402 | 429 => " (quota or rate limit)",
             _ => "",
         };
-        Error::Http(format!("ElevenLabs returned {status}{hint}: {}", message.trim()))
+        Error::Http(format!("ElevenLabs returned {status}{hint}: {message}"))
     }
 
     /// A key limited to some permissions gets a 401 naming the one a request lacks ("The API key you
@@ -112,9 +122,7 @@ impl Client {
         if !message.contains("returned 401") {
             return None;
         }
-        let rest = message.split("missing the permission ").nth(1)?;
-        let name = rest.split_whitespace().next()?.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
-        (!name.is_empty()).then(|| name.to_string())
+        permission_in(message)
     }
 
     fn finish(mut resp: ureq::http::Response<ureq::Body>) -> Result<Generated> {
@@ -267,6 +275,13 @@ pub(super) fn urlencode(s: &str) -> String {
     out
 }
 
+/// The permission named in ElevenLabs' "missing the permission … to execute this operation".
+fn permission_in(message: &str) -> Option<String> {
+    let rest = message.split("missing the permission ").nth(1)?;
+    let name = rest.split_whitespace().next()?.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,6 +306,9 @@ mod tests {
             br#"{"detail":{"status":"missing_permissions","message":"The API key you used is missing the permission user_read to execute this operation."}}"#,
         );
         assert_eq!(Client::missing_permission(&scoped).as_deref(), Some("user_read"));
+        let text = scoped.to_string();
+        assert!(text.contains("this API key works, but it isn't allowed `user_read`"), "{text}");
+        assert!(!text.contains("rejected"), "{text}");
         let invalid = Client::fail(401, br#"{"detail":{"status":"invalid_api_key","message":"Invalid API key"}}"#);
         assert_eq!(Client::missing_permission(&invalid), None);
         assert_eq!(Client::missing_permission(&Client::fail(429, b"slow down")), None);
