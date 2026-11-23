@@ -3,7 +3,7 @@
 
 import { h, clear, button, iconButton, icon, Icons, usd, bytes, duration, spinner, emptyState, checkbox } from '../../dom';
 import { effect } from '../../store';
-import { brands, claudeAvailable, environment } from '../../app-state';
+import { brands, assistantAvailable, environment, readiness, settings } from '../../app-state';
 import { copyButton } from '../../text-tools';
 import type { ProjectWindow } from '../window';
 import type { Issue } from '../../types';
@@ -40,7 +40,7 @@ const FIX_LABEL: Record<string, string> = {
 export function validationTab(w: ProjectWindow): HTMLElement {
   const root = h('div', { class: 'validation-tab' });
   const d = w.doc;
-  effect([d.report, d.validating, w.runs.live, d.project, brands, w.assistant.running, environment], () => {
+  effect([d.report, d.validating, w.runs.live, d.project, brands, w.assistant.running, environment, settings, readiness], () => {
     const r = d.report.value;
     const head = h(
       'div',
@@ -53,14 +53,14 @@ export function validationTab(w: ProjectWindow): HTMLElement {
       button('Dry Run…', () => w.runs.requestDryRun(), { appearance: 'subtle', disabled: d.validating.value || w.runs.running }),
     );
     if (!r) {
-      clear(root, head, emptyState('Validate before you run', 'Checks the environment, media, spec, brand, outputs and budget. Nothing is sent to Claude.', button('Validate', () => d.validate(), { appearance: 'primary' })));
+      clear(root, head, emptyState('Validate before you run', 'Checks the environment, media, spec, brand, outputs and budget. Nothing is sent to the Assistant.', button('Validate', () => d.validate(), { appearance: 'primary' })));
       return;
     }
     const est = r.estimates;
     const estimates = h(
       'dl',
       { class: 'estimates' },
-      h('dt', null, 'Claude (approximate)'), h('dd', null, `${usd(est.claude_usd_low)} – ${usd(est.claude_usd_high)}`),
+      h('dt', null, 'Assistant (approximate)'), h('dd', null, `${usd(est.claude_usd_low)} – ${usd(est.claude_usd_high)}`),
       h('dt', null, 'ElevenLabs credits'), h('dd', null, `${est.eleven_credits} of ${est.eleven_cap}${est.eleven_remaining != null ? ` (${est.eleven_remaining} left)` : ''}`),
       h('dt', null, 'Disk'), h('dd', null, `${bytes(est.disk_bytes)} needed${est.free_bytes != null ? `, ${bytes(est.free_bytes)} free` : ''}`),
       h('dt', null, 'Planned length'), h('dd', null, `${duration(est.duration_s)} · ${est.voice_over_words} voice-over words`),
@@ -71,11 +71,11 @@ export function validationTab(w: ProjectWindow): HTMLElement {
       head,
       r.issues.length === 0 ? h('div', { class: 'ready', role: 'status' }, icon(Icons.checkCircle, 'ok'), ' Ready to run') : null,
       r.issues.length
-        ? button('Ask Claude to Fix', () => w.assistant.askToFixFindings(), {
+        ? button('Ask Assistant to Fix', () => w.assistant.askToFixFindings(), {
             appearance: 'primary',
             glyph: Icons.chat,
-            disabled: !claudeAvailable() || w.assistant.running.value,
-            title: 'Opens Claude with a request to fix these findings. The findings are sent along; you can edit the request before sending.',
+            disabled: !assistantAvailable() || w.assistant.running.value,
+            title: 'Opens the Assistant with a request to fix these findings. The findings are sent along; you can edit the request before sending.',
           })
         : null,
       h('ul', { class: 'issues', 'aria-label': 'Validation issues' }, groups.flat().map((i) => issueRow(i))),
@@ -105,7 +105,7 @@ export function validationTab(w: ProjectWindow): HTMLElement {
           i.severity === 'warning' ? checkbox('Acknowledge', d.acknowledged.has(i.id), (v) => (v ? d.acknowledged.add(i.id) : d.acknowledged.delete(i.id))) : null,
         ),
       ),
-      iconButton(Icons.chat, 'Ask Claude to fix this', () => w.assistant.askToFixFindings(i), { disabled: !claudeAvailable() || w.assistant.running.value }),
+      iconButton(Icons.chat, 'Ask the Assistant to fix this', () => w.assistant.askToFixFindings(i), { disabled: !assistantAvailable() || w.assistant.running.value }),
       copyButton('Copy this result', () => issueText(i)),
     );
   }

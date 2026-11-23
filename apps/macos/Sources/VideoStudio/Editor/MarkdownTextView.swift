@@ -306,7 +306,7 @@ final class MarkdownTextView: NSTextView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak pop] in pop?.close() }
     }
 
-    /// Hovering an island marker shows its name, any problem and "Ask Claude about this island".
+    /// Hovering an island marker shows its name, any problem and "Ask Assistant about this island".
     private func showIslandHover(_ idx: Int, at point: NSPoint) -> Bool {
         guard let c, let marker = c.islandMarker(at: idx) else { return false }
         if hoverPopover?.isShown == true { return true }
@@ -348,8 +348,8 @@ final class MarkdownTextView: NSTextView {
             let item = NSMenuItem(title: "Island “\(island.name)”", action: nil, keyEquivalent: "")
             let sub = NSMenu()
             if island.isUsable {
-                sub.addItem(ClosureMenuItem(title: "Ask Claude…") { [weak c] in c?.askAboutIsland(island) })
-                sub.items.last?.isHidden = !AppState.shared.claudeAvailable
+                sub.addItem(ClosureMenuItem(title: "Ask Assistant…") { [weak c] in c?.askAboutIsland(island) })
+                sub.items.last?.isHidden = !AppState.shared.assistantAvailable
                 sub.addItem(ClosureMenuItem(title: "Copy Reference") { [weak c] in c?.copyIslandReference(island) })
                 sub.addItem(.separator())
             }
@@ -373,8 +373,8 @@ final class MarkdownTextView: NSTextView {
         if selectedRange().length > 0 {
             extra.append(NSMenuItem(title: "Convert CSV/TSV to Table", action: #selector(convertToTable(_:)), keyEquivalent: ""))
         }
-        if AppState.shared.claudeAvailable, selectedRange().length > 0 {
-            extra.append(ClosureMenuItem(title: "Ask Claude About Selection…") { [weak c] in c?.askAboutSelection() })
+        if AppState.shared.assistantAvailable, selectedRange().length > 0 {
+            extra.append(ClosureMenuItem(title: "Ask Assistant About Selection…") { [weak c] in c?.askAboutSelection() })
         }
         if !extra.isEmpty {
             for (i, item) in extra.enumerated() { menu.insertItem(item, at: i) }

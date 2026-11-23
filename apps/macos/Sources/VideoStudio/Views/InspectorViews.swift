@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Inspector: Claude, Project, Outputs, Validation, Run (spec §17).
+/// Inspector: Assistant, Project, Outputs, Validation, Run (spec §17).
 struct InspectorView: View {
     @ObservedObject var document: ProjectDocument
     @ObservedObject var chatFocus: FocusRequest
@@ -155,9 +155,9 @@ struct AppRecordingSection: View {
 
     var body: some View {
         InspectorSection(title: "App recording") {
-            Toggle("Let Claude drive and record apps", isOn: Binding(get: { capture.enabled }, set: { v in document.update { $0.app_capture.enabled = v } }))
-                .help("During a production run, Claude Code opens the desktop app or web app the spec names, operates it and records the screen. cutline only edits the recordings.")
-            Text("When a spec asks for footage of an app that isn't attached, the production run records it: Claude Code opens the app or web page, clicks and types, and records the window. Nothing is driven in a dry run.")
+            Toggle("Let the Assistant drive and record apps", isOn: Binding(get: { capture.enabled }, set: { v in document.update { $0.app_capture.enabled = v } }))
+                .help("During a production run, the Assistant opens the desktop app or web app the spec names, operates it and records the screen. cutline only edits the recordings.")
+            Text("When a spec asks for footage of an app that isn't attached, the production run records it: the Assistant opens the app or web page, clicks and types, and records the window. Nothing is driven in a dry run.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if capture.enabled {
                 Field("Apps") {
@@ -236,7 +236,7 @@ struct ProjectInspector: View {
                         ForEach(IntentKind.all) { Text($0.label).tag($0.key) }
                     }
                     if document.project.intent.kind == "unset" {
-                        Label("Required: the intent sets defaults and is given to Claude.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                        Label("Required: the intent sets defaults and is given to the Assistant.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
                     }
                     if document.project.intent.kind == "other" { TextField("Describe the intent", text: text(\.other)) }
                     TextField("Audience", text: text(\.audience), prompt: Text("Who is this for?"))
@@ -266,7 +266,7 @@ struct ProjectInspector: View {
                         .help("Used for chat, spec edits and questions")
                     ModelPicker(title: "Dry run", model: Binding(get: { document.project.models.dry_run }, set: { v in document.update { $0.models.dry_run = v } }),
                                 settingsDefault: AppState.shared.settings.default_dry_run_model)
-                        .help("The model that rehearses the run before the production model is used. Settings default follows Settings › Claude.")
+                        .help("The model that rehearses the run before the production model is used. Settings default follows Settings › Claude. Codex runs use the model in Settings › Assistant.")
                     EffortPicker(effort: Binding(get: { document.project.models.effort }, set: { v in document.update { $0.models.effort = v } }))
                     Text("The production model is set on each run config, in Outputs.").font(.caption).foregroundStyle(.secondary)
                 }
@@ -477,11 +477,11 @@ struct RunConfigEditor: View {
                 TextField("", value: bind(\.eleven_credit_cap), format: .number).frame(width: 90).multilineTextAlignment(.trailing)
                     .accessibilityLabel("ElevenLabs credit cap")
             }
-            Field("Claude spend limit") {
+            Field("Assistant spend limit") {
                 HStack(spacing: 3) {
                     Text("$").foregroundStyle(.secondary)
                     TextField("none", value: Binding(get: { rc.max_spend_usd }, set: { v in document.updateRunConfig(rc.id) { $0.max_spend_usd = (v ?? 0) > 0 ? v : nil } }), format: .number)
-                        .frame(width: 76).multilineTextAlignment(.trailing).accessibilityLabel("Claude spend limit in dollars")
+                        .frame(width: 76).multilineTextAlignment(.trailing).accessibilityLabel("Assistant spend limit in dollars")
                 }
             }
             Field("Turn limit") {
@@ -495,7 +495,7 @@ struct RunConfigEditor: View {
                     Text("s").foregroundStyle(.secondary)
                 }
             }
-            .help("How long a question from Claude waits before the run proceeds on Claude's stated assumption. Empty waits for you.")
+            .help("How long a question from the Assistant waits before the run proceeds on its stated assumption. Empty waits for you.")
         }
     }
 }

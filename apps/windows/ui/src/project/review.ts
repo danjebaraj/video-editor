@@ -1,4 +1,4 @@
-// Claude's edits, reviewed per hunk (spec §4.3, §23.3): a card per change from the core's diff
+// The Assistant's edits, reviewed per hunk (spec §4.3, §23.3): a card per change from the core's diff
 // with Accept and Reject, and the whole change in a unified merge view (@codemirror/merge).
 
 import { EditorState } from '@codemirror/state';
@@ -10,7 +10,7 @@ import { effect } from '../store';
 import type { Assistant } from './assistant';
 
 export function reviewView(a: Assistant): HTMLElement {
-  const root = h('section', { class: 'review', 'aria-label': 'Review Claude’s changes' });
+  const root = h('section', { class: 'review', 'aria-label': 'Review the Assistant’s changes' });
   let merge: EditorView | null = null;
   effect([a.review], () => {
     const r = a.review.value;
@@ -49,7 +49,7 @@ export function reviewView(a: Assistant): HTMLElement {
     clear(
       root,
       h('header', { class: 'row' },
-        h('div', { class: 'grow' }, h('h2', null, 'Claude changed the spec'), h('div', { class: 'muted small' }, `${r.hunks.length} changes · ${accepted} accepted · ${undecided} to review`)),
+        h('div', { class: 'grow' }, h('h2', null, 'The Assistant changed the spec'), h('div', { class: 'muted small' }, `${r.hunks.length} changes · ${accepted} accepted · ${undecided} to review`)),
         button('Reject All', () => a.rejectAll()),
         button('Accept All', () => a.acceptAll(), { appearance: 'primary' }),
         button('Done', () => a.finish()),

@@ -18,6 +18,13 @@ export type MediaRole = ("footage" | "b_roll" | "screen_recording" | "logo" | "m
  */
 export type RunKind = (("dry_run" | "production") | "audio_review")
 /**
+ * The assistant and production provider (Settings › Assistant).
+ * 
+ * This interface was referenced by `Project`'s JSON-Schema
+ * via the `definition` "Provider".
+ */
+export type Provider = ("claude" | "codex")
+/**
  * This interface was referenced by `Project`'s JSON-Schema
  * via the `definition` "RunStatus".
  */
@@ -461,6 +468,11 @@ model?: (string | null)
  * The run this one revises.
  */
 previous_run?: (string | null)
+/**
+ * The provider that ran it, captured at start (FEAT-spry-alpaca-5RQZ). Absent in runs
+ * recorded before the choice existed, which Claude Code ran.
+ */
+provider?: (Provider | null)
 run_config: string
 /**
  * The run config's name when the run started (configs can be renamed or deleted later).

@@ -9,7 +9,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// The open project. (`document` is taken by NSWindowController.)
     let doc: ProjectDocument
     let findBar = FindBarModel()
-    /// Bumped to move keyboard focus into the Claude composer.
+    /// Bumped to move keyboard focus into the Assistant composer.
     let chatFocus = FocusRequest()
 
     var currentEditor: EditorController? { doc.editor }
@@ -80,14 +80,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(stopRun(_:)):
             return doc.runs.isRunning || doc.assistant.isRunning
         case #selector(runProject(_:)), #selector(dryRun(_:)), #selector(audioReview(_:)):
-            return !doc.runs.isRunning && AppState.shared.claudeAvailable
+            return !doc.runs.isRunning && AppState.shared.assistantAvailable
         case #selector(gatherInfo(_:)):
-            return !doc.assistant.isRunning && AppState.shared.claudeAvailable
+            return !doc.assistant.isRunning && AppState.shared.assistantAvailable
         case #selector(revealRunFolder(_:)), #selector(exportLogs(_:)), #selector(copyIssueReport(_:)):
             return selectedRunFolder != nil
         case #selector(formatCommand(_:)), #selector(performFormatCommand(_:)):
             // Only while the spec has focus: these carry plain shortcuts (⌘1, ⌘[, ⌥⌘↑…) that
-            // would otherwise edit the spec while you type in the Claude box or a field.
+            // would otherwise edit the spec while you type in the Assistant box or a field.
             return !doc.showPreview && doc.editor.textView.isEditable && window?.firstResponder === doc.editor.textView
         case #selector(insertSpecBlock(_:)), #selector(insertIsland(_:)):
             return !doc.showPreview && doc.editor.textView.isEditable
@@ -125,7 +125,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         panel.directoryURL = doc.fileURL.deletingLastPathComponent()
         panel.title = "Duplicate Project"
         let keepRuns = NSButton(checkboxWithTitle: "Keep run history", target: nil, action: nil)
-        let keepSessions = NSButton(checkboxWithTitle: "Keep Claude sessions", target: nil, action: nil)
+        let keepSessions = NSButton(checkboxWithTitle: "Keep Assistant sessions", target: nil, action: nil)
         let stack = NSStackView(views: [keepRuns, keepSessions])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -356,7 +356,7 @@ enum RunActions {
         panel.allowedContentTypes = [.zip]
         panel.nameFieldStringValue = folder.lastPathComponent + "-logs.zip"
         panel.title = "Export Logs"
-        panel.message = "A zip of this run's logs, the instructions Claude was given, the spec and the edit. No media is included."
+        panel.message = "A zip of this run's logs, the instructions the Assistant was given, the spec and the edit. No media is included."
         let redact = NSButton(checkboxWithTitle: "Replace media paths, media file names and my home folder with placeholders", target: nil, action: nil)
         let box = NSStackView(views: [redact])
         box.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)

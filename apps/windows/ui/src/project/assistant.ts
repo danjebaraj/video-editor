@@ -3,7 +3,7 @@
 
 import { core, request, on, errorText } from '../bridge';
 import { Signal } from '../store';
-import { claudeAvailable } from '../app-state';
+import { assistantAvailable, assistantSetupProblem } from '../app-state';
 import { toast } from '../dialogs';
 import type { ProjectDocument } from './document';
 import type { ClaudeQuestion, Hunk, Issue } from '../types';
@@ -124,12 +124,14 @@ export class Assistant {
   /** Sends one turn. `display` is what the transcript shows for it. */
   async send(prompt: string, opts: { display?: string; selection?: { text: string; from: number; to: number } } = {}) {
     if (this.running.value) return;
-    if (!claudeAvailable()) {
-      toast('Claude Code isn’t available. See Settings › Claude.', 'error');
+    // The provider selected now (Settings › Assistant); the core reads it again as the turn starts.
+    if (!assistantAvailable()) {
+      const p = assistantSetupProblem();
+      toast(`${p.title} ${p.detail}`, 'error');
       return;
     }
     if (this.review.value) {
-      toast('Review Claude’s last change first.', 'error');
+      toast('Review the Assistant’s last change first.', 'error');
       return;
     }
     try {
@@ -365,7 +367,7 @@ export class Assistant {
     return { prompt: context.length ? `${text}\n\n---\nContext from the app:\n\n${context.join('\n\n')}` : text, labels };
   }
 
-  /** Validation › Ask Claude to Fix: the Claude tab with the request written, for every finding
+  /** Validation › Ask Assistant to Fix: the Assistant tab with the request written, for every finding
    *  or for one. The findings themselves go along as context when it is sent. */
   async askToFixFindings(issue?: Issue) {
     const r = this.doc.report.value;

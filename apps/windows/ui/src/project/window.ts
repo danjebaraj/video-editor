@@ -4,7 +4,7 @@
 import { h, clear, button, iconButton, icon, Icons, select, spinner, usd, elapsed, fileName, parentDir, joinPath } from '../dom';
 import { core, request, on, errorText } from '../bridge';
 import { Signal, effect } from '../store';
-import { brands, claudeAvailable, environment, detect, libraryDir } from '../app-state';
+import { brands, assistantAvailable, environment, detect, libraryDir, readiness, settings, providerName } from '../app-state';
 import { confirm, saveFile, openFiles, openFolders, Filters, toast, sheet } from '../dialogs';
 import { clipboardText, copyButton } from '../text-tools';
 import { ProjectDocument } from './document';
@@ -146,7 +146,7 @@ export class ProjectWindow {
   private toolbar(): HTMLElement {
     const d = this.doc;
     const el = h('header', { class: 'toolbar', role: 'toolbar', 'aria-label': 'Project' });
-    effect([d.project, d.runConfig, brands, this.runs.live, this.runs.preparing, d.validating, this.previewOn, environment], () => {
+    effect([d.project, d.runConfig, brands, this.runs.live, this.runs.preparing, d.validating, this.previewOn, environment, settings, readiness], () => {
       const live = this.runs.live.value;
       const update: [string, string][] = d.brandUpdateAvailable && d.p.brand ? [['__update__', `Update “${d.p.brand.snapshot.name}” to Latest`]] : [];
       const brandSel = select([['', 'No brand'], ...brands.value.map((b) => [b.id, b.name] as [string, string]), ...update, ['__edit__', 'Edit Brand Presets…']], d.p.brand?.preset_id ?? '', (v) => {
@@ -185,8 +185,8 @@ export class ProjectWindow {
         button('Validate', () => (this.showTab('validation'), d.validate()), { glyph: Icons.validate, title: 'Validate (Ctrl+Shift+B)', disabled: d.validating.value || !!live }),
         live
           ? button(live.stopping ? 'Stopping…' : 'Stop', () => this.runs.stop(), { glyph: Icons.stop, title: 'Stop (Shift+F5)', disabled: live.stopping })
-          : button('Run', () => this.runs.requestRun(), { appearance: 'primary', glyph: Icons.play, title: 'Run (F5)', disabled: !claudeAvailable() || this.runs.preparing.value }),
-        live ? null : button('Audio Review', () => this.runs.requestRun(undefined, { audioReview: true }), { glyph: Icons.audio, title: 'Build and play the soundtrack from the spec, without rendering video (Ctrl+F5)', disabled: !claudeAvailable() || this.runs.preparing.value }),
+          : button('Run', () => this.runs.requestRun(), { appearance: 'primary', glyph: Icons.play, title: assistantAvailable() ? 'Run (F5)' : `${providerName()} is required to run (Settings › Assistant)`, disabled: !assistantAvailable() || this.runs.preparing.value }),
+        live ? null : button('Audio Review', () => this.runs.requestRun(undefined, { audioReview: true }), { glyph: Icons.audio, title: 'Build and play the soundtrack from the spec, without rendering video (Ctrl+F5)', disabled: !assistantAvailable() || this.runs.preparing.value }),
         h('span', { class: 'grow' }),
         chip,
         iconButton(this.previewOn.value ? Icons.code : Icons.preview, this.previewOn.value ? 'Show source (Ctrl+/)' : 'Show preview (Ctrl+/)', () => (this.previewOn.value = !this.previewOn.value), { 'aria-pressed': String(this.previewOn.value) }),
@@ -196,7 +196,7 @@ export class ProjectWindow {
   }
 
   private inspector(): HTMLElement {
-    const tabs: [InspectorTab, string][] = [['claude', 'Claude'], ['project', 'Project'], ['outputs', 'Outputs'], ['validation', 'Validation'], ['run', 'Run']];
+    const tabs: [InspectorTab, string][] = [['claude', 'Assistant'], ['project', 'Project'], ['outputs', 'Outputs'], ['validation', 'Validation'], ['run', 'Run']];
     const builders: Record<InspectorTab, () => HTMLElement> = { claude: () => claudeTab(this), project: () => projectTab(this), outputs: () => outputsTab(this), validation: () => validationTab(this), run: () => runTab(this) };
     const panels = new Map<InspectorTab, HTMLElement>();
     const tablist = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Inspector' });
@@ -377,7 +377,7 @@ export class ProjectWindow {
     const sessBox = h('input', { type: 'checkbox', id: 'keep-sessions' }) as HTMLInputElement;
     runsBox.addEventListener('change', () => (keepRuns = runsBox.checked));
     sessBox.addEventListener('change', () => (keepSessions = sessBox.checked));
-    s.body.append(h('label', { class: 'check' }, runsBox, h('span', null, 'Keep run history')), h('label', { class: 'check' }, sessBox, h('span', null, 'Keep Claude sessions')));
+    s.body.append(h('label', { class: 'check' }, runsBox, h('span', null, 'Keep run history')), h('label', { class: 'check' }, sessBox, h('span', null, 'Keep Assistant sessions')));
     s.footer.append(button('Cancel', () => s.close()), button('Duplicate…', () => s.close(true), { appearance: 'primary' }));
     if (!(await s.done)) return;
     await this.doc.save().catch(() => {});
@@ -533,7 +533,7 @@ export class ProjectWindow {
       [ctrlAlt && (e.code === 'Digit4' || e.key === '4'), 'inspector_validation'],
       [ctrlAlt && (e.code === 'Digit5' || e.key === '5'), 'inspector_run'],
     ];
-    // Ctrl+Enter in the composer sends there; elsewhere it is "Send to Claude".
+    // Ctrl+Enter in the composer sends there; elsewhere it is "Send to Assistant".
     if (e.ctrlKey && e.key === 'Enter' && !(e.target as HTMLElement)?.classList?.contains('composer')) {
       e.preventDefault();
       this.command('send_to_claude');

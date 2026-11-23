@@ -598,6 +598,8 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         previous_run: previous.as_ref().map(|p| p.id.clone()),
         cost_usd: None,
         eleven_credits: None,
+        // history keeps the provider used at execution time
+        provider: Some(if codex.is_some() { crate::codex::Provider::Codex } else { crate::codex::Provider::Claude }),
     };
 
     // run.json: the resolved config (inputs). logs/run.json grows the versions and the outcome.

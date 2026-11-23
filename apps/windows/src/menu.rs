@@ -48,7 +48,7 @@ const VIEW: &[Item] = &[
     ("sidebar_media", "&Media\tCtrl+2"),
     ("sidebar_runs", "&Runs\tCtrl+3"),
     ("", ""),
-    ("inspector_claude", "&Claude\tCtrl+Alt+1"),
+    ("inspector_claude", "&Assistant\tCtrl+Alt+1"),
     ("inspector_project", "&Project\tCtrl+Alt+2"),
     ("inspector_outputs", "O&utputs\tCtrl+Alt+3"),
     ("inspector_validation", "&Validation\tCtrl+Alt+4"),
@@ -63,7 +63,7 @@ const PROJECT: &[Item] = &[
     ("", ""),
     ("relink", "Re&link Media…"),
     ("gather_info", "&Gather Missing Info"),
-    ("send_to_claude", "Send to &Claude\tCtrl+Enter"),
+    ("send_to_claude", "Send to Assi&stant\tCtrl+Enter"),
 ];
 
 const WINDOW: &[Item] = &[("library", "App &Library\tCtrl+Shift+L")];

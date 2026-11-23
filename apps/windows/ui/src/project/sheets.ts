@@ -3,7 +3,7 @@
 import { h, clear, button, icon, Icons, usd, select } from '../dom';
 import { effect } from '../store';
 import { sheet, openFiles, openFolders, Filters, toast } from '../dialogs';
-import { modelName } from '../app-state';
+import { modelName, provider, settings } from '../app-state';
 import { modelPicker } from '../widgets';
 import { copyButton, copyable } from '../text-tools';
 import type { ProjectWindow } from './window';
@@ -11,6 +11,12 @@ import type { RunPlan } from './runs';
 import type { Finding, Readiness } from '../types';
 
 let relinkOpen = false;
+
+/** With Codex selected, runs use the Codex model from Settings › Assistant: shown, not picked. */
+function codexModel(): HTMLElement | null {
+  if (provider() !== 'codex') return null;
+  return h('span', { title: 'Codex runs use the model chosen in Settings › Assistant' }, settings.value?.codex_model || 'Codex default');
+}
 
 export function showRelink(w: ProjectWindow) {
   if (relinkOpen) return;
@@ -71,12 +77,12 @@ export function showRunConfirm(w: ProjectWindow, plan: RunPlan) {
   clear(s.body,
     h('dl', { class: 'summary-grid' },
       h('dt', null, 'Outputs'), h('dd', null, plan.outputs.map((o) => `${o.name} ${o.width}×${o.height}`).join(', ') || '—'),
-      h('dt', null, 'Model'), h('dd', null, modelPicker(plan.model, (v) => (plan.model = v), { label: 'Production model for this run' })),
+      h('dt', null, 'Model'), h('dd', null, codexModel() ?? modelPicker(plan.model, (v) => (plan.model = v), { label: 'Production model for this run' })),
       h('dt', null, 'Quality'), h('dd', null, rc.quality === 'draft' ? 'Draft' : 'Final'),
       h('dt', null, 'Estimated cost'), h('dd', null, `${usd(est.claude_usd_low)} – ${usd(est.claude_usd_high)} (approximate)${est.eleven_credits ? ` · ${est.eleven_credits} ElevenLabs credits` : ''}`),
       h('dt', null, 'Output folder'), h('dd', { class: 'path small' }, plan.outputFolder),
     ),
-    plan.revise ? h('blockquote', null, plan.revise.feedback) : h('label', { class: 'check' }, dryToggle, h('span', null, `Do a dry run first with ${modelName(w.doc.dryRunModel)}`)),
+    plan.revise ? h('blockquote', null, plan.revise.feedback) : h('label', { class: 'check' }, dryToggle, h('span', null, provider() === 'codex' ? 'Do a dry run first' : `Do a dry run first with ${modelName(w.doc.dryRunModel)}`)),
     warnings.length ? h('div', { class: 'note warn' }, h('strong', null, `${warnings.length} warning(s) will be accepted for this run`), h('ul', { class: 'small' }, warnings.slice(0, 5).map((i) => h('li', null, i.title)))) : null,
   );
   s.footer.append(
@@ -117,7 +123,7 @@ function showAudioReviewConfirm(w: ProjectWindow, plan: RunPlan, rcName: string)
     h('p', { class: 'hint' }, 'Builds the soundtrack of one output from the spec (voice-over, music, effects and the clips’ own sound) so you can listen before any video is rendered.'),
     h('dl', { class: 'summary-grid' },
       h('dt', null, 'Output'), h('dd', null, output),
-      h('dt', null, 'Model'), h('dd', null, modelPicker(plan.model, (v) => (plan.model = v), { label: 'Model for this Audio Review' })),
+      h('dt', null, 'Model'), h('dd', null, codexModel() ?? modelPicker(plan.model, (v) => (plan.model = v), { label: 'Model for this Audio Review' })),
       h('dt', null, 'Estimated cost'), h('dd', null, `${usd(est.claude_usd_low)} – ${usd(est.claude_usd_high)} (approximate)${est.eleven_credits ? ` · ${est.eleven_credits} ElevenLabs credits` : ''}`),
     ),
     plan.revise ? h('blockquote', null, plan.revise.feedback) : null,
@@ -171,7 +177,7 @@ export function showFindings(w: ProjectWindow, r: Readiness) {
   const notes = r.notes;
   clear(s.body, section('Unclear in the spec', r.ambiguities), section('Missing media', r.missing_media), section('Risks', r.risks), section('Assumptions the dry run made', r.assumptions), section('Made during the production run (nothing to do)', r.planned ?? []), notes ? copyable(h('p', { class: 'muted' }, notes), 'Copy the notes', () => notes) : null);
   s.footer.append(
-    button('Ask Claude to Fix the Spec', () => {
+    button('Ask Assistant to Fix the Spec', () => {
       s.close('fix');
       w.runs.findings.value = null;
       w.runs.pendingPlan = null;

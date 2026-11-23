@@ -4,7 +4,7 @@
 import { h, clear, button, iconButton, icon, Icons, usd, bytes, duration, elapsed, when, spinner, emptyState, select, fileName } from '../../dom';
 import { core, request, errorText } from '../../bridge';
 import { effect, Signal } from '../../store';
-import { claudeAvailable, modelName } from '../../app-state';
+import { assistantAvailable, modelName, readiness, settings } from '../../app-state';
 import { saveFile, Filters, toast, sheet } from '../../dialogs';
 import { questionCard } from '../../widgets';
 import { copyButton, copyable, copyText, inline, markdownBlocks, markdownText, previewToggle } from '../../text-tools';
@@ -30,7 +30,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
     return k;
   };
 
-  effect([w.runs.live, w.runs.selectedRun, w.doc.project, sub], () => {
+  effect([w.runs.live, w.runs.selectedRun, w.doc.project, sub, settings, readiness], () => {
     const live = w.runs.live.value;
     if (live) {
       renderLive();
@@ -44,8 +44,8 @@ export function runTab(w: ProjectWindow): HTMLElement {
     const rec = w.runs.selected();
     if (!rec) {
       clear(root, emptyState('No runs yet', 'Validate the spec, then run it. Audio Review builds only the soundtrack, to listen to before any video is rendered.', h('div', { class: 'row' },
-        button('Run', () => w.runs.requestRun(), { appearance: 'primary', glyph: Icons.play, disabled: !claudeAvailable() }),
-        button('Audio Review', () => w.runs.requestRun(undefined, { audioReview: true }), { glyph: Icons.audio, disabled: !claudeAvailable() }))));
+        button('Run', () => w.runs.requestRun(), { appearance: 'primary', glyph: Icons.play, disabled: !assistantAvailable() }),
+        button('Audio Review', () => w.runs.requestRun(undefined, { audioReview: true }), { glyph: Icons.audio, disabled: !assistantAvailable() }))));
       return;
     }
     if (resultsFor !== rec.id + rec.status) {
@@ -113,11 +113,11 @@ export function runTab(w: ProjectWindow): HTMLElement {
       h('div', { class: `live-details${transcriptOpen ? ' capped' : ''}` },
         h('div', { class: 'tab-header' }, h('strong', null, kindLabel(l.kind)), h('span', { class: 'muted' }, ` · ${modelName(l.model)} · ${elapsed(secs)}`), h('span', { class: 'grow' }), h('span', { class: 'muted small' }, l.status)),
         l.question
-          ? h('div', { class: 'live-pad' }, questionCard(l.question.questions, (a) => w.runs.answer(a)), l.question.timeout_s ? h('p', { class: 'hint' }, `With no answer in ${l.question.timeout_s} s, Claude proceeds on its stated assumption.`) : null)
+          ? h('div', { class: 'live-pad' }, questionCard(l.question.questions, (a) => w.runs.answer(a)), l.question.timeout_s ? h('p', { class: 'hint' }, `With no answer in ${l.question.timeout_s} s, the Assistant proceeds on its stated assumption.`) : null)
           : null,
         stages,
         h('dl', { class: 'estimates' },
-          h('dt', null, 'Claude'), h('dd', null, usd(cost?.claude_usd, cost?.claude_estimated)),
+          h('dt', null, l.provider === 'codex' ? 'Codex' : 'Claude Code'), h('dd', null, usd(cost?.claude_usd, cost?.claude_estimated)),
           l.kind !== 'dry_run' ? [h('dt', null, 'ElevenLabs'), h('dd', null, `${cost?.eleven_credits ?? 0} of ${cost?.eleven_cap ?? 0} credits`)] : null),
         l.warnings.length ? h('ul', { class: 'warnings small live-pad' }, l.warnings.map((x) => h('li', { class: 'warn' }, x))) : null),
       h('div', { class: 'live-transcript-head' }, toggle),
@@ -134,9 +134,9 @@ export function runTab(w: ProjectWindow): HTMLElement {
     if (t.role === 'assistant') return h('div', { class: cls }, markdownText(t.text));
     if (t.role === 'error') return h('div', { class: cls }, copyable(h('span', null, t.text), 'Copy the error', () => t.text));
     if (failed) {
-      // Not the run failing: a step that didn't work, which Claude reads and usually retries.
+      // Not the run failing: a step that didn't work, which the Assistant reads and usually retries.
       const all = `${t.text}\n\n${t.detail ?? ''}`.trim();
-      return h('div', { class: cls, title: `This step didn’t work. Claude sees the same message and usually tries again; the run continues.${t.detail ? `\n\n${t.detail}` : ''}` },
+      return h('div', { class: cls, title: `This step didn’t work. The Assistant sees the same message and usually tries again; the run continues.${t.detail ? `\n\n${t.detail}` : ''}` },
         copyable(h('span', { class: 'md-inline' }, icon(Icons.warning), ' ', ...inline(t.text)), 'Copy the details', () => all));
     }
     if (t.role === 'tool') return h('div', { class: `${cls} md-inline`, title: t.detail ?? '' }, icon(Icons.wrench), ' ', ...inline(t.text));
@@ -149,7 +149,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
     const failed = rec.status === 'failed';
     const head = h('div', { class: 'result-head' },
       h('div', { class: 'row' }, h('strong', { class: `status ${rec.status}` }, STATUS_LABEL[rec.status] ?? rec.status), rec.kind === 'dry_run' ? h('span', { class: 'pill' }, 'Dry run') : rec.kind === 'audio_review' ? h('span', { class: 'pill' }, 'Audio Review') : null),
-      h('div', { class: 'muted small' }, [rc?.name ?? rec.run_config, when(rec.started), rec.model ? modelName(rec.model) : null, rec.cost_usd != null ? usd(rec.cost_usd) : null, rec.eleven_credits ? `${rec.eleven_credits} credits` : null].filter(Boolean).join(' · ')),
+      h('div', { class: 'muted small' }, [rc?.name ?? rec.run_config, when(rec.started), rec.provider === 'codex' ? 'Codex' : 'Claude Code', rec.model ? modelName(rec.model) : null, rec.cost_usd != null ? usd(rec.cost_usd) : null, rec.eleven_credits ? `${rec.eleven_credits} credits` : null].filter(Boolean).join(' · ')),
       results?.run?.message ? copyable(h('div', { class: failed ? 'danger small' : 'small' }, results.run.message), 'Copy the message', () => results?.run?.message ?? '') : null,
       results?.blocking?.length ? blockingList(results.blocking) : null,
       // An Audio Review's warnings (a silent timeline among them) come before the player.
@@ -175,8 +175,8 @@ export function runTab(w: ProjectWindow): HTMLElement {
       body,
       h('div', { class: 'row end wrap' },
         button('Reveal Run Folder', () => request('shell.reveal', { path: rec.folder }), { glyph: Icons.openFolder }),
-        rec.kind !== 'dry_run' ? button('Revise…', () => revise(rec), { glyph: Icons.revise, disabled: !rec.claude_session || !claudeAvailable() || w.runs.running }) : null,
-        rec.kind !== 'dry_run' ? button('Re-run', () => w.runs.rerun(rec, auditioned()), { glyph: Icons.rerun, disabled: !claudeAvailable() || w.runs.running }) : null),
+        rec.kind !== 'dry_run' ? button('Revise…', () => revise(rec), { glyph: Icons.revise, disabled: !rec.claude_session || !assistantAvailable() || w.runs.running }) : null,
+        rec.kind !== 'dry_run' ? button('Re-run', () => w.runs.rerun(rec, auditioned()), { glyph: Icons.rerun, disabled: !assistantAvailable() || w.runs.running }) : null),
     );
   }
 
@@ -337,7 +337,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
       h('div', { class: 'log-split' }, list, view),
       h('div', { class: 'row wrap' },
         button('Reveal Logs Folder', () => request('shell.reveal', { path: `${rec.folder}\\logs` })),
-        button('Export Logs…', () => exportLogs(rec.folder), { title: 'A zip of everything needed to study this run: logs, the instructions Claude was given, the spec and the edit. Media paths can be redacted.' }),
+        button('Export Logs…', () => exportLogs(rec.folder), { title: 'A zip of everything needed to study this run: logs, the instructions the Assistant was given, the spec and the edit. Media paths can be redacted.' }),
         button('Copy Issue Report', () => copyIssueReport(rec.folder))));
   }
 
@@ -345,7 +345,7 @@ export function runTab(w: ProjectWindow): HTMLElement {
     const review = rec.kind === 'audio_review';
     const s = sheet(review ? 'Revise this Audio Review' : 'Revise this run');
     const box = h('textarea', { rows: 6, 'aria-label': 'What should change?', placeholder: 'For example: make the hook faster, use the logo at the end.' }) as HTMLTextAreaElement;
-    s.body.append(h('p', { class: 'hint' }, review ? 'Say what to change in the soundtrack. Claude mixes it again, reusing audio that hasn’t changed, into a new review; this take stays playable to compare.' : 'Claude continues its session from this run and writes a new run folder linked to it.'), box);
+    s.body.append(h('p', { class: 'hint' }, review ? 'Say what to change in the soundtrack. The Assistant mixes it again, reusing audio that hasn’t changed, into a new review; this take stays playable to compare.' : 'The Assistant continues from this run and writes a new run folder linked to it.'), box);
     s.footer.append(button('Cancel', () => s.close()), button('Continue…', () => s.close(box.value.trim()), { appearance: 'primary' }));
     const feedback = await s.done;
     if (!feedback) return;
@@ -363,7 +363,7 @@ export async function exportLogs(folder: string) {
   const redact =
     (await confirm(
       'Replace paths with placeholders?',
-      "The zip holds this run's logs, the instructions Claude was given, the spec and the edit. No media is included. Replace media paths, media file names and your home folder with placeholders?",
+      "The zip holds this run's logs, the instructions the Assistant was given, the spec and the edit. No media is included. Replace media paths, media file names and your home folder with placeholders?",
       ['Keep Paths', 'Redact'],
     )) === 1;
   try {
