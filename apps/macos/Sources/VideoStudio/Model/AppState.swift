@@ -64,7 +64,7 @@ final class AppState: ObservableObject {
         if usesCodex {
             if isCheckingCodex && codexStatus == nil { return ("Checking Codex…", "Looking for \(providerExecutable).") }
             let f = codexStatus?.finding
-            return (f?.title ?? "Codex isn't ready", "Looked for \(providerExecutable). " + (f?.remedy ?? "Install the Codex CLI, or set its path in Settings › Assistant, then re-check."))
+            return (f?.title ?? "Codex isn't ready", "Looked for \(providerExecutable). " + (f?.remedy ?? "Install the Codex CLI, or set its path in Settings › Codex, then re-check."))
         }
         guard let c = environment?.claude else {
             return ("Claude Code isn't available", "Looked for \(providerExecutable). Install the Claude Code CLI, or set its path in Settings › Claude, then re-check.")
@@ -81,7 +81,15 @@ final class AppState: ObservableObject {
         if usesCodex { checkCodex() } else { detect(force: true) }
     }
 
-    /// Asks Codex whether it is ready (Settings › Assistant › Re-check, a switch, activation).
+    /// The models Codex offers, from the last check (empty until Codex answers).
+    var codexModelChoices: [(id: String, name: String)] { (codexStatus?.models ?? []).map { ($0.id, $0.name) } }
+
+    /// The label for an effective model under the selected provider (BUG-fond-crane-62ZP).
+    func modelLabel(_ effective: String?) -> String {
+        ModelResolution.label(effective: effective, codex: usesCodex, codexModels: codexModelChoices, claudeName: { self.models.displayName($0) })
+    }
+
+    /// Asks Codex whether it is ready (Settings › Codex › Re-check, a switch, activation).
     func checkCodex() {
         readinessGeneration += 1
         let generation = readinessGeneration
@@ -89,8 +97,9 @@ final class AppState: ObservableObject {
         isCheckingCodex = true
         Task {
             let status: CodexStatus? = try? await Core.async("codex.check", ["path": path])
-            // A newer switch or check has started since: this answer is stale.
-            guard generation == self.readinessGeneration, self.usesCodex else { return }
+            // A newer switch or check has started since: this answer is stale. Settings › Codex
+            // checks Codex while Claude is selected too, so the answer is kept either way.
+            guard generation == self.readinessGeneration else { return }
             self.codexStatus = status ?? CodexStatus(state: "missing")
             self.isCheckingCodex = false
         }

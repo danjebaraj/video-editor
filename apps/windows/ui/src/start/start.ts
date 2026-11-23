@@ -71,7 +71,7 @@ function renderChecklist(list: HTMLElement) {
   if (provider() === 'codex') {
     // The provider chosen in Settings › Assistant (FEAT-spry-alpaca-5RQZ).
     const cs = codexStatus.value;
-    rows.push(row(cs ? cs.state === 'ready' : null, 'Codex', !cs ? `Checking ${providerExecutable()}…` : cs.state === 'ready' ? `Ready${cs.plan ? ` (${cs.plan} plan)` : ''}` : `${cs.finding?.title ?? cs.state}: ${providerExecutable()}`, openSettings('assistant')));
+    rows.push(row(cs ? cs.state === 'ready' : null, 'Codex', !cs ? `Checking ${providerExecutable()}…` : cs.state === 'ready' ? `Ready${cs.plan ? ` (${cs.plan} plan)` : ''}` : `${cs.finding?.title ?? cs.state}: ${providerExecutable()}`, openSettings('codex')));
   }
   if (!env) {
     rows.push(...(provider() === 'codex' ? [] : [row(null, 'Claude Code', 'Checking…')]), row(null, 'cutline', 'Checking…'));

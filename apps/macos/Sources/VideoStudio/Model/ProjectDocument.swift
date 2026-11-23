@@ -381,6 +381,37 @@ final class ProjectDocument: ObservableObject, Identifiable {
         return own.isEmpty ? AppState.shared.settings.default_assistant_model : own
     }
 
+    /// The model the next operation of `use` runs with under the selected provider, as the core's
+    /// `models.effective` resolves it (BUG-fond-crane-62ZP). `nil` is Codex's own default.
+    func effectiveModel(_ use: ModelUse, runConfig: RunConfig? = nil, override: String? = nil) -> String? {
+        let app = AppState.shared
+        return Self.effectiveModel(use, models: project.models, runConfig: runConfig, settings: app.settings, codex: app.usesCodex, override: override)
+    }
+
+    /// `effectiveModel` for given project models, settings and provider (the self test compares it
+    /// with the core's `models.effective`).
+    static func effectiveModel(_ use: ModelUse, models: ProjectModels, runConfig: RunConfig?, settings s: CoreSettings, codex: Bool, override: String? = nil) -> String? {
+        if codex {
+            let own: String
+            switch use {
+            case .assistant: own = models.codex_assistant
+            case .dry_run: own = models.codex_dry_run
+            case .production: own = runConfig?.codex_production_model ?? ""
+            }
+            return ModelResolution.effective(codex: true, override: override, own: own, settingsDefault: s.codex_model, claudeFallback: "")
+        }
+        switch use {
+        case .assistant: return ModelResolution.effective(codex: false, override: override, own: models.assistant, settingsDefault: s.default_assistant_model, claudeFallback: "sonnet")
+        case .dry_run: return ModelResolution.effective(codex: false, override: override, own: models.dry_run, settingsDefault: s.default_dry_run_model, claudeFallback: "haiku")
+        case .production: return ModelResolution.effective(codex: false, override: override, own: runConfig?.production_model ?? "", settingsDefault: s.default_production_model, claudeFallback: "opus")
+        }
+    }
+
+    /// What pickers and headers show for `effectiveModel`: "Codex default" when Codex chooses.
+    func effectiveModelLabel(_ use: ModelUse, runConfig: RunConfig? = nil, override: String? = nil) -> String {
+        AppState.shared.modelLabel(effectiveModel(use, runConfig: runConfig, override: override))
+    }
+
     /// True when the library holds a newer copy of the project's brand preset (the same test as
     /// the core's `brand.is_newer`, on the list the app already has).
     var brandUpdateAvailable: Bool {

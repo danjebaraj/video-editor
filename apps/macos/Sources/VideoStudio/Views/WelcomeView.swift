@@ -75,7 +75,7 @@ struct OnboardingChecklist: View {
                 row(ok: app.codexStatus.map(\.ready),
                     title: "Codex",
                     detail: app.codexStatus.map { s in s.ready ? "Ready" + (s.plan.map { " (\($0) plan)" } ?? "") : "\(s.finding?.title ?? s.state): \(app.providerExecutable)" } ?? "Checking \(app.providerExecutable)…",
-                    action: ("Settings…", { AppDelegate.shared.showSettings(pane: "assistant") }))
+                    action: ("Settings…", { AppDelegate.shared.showSettings(pane: "codex") }))
             } else {
                 row(ok: app.environment == nil ? nil : (app.claudeAvailable && app.environment?.signed_in != false),
                     title: "Claude Code",

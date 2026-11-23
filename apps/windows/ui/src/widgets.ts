@@ -1,7 +1,8 @@
 // Widgets shared by several views: the model picker, the effort picker and the Assistant's question card.
 
 import { h, button, select } from './dom';
-import { models, environment, modelName } from './app-state';
+import { models, environment, modelName, settings, provider, codexStatus, codexModelChoices } from './app-state';
+import { codexEmptyChoiceLabel } from './model-resolution';
 import { prompt } from './dialogs';
 import type { ClaudeQuestion } from './types';
 
@@ -34,6 +35,44 @@ export function modelPicker(value: string | undefined | null, onChange: (v: stri
     onChange(v);
   }, { 'aria-label': opts.label });
   return el;
+}
+
+/**
+ * Codex's model picker (BUG-fond-crane-62ZP): an explicit empty choice — Codex default, or the model
+ * in Settings › Codex when one is set there — then the models Codex reports, plus a custom ID, which
+ * is offered even when Codex hasn't answered with a list. Empty follows Settings › Codex.
+ */
+export function codexModelPicker(value: string | undefined | null, onChange: (v: string) => void, opts: { label: string }): HTMLElement {
+  value = (value ?? '').trim();
+  const list = codexModelChoices();
+  const options: [string, string][] = [['', codexEmptyChoiceLabel(settings.value?.codex_model, list)]];
+  for (const m of codexStatus.value?.models ?? []) options.push([m.id, `${m.name}${m.is_default ? ' (default)' : ''}`]);
+  if (value && !list.some((m) => m.id === value)) options.push([value, `Custom: ${value}`]);
+  options.push(['__custom__', 'Custom ID…']);
+  const el = select(options, value, async (v) => {
+    if (v === '__custom__') {
+      const id = await prompt('Custom Codex model ID', 'Passed to Codex as it is', value ?? '');
+      el.value = value ?? '';
+      if (id) onChange(id.trim());
+      return;
+    }
+    onChange(v);
+  }, { 'aria-label': opts.label });
+  return el;
+}
+
+/**
+ * A model choice that follows the selected provider (BUG-fond-crane-62ZP): Claude's picker bound to
+ * Claude's field, or Codex's bound to the Codex field. Each provider's choice is kept while the other
+ * is selected. Views that use it re-render on `settings` and `codexStatus`.
+ */
+export function providerModelPicker(
+  claude: { value: string | undefined | null; onChange: (v: string) => void; settingsDefault?: string },
+  codex: { value: string | undefined | null; onChange: (v: string) => void },
+  label: string,
+): HTMLElement {
+  if (provider() === 'codex') return codexModelPicker(codex.value, codex.onChange, { label });
+  return modelPicker(claude.value, claude.onChange, claude.settingsDefault !== undefined ? { label, settingsDefault: claude.settingsDefault } : { label });
 }
 
 /** Shown only when the installed CLI lists `--effort` levels. */

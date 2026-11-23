@@ -276,7 +276,7 @@ fn copy_tree(from: &Utf8Path, to: &Utf8Path) {
 }
 
 /// What a run says when Codex is the provider and can't be found.
-pub const CODEX_MISSING: &str = "Codex is selected in Settings › Assistant, but it isn't installed. Install the Codex CLI (it provides `codex app-server`) or set its path in Settings › Assistant, then try again.";
+pub const CODEX_MISSING: &str = "Codex is selected in Settings › Assistant, but it isn't installed. Install the Codex CLI (it provides `codex app-server`) or set its path in Settings › Codex, then try again.";
 
 /// Why the selected Codex can't be used: a bad configured path (named) or no Codex at all.
 pub fn codex_problem(configured: &str) -> Option<String> {

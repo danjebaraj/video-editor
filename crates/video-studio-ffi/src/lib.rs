@@ -886,7 +886,7 @@ mod tests {
             (Some("bad_path"), Some("codex_path_invalid"))
         );
         assert!(codex["finding"]["title"].as_str().unwrap().contains("no-codex-here"));
-        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Settings › Assistant"));
+        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Settings › Codex"));
         let missing = core::codex::CodexStatus::Missing.finding().unwrap();
         assert!(missing.0 == "codex_missing" && missing.2.contains("Install the Codex CLI"));
         // validation with a supplied environment (no tools are run)

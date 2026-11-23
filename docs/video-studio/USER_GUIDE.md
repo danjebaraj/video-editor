@@ -336,7 +336,7 @@ When the Assistant needs a decision, a **"The Assistant has a question"** card a
 ### Sessions and models
 
 - The menu at the top of the panel switches between conversations, starts a **New Session** (⇧⌘N), and renames or deletes them.
-- The assistant's model is set in **Project › Models › Spec assistant**. The default comes from Settings › Claude and is Sonnet. With Codex selected, the Assistant uses the Codex model in Settings › Assistant.
+- The assistant's model is set in **Project › Models › Spec assistant**. The default comes from Settings › Claude and is Sonnet. With Codex selected, the same picker offers Codex's models; *Codex default* follows Settings › Codex.
 - To see each reply's token usage and cost, turn on Settings › Claude › *Show token usage and cost after each assistant reply*.
 
 ---
@@ -754,9 +754,13 @@ How every video is finished. A project follows these unless Project › Finish i
 
 Chooses who drives the Assistant and runs in every open project: **Claude Code** (the default) or **Codex**. Open project windows follow the change at once: their setup messages, enabled buttons and readiness checks switch to the new provider. Work already under way keeps the provider it started with, and run history shows the provider each run used.
 
+Each provider is set up in its own pane, Settings › Claude and Settings › Codex; opening either doesn't change the provider. With Codex selected, the model pickers in Project › Models, on each run config (Outputs › Production) and in the run sheet offer *Codex default* and Codex's models; with Claude Code selected they offer Claude's. A project keeps both sets of choices, so switching back restores them.
+
+### Codex
+
 - **Codex** status: *Re-check* runs the same check every window uses. When Codex isn't ready, the message names the executable it looked for and what to do.
 - **Codex path:** blank looks for `codex` on PATH.
-- **Model:** the Codex model, or *Codex default*. Claude's model choices stay in Settings › Claude.
+- **Model:** the default Codex model for projects that don't choose their own, or *Codex default* to let Codex choose. Claude's model choices stay in Settings › Claude.
 - Sign-in is handled by the Codex CLI (`codex login`).
 
 ### Claude

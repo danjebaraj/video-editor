@@ -39,10 +39,13 @@ struct RunPlan: Equatable {
     var kind = "production"
     /// Audio Review: the output (ID) whose timing and audio settings are auditioned.
     var audioOutput: String?
+    /// This run's Codex model when Codex is selected (BUG-fond-crane-62ZP): starts as the run config's
+    /// Codex choice; empty follows Settings › Codex, then Codex's default. `model` stays Claude's.
+    var codexModel = ""
 
     var isAudioReview: Bool { kind == "audio_review" }
 
-    static func == (a: RunPlan, b: RunPlan) -> Bool { a.runConfig == b.runConfig && a.model == b.model && a.dryRunFirst == b.dryRunFirst && a.revise?.runID == b.revise?.runID && a.kind == b.kind && a.audioOutput == b.audioOutput }
+    static func == (a: RunPlan, b: RunPlan) -> Bool { a.runConfig == b.runConfig && a.model == b.model && a.dryRunFirst == b.dryRunFirst && a.revise?.runID == b.revise?.runID && a.kind == b.kind && a.audioOutput == b.audioOutput && a.codexModel == b.codexModel }
 }
 
 /// Drives runs for one project (spec §12): validate, confirm, optional dry run, production,
@@ -134,9 +137,9 @@ final class RunController: ObservableObject {
             if audioReview {
                 // Allowed as a project's first run: no dry run, and the review goes in the library.
                 let pick = outputs.first { $0.id == audioOutput }?.id ?? outputs.first?.id
-                plan = RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: "", model: rc.production_model, dryRunFirst: false, revise: revise, kind: "audio_review", audioOutput: pick)
+                plan = RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: "", model: rc.production_model, dryRunFirst: false, revise: revise, kind: "audio_review", audioOutput: pick, codexModel: rc.codex_production_model)
             } else {
-                plan = RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: document.outputRoot(for: rc), model: rc.production_model, dryRunFirst: rc.dry_run_first && revise == nil, revise: revise)
+                plan = RunPlan(runConfig: rc, outputs: outputs, report: report, outputFolder: document.outputRoot(for: rc), model: rc.production_model, dryRunFirst: rc.dry_run_first && revise == nil, revise: revise, codexModel: rc.codex_production_model)
             }
         }
     }
@@ -189,9 +192,12 @@ final class RunController: ObservableObject {
             "assume_answers": false,
             "validation": Core.arg(plan.report),
         ]
-        // The provider is read from Settings as the run starts; a Claude model isn't sent to Codex.
+        // The provider is read from Settings as the run starts; a Claude model isn't sent to Codex,
+        // and a Codex model isn't sent to Claude (BUG-fond-crane-62ZP). Dry runs use the project's.
         let provider = AppState.shared.provider
         if kind != "dry_run", provider == "claude", plan.model != plan.runConfig.production_model { request["model"] = plan.model }
+        let codexOverride = plan.codexModel.trimmingCharacters(in: .whitespaces)
+        if kind != "dry_run", provider == "codex", !codexOverride.isEmpty, codexOverride != plan.runConfig.codex_production_model { request["codex_model"] = codexOverride }
         if let r = plan.revise, kind != "dry_run" { request["revise"] = ["previous_run": r.runID, "feedback": r.feedback] }
         if kind == "audio_review", let o = plan.audioOutput { request["audio_output"] = o }
         if let t = plan.runConfig.question_timeout_s, t > 0 { request["question_timeout_s"] = t }

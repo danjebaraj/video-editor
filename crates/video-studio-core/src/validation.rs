@@ -463,7 +463,7 @@ pub fn optional_tools_text(missing: &[String]) -> String {
 fn check_codex(c: &mut Ctx, env: &dyn EnvProbe) {
     let status = env.codex_status().unwrap_or(crate::codex::CodexStatus::Missing);
     if let Some((rule, title, fix)) = status.finding() {
-        c.add(rule, None, Severity::Blocker, "environment", title, Some(fix), FixLink::target("settings", "assistant"));
+        c.add(rule, None, Severity::Blocker, "environment", title, Some(fix), FixLink::target("settings", "codex"));
     }
 }
 

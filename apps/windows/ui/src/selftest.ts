@@ -10,6 +10,7 @@ import { environment, keyStatus, detect, brands, reloadLibrary, settings } from 
 import { DEFAULT_FINISH, filledFinish, sameFinish } from './finish';
 import { clipboardText, copyText, markdownBlocks, parseMarkdown } from './text-tools';
 import { reportText } from './project/inspector/validation';
+import { effectiveModel, modelLabel } from './model-resolution';
 import type { ProjectWindow } from './project/window';
 
 interface Fixture {
@@ -177,6 +178,31 @@ async function run(w: ProjectWindow, fx: Fixture) {
     check(summary.summary.includes('App recording: on'), 'the project summary tells Claude about app recording');
     const perms = await core<{ supported: boolean }>('capture.permissions', { request: false });
     check(perms.supported, 'app recording is supported on this machine');
+  });
+
+  // BUG-fond-crane-62ZP: the pickers and the Assistant header show the model the core sends.
+  await step('model resolution', async () => {
+    const models = { ...d.p.models, assistant: 'fable', codex_assistant: '' };
+    const rc = { ...d.currentRunConfig()!, production_model: 'opus', codex_production_model: '' };
+    const s = settings.value!;
+    const mismatches: string[] = [];
+    for (const step of [0, 1]) {
+      if (step === 1) {
+        models.codex_assistant = 'gpt-test-codex';
+        rc.codex_production_model = 'gpt-test-prod';
+      }
+      for (const prov of ['claude', 'codex'] as const) {
+        for (const use of ['assistant', 'dry_run', 'production'] as const) {
+          const local = effectiveModel(models, rc, s, prov, use);
+          const ffi = await core<{ model: string | null }>('models.effective', { models, run_config: rc, use, provider: prov });
+          if (local !== ffi.model) mismatches.push(`${prov} ${use}: ${local} vs ${ffi.model}`);
+        }
+      }
+    }
+    check(!mismatches.length, `pickers resolve the model the core sends: ${mismatches.join('; ')}`);
+    models.codex_assistant = '';
+    const label = modelLabel(effectiveModel(models, rc, s, 'codex', 'assistant'), 'codex', [], (x) => x);
+    check(label === (s.codex_model || 'Codex default') && label !== 'fable', 'Codex with nothing chosen shows Codex’s default, not Claude’s model');
   });
 
   await step('relink', async () => {

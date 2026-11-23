@@ -274,6 +274,11 @@ final class AssistantModel: ObservableObject {
             "media": summaryJSON?["media"] as? [Any] ?? [],
             "extra_env": extraEnv,
         ]
+        // `model` is Claude's and never reaches Codex; Codex gets the project's Codex assistant
+        // model, else Settings › Codex, else its own default (BUG-fond-crane-62ZP). The core picks
+        // the provider from Settings as the turn starts and uses only that provider's field.
+        let codexModel = p.models.codex_assistant.trimmingCharacters(in: .whitespaces)
+        if !codexModel.isEmpty { request["codex_model"] = codexModel }
         if let e = p.models.effort, !e.isEmpty { request["effort"] = e }
         if let s = session.claudeSession { request["resume"] = s }
         if Helper.exists { request["helper"] = Helper.path }

@@ -218,9 +218,9 @@ struct RunConfirmSheet: View {
                 GridRow {
                     Text("Model").foregroundStyle(.secondary)
                     if app.usesCodex {
-                        // Codex runs use the Codex model from Settings › Assistant.
-                        Text(app.settings.codex_model.isEmpty ? "Codex default" : app.settings.codex_model).font(.callout)
-                            .help("Codex runs use the model chosen in Settings › Assistant")
+                        // This run's Codex model, sent as `codex_model` (BUG-fond-crane-62ZP).
+                        CodexModelPicker(title: "", model: $plan.codexModel).labelsHidden()
+                            .help("Starts as the run config's Codex model; Codex default follows Settings › Codex")
                     } else {
                         ModelPicker(title: "", model: $plan.model).labelsHidden()
                     }
@@ -248,8 +248,8 @@ struct RunConfirmSheet: View {
                 if plan.revise == nil && !plan.isAudioReview {
                     GridRow {
                         Text("Dry run").foregroundStyle(.secondary)
-                        Toggle(app.usesCodex ? "Do a dry run first" : "Do a dry run first with \(app.models.displayName(document.dryRunModel))", isOn: $plan.dryRunFirst)
-                            .help(app.usesCodex ? "Codex dry runs use the model chosen in Settings › Assistant" : "The dry run model is set in Project › Models, or in Settings › Claude for projects that follow the default")
+                        Toggle("Do a dry run first with \(document.effectiveModelLabel(.dry_run))", isOn: $plan.dryRunFirst)
+                            .help(app.usesCodex ? "The Codex dry run model is set in Project › Models, or in Settings › Codex for projects that follow the default" : "The dry run model is set in Project › Models, or in Settings › Claude for projects that follow the default")
                     }
                 }
             }
