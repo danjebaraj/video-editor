@@ -197,6 +197,7 @@ fn run_codex_audio_review(w: &World) -> std::process::Output {
         .env("VIDEO_STUDIO_NO_CLAUDE", "1")
         .env("FAKE_CODEX_SCRIPT", w.script.as_str())
         .env("FAKE_CODEX_LOG", w.root.join("codex.ndjson").as_str())
+        .env("VIDEO_STUDIO_CODEX_PATCH_TIMEOUT_MS", "1500")
         .output()
         .unwrap()
 }
@@ -323,4 +324,149 @@ fn a_codex_audio_review_that_calls_a_missing_tool_fails_at_once_with_the_cause()
     let o = run_codex_audio_review(&w);
     let fin = events(&o).pop().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
     assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}");
+}
+
+/// Four narration scripts in one Codex patch (BUG-green-cricket-P6HQ).
+fn four_scripts(complete: &str) -> Value {
+    json!({"patch": {"id": 2, "complete": complete, "files": (1..=4)
+        .map(|i| json!({"path": format!("audio/scene{i}.txt"), "content": format!("Narration for scene {i}.")}))
+        .collect::<Vec<_>>()}})
+}
+
+fn tool_texts(ev: &[Value]) -> Vec<String> {
+    ev.iter()
+        .filter(|e| e["event"] == "message" && e["role"] == "tool")
+        .filter_map(|e| e["text"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// Responses the client sent to one server request.
+fn responses_to(w: &World, id: Value) -> Vec<Value> {
+    ndjson(&w.root.join("codex.ndjson"))
+        .into_iter()
+        .filter(|m| m.get("method").is_none() && m.get("id") == Some(&id))
+        .collect()
+}
+
+/// BUG-green-cricket-P6HQ: a four-file patch counts as written only when Codex reports it
+/// applied; then the scripts feed the speech helper and the soundtrack is mixed.
+#[test]
+fn a_codex_patch_counts_as_written_once_applied_and_feeds_the_helper() {
+    let mut steps = vec![four_scripts("ok")];
+    for i in 1..=4 {
+        steps.push(json!({"command": format!("video-studio eleven tts --voice v1 --text-file audio/scene{i}.txt --out audio/scene{i}.mp3")}));
+    }
+    steps.extend([
+        json!({"write": {"path": "project.json5", "content": PROJECT_JSON5}}),
+        json!({"command": "cutline validate project.json5"}),
+        json!({"command": "cutline audio project.json5 --export youtube-shorts --out outputs/audio-review.wav"}),
+        json!({"write": {"path": "summary.md", "content": "## What you will hear\nFour passages.\n"}}),
+    ]);
+    let w = codex_world(Value::Array(steps));
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}\n{}", stderr(&o));
+    assert_eq!(responses_to(&w, json!(2)).len(), 1, "one answer to the patch approval");
+    let tools = tool_texts(&ev);
+    for i in 1..=4 {
+        assert!(tools.contains(&format!("Wrote `audio/scene{i}.txt`")), "{tools:?}");
+    }
+    // each write is reported after it was applied, not when it was approved
+    let pending = ev.iter().position(|e| e["detail"] == "Writing `audio/scene1.txt`…").expect("pending status");
+    let wrote = ev.iter().position(|e| e["text"] == "Wrote `audio/scene1.txt`").unwrap();
+    assert!(pending < wrote);
+    let r = w.load_project().runs.pop().unwrap();
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    let helper = std::fs::read_to_string(folder.join("logs/eleven.ndjson")).unwrap();
+    for i in 1..=4 {
+        assert!(helper.contains(&format!("Narration for scene {i}.")), "the helper got scene {i}: {helper}");
+    }
+    assert!(folder.join("outputs/audio-review.wav").is_file());
+}
+
+/// BUG-green-cricket-P6HQ: an accepted patch Codex never reports applied stops the run after
+/// the deadline, naming the files. Nothing claims they were written, the refused reads and the
+/// help call aren't a write or a mix, no credits are spent and the next run starts.
+#[test]
+fn a_codex_patch_never_reported_applied_stops_the_run_with_the_files_named() {
+    let w = codex_world(json!([]));
+    std::fs::write(
+        &w.script,
+        json!([
+            [
+                four_scripts("withhold"),
+                {"command": "ls audio"},
+                {"command": "cat audio/scene1.txt"},
+                {"command": "cutline audio --help"},
+                {"hang": true}
+            ],
+            [
+                {"write": {"path": "project.json5", "content": PROJECT_JSON5}},
+                {"command": "cutline audio project.json5 --export youtube-shorts --out outputs/audio-review.wav"},
+                {"write": {"path": "summary.md", "content": "## What you will hear\nThe tone.\n"}}
+            ]
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert_eq!(fin["status"], "failed", "{fin}");
+    assert_eq!(fin["eleven_credits"], 0);
+    let msg = fin["message"].as_str().unwrap();
+    assert!(
+        msg.contains("`audio/scene1.txt`") && msg.contains("`audio/scene4.txt`") && msg.contains("accepted"),
+        "{msg}"
+    );
+    assert!(msg.contains("outputs/audio-review.wav"), "{msg}");
+    assert_eq!(responses_to(&w, json!(2)).len(), 1);
+    let tools = tool_texts(&ev);
+    assert!(!tools.iter().any(|t| t.starts_with("Wrote")), "{tools:?}");
+    let stages: Vec<&str> =
+        ev.iter().filter(|e| e["event"] == "stage_started").filter_map(|e| e["stage"].as_str()).collect();
+    assert!(!stages.contains(&"mix"), "help is no mix: {stages:?}");
+    assert!(!ev.iter().any(|e| e["event"] == "progress" && e["fraction"] == 1.0), "nothing completed");
+    let r = w.load_project().runs.pop().unwrap();
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    assert!(!folder.join("outputs/audio-review.wav").exists());
+    let summary = std::fs::read_to_string(folder.join("logs/summary.md")).unwrap();
+    assert!(!summary.contains("permissions.ndjson") || folder.join("logs/permissions.ndjson").is_file(), "{summary}");
+
+    let o = run_codex_audio_review(&w);
+    let fin = events(&o).pop().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}");
+}
+
+/// BUG-green-cricket-P6HQ: a patch Codex reports failed is a failure of those writes, not a
+/// success; a batch with one path outside the run folder is declined whole, with one answer.
+#[test]
+fn a_failed_or_partly_outside_codex_patch_writes_nothing_and_says_so() {
+    let w = codex_world(json!([
+        four_scripts("fail"),
+        {"patch": {"id": 9, "complete": "ok", "files": [
+            {"path": "audio/inside.txt", "content": "in"},
+            {"path": "../outside.txt", "content": "out"}
+        ]}}
+    ]));
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert_eq!(fin["status"], "failed", "{fin}");
+    let tools = tool_texts(&ev);
+    assert!(!tools.iter().any(|t| t.starts_with("Wrote")), "{tools:?}");
+    assert!(
+        ev.iter().any(|e| e["event"] == "message"
+            && e["failed"] == true
+            && e["text"].as_str().unwrap_or("").contains("scene1.txt")),
+        "the failed write is shown as failed: {tools:?}"
+    );
+    let answers = responses_to(&w, json!(9));
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0]["result"]["decision"], "decline");
+    let r = w.load_project().runs.pop().unwrap();
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    assert!(!folder.join("audio/inside.txt").exists() && !folder.parent().unwrap().join("outside.txt").exists());
+    assert!(fin["message"].as_str().unwrap().contains("scene1.txt"), "{fin}");
 }
