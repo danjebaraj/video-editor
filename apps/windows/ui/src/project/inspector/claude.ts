@@ -4,7 +4,7 @@
 import { h, clear, button, iconButton, icon, Icons, checkbox, emptyState, select } from '../../dom';
 import { request } from '../../bridge';
 import { effect } from '../../store';
-import { environment, assistantAvailable, assistantChecked, assistantSetupProblem, readiness, modelName, settings } from '../../app-state';
+import { environment, assistantAvailable, assistantChecked, assistantSetupProblem, readiness, settings, codexStatus, effectiveModelLabel, providerName } from '../../app-state';
 import { prompt, confirm, openFolders } from '../../dialogs';
 import { questionCard } from '../../widgets';
 import { copyButton, copyable, inline, markdownText } from '../../text-tools';
@@ -48,10 +48,13 @@ export function claudeTab(w: ProjectWindow): HTMLElement {
     if (box.value !== v) box.value = v;
   });
 
+  // The model the next turn uses under the selected provider (BUG-fond-crane-62ZP): "Codex default"
+  // when Codex chooses, never Claude's model while Codex is selected.
   const modelLabel = h('span', { class: 'muted small', title: 'The spec assistant model. Change it in the Project inspector.' });
-  effect([w.doc.project, settings], () => {
-    const name = modelName(w.doc.assistantModel);
+  effect([w.doc.project, settings, codexStatus], () => {
+    const name = effectiveModelLabel(w.doc.p.models, null, 'assistant');
     if (modelLabel.textContent !== name) modelLabel.textContent = name;
+    modelLabel.title = `The spec assistant model for ${providerName()}. Change it in the Project inspector.`;
   });
 
   effect([a.sessions, a.current, a.running, environment, settings, readiness], () => {

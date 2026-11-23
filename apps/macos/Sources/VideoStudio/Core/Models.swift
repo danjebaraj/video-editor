@@ -185,18 +185,38 @@ struct CapturePermissions: Codable, Equatable {
 }
 
 struct ProjectModels: Codable, Equatable {
+    /// Claude's spec assistant model. Never sent to Codex.
     var assistant = "sonnet"
+    /// Claude's dry run model.
     var dry_run = "haiku"
+    /// The assistant model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows
+    /// Settings › Codex, then Codex's own default.
+    var codex_assistant = ""
+    /// The dry run model when Codex is the provider. Empty follows Settings › Codex.
+    var codex_dry_run = ""
     var effort: String?
     var web_access = false
 
+    enum CodingKeys: String, CodingKey { case assistant, dry_run, codex_assistant, codex_dry_run, effort, web_access }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         assistant = try c.decodeIfPresent(String.self, forKey: .assistant) ?? "sonnet"
         dry_run = try c.decodeIfPresent(String.self, forKey: .dry_run) ?? "haiku"
+        codex_assistant = try c.decodeIfPresent(String.self, forKey: .codex_assistant) ?? ""
+        codex_dry_run = try c.decodeIfPresent(String.self, forKey: .codex_dry_run) ?? ""
         effort = try c.decodeIfPresent(String.self, forKey: .effort)
         web_access = try c.decodeIfPresent(Bool.self, forKey: .web_access) ?? false
+    }
+    /// Written as the core writes it: empty Codex choices are left out.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(assistant, forKey: .assistant)
+        try c.encode(dry_run, forKey: .dry_run)
+        if !codex_assistant.isEmpty { try c.encode(codex_assistant, forKey: .codex_assistant) }
+        if !codex_dry_run.isEmpty { try c.encode(codex_dry_run, forKey: .codex_dry_run) }
+        try c.encodeIfPresent(effort, forKey: .effort)
+        try c.encode(web_access, forKey: .web_access)
     }
 }
 
@@ -483,7 +503,11 @@ struct RunConfig: Codable, Equatable, Identifiable {
     var id: String
     var name: String
     var outputs: [String] = []
+    /// Claude's production model. Never sent to Codex.
     var production_model = "opus"
+    /// The production model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows
+    /// Settings › Codex, then Codex's own default.
+    var codex_production_model = ""
     var quality = "final"
     var locales: [String] = []
     var output_folder = ""
@@ -495,7 +519,26 @@ struct RunConfig: Codable, Equatable, Identifiable {
     var question_timeout_s: Int?
     var effort: String?
 
-    enum CodingKeys: String, CodingKey { case id, name, outputs, production_model, quality, locales, output_folder, eleven_credit_cap, dry_run_first, max_spend_usd, max_turns, web_access, question_timeout_s, effort }
+    enum CodingKeys: String, CodingKey { case id, name, outputs, production_model, codex_production_model, quality, locales, output_folder, eleven_credit_cap, dry_run_first, max_spend_usd, max_turns, web_access, question_timeout_s, effort }
+    /// Written as the core writes it: an empty Codex choice is left out.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(outputs, forKey: .outputs)
+        try c.encode(production_model, forKey: .production_model)
+        if !codex_production_model.isEmpty { try c.encode(codex_production_model, forKey: .codex_production_model) }
+        try c.encode(quality, forKey: .quality)
+        try c.encode(locales, forKey: .locales)
+        try c.encode(output_folder, forKey: .output_folder)
+        try c.encode(eleven_credit_cap, forKey: .eleven_credit_cap)
+        try c.encode(dry_run_first, forKey: .dry_run_first)
+        try c.encodeIfPresent(max_spend_usd, forKey: .max_spend_usd)
+        try c.encodeIfPresent(max_turns, forKey: .max_turns)
+        try c.encode(web_access, forKey: .web_access)
+        try c.encodeIfPresent(question_timeout_s, forKey: .question_timeout_s)
+        try c.encodeIfPresent(effort, forKey: .effort)
+    }
     init(id: String, name: String) { self.id = id; self.name = name }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -503,6 +546,7 @@ struct RunConfig: Codable, Equatable, Identifiable {
         name = try c.decode(String.self, forKey: .name)
         outputs = try c.decodeIfPresent([String].self, forKey: .outputs) ?? []
         production_model = try c.decodeIfPresent(String.self, forKey: .production_model) ?? "opus"
+        codex_production_model = try c.decodeIfPresent(String.self, forKey: .codex_production_model) ?? ""
         quality = try c.decodeIfPresent(String.self, forKey: .quality) ?? "final"
         locales = try c.decodeIfPresent([String].self, forKey: .locales) ?? []
         output_folder = try c.decodeIfPresent(String.self, forKey: .output_folder) ?? ""

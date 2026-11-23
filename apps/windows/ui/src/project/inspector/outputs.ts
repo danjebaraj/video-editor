@@ -5,9 +5,9 @@
 import { h, clear, field, textInput, numberInput, select, checkbox, button, iconButton, Icons, emptyState, setDisabled } from '../../dom';
 import { core, request } from '../../bridge';
 import { effect } from '../../store';
-import { platforms, settings, saveSettings } from '../../app-state';
+import { platforms, settings, saveSettings, codexStatus } from '../../app-state';
 import { prompt, confirm, openFolders, sheet } from '../../dialogs';
-import { modelPicker, effortPicker } from '../../widgets';
+import { providerModelPicker, effortPicker } from '../../widgets';
 import type { ProjectWindow } from '../window';
 import type { OutputConfig, RunConfig, OutputPreset } from '../../types';
 
@@ -26,7 +26,8 @@ export function outputsTab(w: ProjectWindow): HTMLElement {
     outputRoot = rc ? await core<string>('outputs.root', { project: d.p, run_config: rc.id }).catch(() => '') : '';
   };
 
-  effect([d.project, d.runConfig, d.outputs, platforms], () => {
+  // `settings` and `codexStatus`: the production model picker follows the selected provider.
+  effect([d.project, d.runConfig, d.outputs, platforms, settings, codexStatus], () => {
     refreshRoot().then(() => render());
   });
 
@@ -112,7 +113,11 @@ export function outputsTab(w: ProjectWindow): HTMLElement {
       h('section', null, h('h3', null, 'Outputs in this run'), outputs, addSelect),
       h('section', null,
         h('h3', null, 'Production'),
-        field('Model', modelPicker(rc.production_model, (v) => upd((r) => (r.production_model = v)), { label: 'Production model' })),
+        // Claude's production model, or Codex's while Codex is selected (BUG-fond-crane-62ZP).
+        field('Model', providerModelPicker(
+          { value: rc.production_model, onChange: (v) => upd((r) => (r.production_model = v)) },
+          { value: rc.codex_production_model, onChange: (v) => upd((r) => (r.codex_production_model = v)) },
+          'Production model')),
         (() => {
           const e = effortPicker(rc.effort ?? null, (v) => upd((r) => (r.effort = v)), 'Production effort');
           return e ? field('Effort', e) : null;

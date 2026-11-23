@@ -125,9 +125,13 @@ pub struct RunRequest {
     /// Run config ID or name.
     pub run_config: String,
     pub kind: RunKind,
-    /// Overrides the config's model for this run.
+    /// Overrides the config's Claude model for this run. Never sent to Codex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Overrides the config's Codex model for this run (BUG-fond-crane-62ZP). Never sent to
+    /// Claude.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_model: Option<String>,
     /// Overrides the config's output folder for this run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<Utf8PathBuf>,
@@ -272,7 +276,7 @@ fn copy_tree(from: &Utf8Path, to: &Utf8Path) {
 }
 
 /// What a run says when Codex is the provider and can't be found.
-pub const CODEX_MISSING: &str = "Codex is selected in Settings › Assistant, but it isn't installed. Install the Codex CLI (it provides `codex app-server`) or set its path in Settings › Assistant, then try again.";
+pub const CODEX_MISSING: &str = "Codex is selected in Settings › Assistant, but it isn't installed. Install the Codex CLI (it provides `codex app-server`) or set its path in Settings › Codex, then try again.";
 
 /// Why the selected Codex can't be used: a bad configured path (named) or no Codex at all.
 pub fn codex_problem(configured: &str) -> Option<String> {
@@ -485,12 +489,22 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
 
     // An empty model in the request means "not chosen", as it does in the project.
     let requested_model = request.model.clone().filter(|m| !m.trim().is_empty());
+    let model_use = match request.kind {
+        RunKind::DryRun => crate::project::ModelUse::DryRun,
+        RunKind::Production | RunKind::AudioReview => crate::project::ModelUse::Production,
+    };
     let model = match (&codex_exe, request.kind) {
-        // Codex: the model chosen for this run, else Settings' Codex model, else Codex's default
-        (Some(_), _) => requested_model
-            .clone()
-            .or_else(|| crate::codex::model_for(&env.settings.codex_model))
-            .unwrap_or_else(|| CODEX_DEFAULT_MODEL.to_string()),
+        // Codex: this run's Codex override, the run config's (or project's) Codex model,
+        // Settings › Codex, else Codex's own default. Claude's choices aren't Codex's.
+        (Some(_), _) => crate::project::effective_model(
+            &project.models,
+            Some(&rc),
+            &env.settings,
+            crate::codex::Provider::Codex,
+            model_use,
+            request.codex_model.as_deref(),
+        )
+        .unwrap_or_else(|| CODEX_DEFAULT_MODEL.to_string()),
         (None, RunKind::DryRun) => requested_model.unwrap_or_else(|| project.models.dry_run_or(&env.settings)),
         (None, RunKind::Production | RunKind::AudioReview) => {
             requested_model.unwrap_or_else(|| rc.production_model.clone())

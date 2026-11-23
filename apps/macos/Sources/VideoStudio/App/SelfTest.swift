@@ -45,6 +45,40 @@ enum SelfTest {
         }
     }
 
+    /// BUG-fond-crane-62ZP: what the pickers and the Assistant header show is the model the core
+    /// sends (`models.effective`), for both providers, and Codex never shows Claude's models.
+    private static func modelResolutionChecks(_ doc: ProjectDocument) {
+        struct Effective: Decodable { var provider: String; var model: String?; var codex_default: Bool }
+        var models = doc.project.models
+        models.assistant = "fable"
+        var rc = doc.selectedRunConfig ?? RunConfig(id: "rc_selftest", name: "Test")
+        rc.production_model = "opus"
+        let probe = { (codex: Bool, use: ModelUse, override: String?) -> (String?, String?) in
+            let local = ProjectDocument.effectiveModel(use, models: models, runConfig: rc, settings: AppState.shared.settings, codex: codex, override: override)
+            var args: [String: Any] = ["models": Core.arg(models), "run_config": Core.arg(rc), "use": use.rawValue, "provider": codex ? "codex" : "claude"]
+            if let override { args["override"] = override }
+            let ffi: Effective? = try? Core.run("models.effective", args)
+            return (local, ffi?.model)
+        }
+        var mismatches: [String] = []
+        for step in 0..<3 {
+            if step == 1 { models.codex_assistant = "gpt-test-codex"; rc.codex_production_model = "gpt-test-prod" }
+            for codex in [false, true] {
+                for use in [ModelUse.assistant, .dry_run, .production] {
+                    for override in [nil, step == 2 ? "x-override" : nil] {
+                        let (local, ffi) = probe(codex, use, override)
+                        if local != ffi { mismatches.append("\(codex ? "codex" : "claude") \(use.rawValue) \(override ?? "-"): \(local ?? "nil") vs \(ffi ?? "nil")") }
+                    }
+                }
+            }
+        }
+        check("pickers resolve the model the core sends, for Claude and Codex", mismatches.isEmpty, mismatches.joined(separator: "; "))
+        models.codex_assistant = ""
+        let label = ModelResolution.label(effective: probe(true, .assistant, nil).0, codex: true, codexModels: [], claudeName: { $0 })
+        let codexLabel = AppState.shared.settings.codex_model.isEmpty ? "Codex default" : AppState.shared.settings.codex_model
+        check("Codex with nothing chosen shows Codex's default, not Claude's model", label == codexLabel && label != "fable", label)
+    }
+
     private static func sleep(_ seconds: Double) async {
         try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
@@ -295,6 +329,7 @@ enum SelfTest {
         check("writes outside spec.md and shell commands are denied", trace.components(separatedBy: "\n").filter { $0.contains("\"decision\":\"deny\"") }.count == 2, trace)
         check("a folder shared with Claude is readable and saved in the project", trace.components(separatedBy: "\n").contains { $0.contains("brief.md") && $0.contains("\"decision\":\"allow\"") } && trace.contains("shared-docs") && (try? String(contentsOf: projectURL, encoding: .utf8))?.contains("assistant_folders") == true, trace)
         check("the project file is untouched by Claude", (try? String(contentsOf: projectURL, encoding: .utf8))?.contains("\"format\"") == true)
+        modelResolutionChecks(doc)
         check("Claude's edit waits for review as hunks", doc.review.pending?.hunks.count == 2, "\(String(describing: doc.review.pending?.hunks.count))")
         check("the editor keeps the old text during review", ed.text == before && !ed.textView.isEditable)
         await snapshot(wc.window, "review")

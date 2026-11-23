@@ -66,10 +66,10 @@ impl CodexLookup {
         match self {
             CodexLookup::Found(_) => String::new(),
             CodexLookup::BadPath { path, reason } => format!(
-                "The Codex path in Settings › Assistant, {path}, {reason}. Correct it, or clear it so the app searches for Codex itself."
+                "The Codex path in Settings › Codex, {path}, {reason}. Correct it, or clear it so the app searches for Codex itself."
             ),
             CodexLookup::NotFound => {
-                "Codex isn't installed. Install the Codex CLI, or set its path in Settings › Assistant.".into()
+                "Codex isn't installed. Install the Codex CLI, or set its path in Settings › Codex.".into()
             }
         }
     }
@@ -282,12 +282,12 @@ impl CodexStatus {
             CodexStatus::Missing => Some((
                 "codex_missing",
                 "Codex isn't installed".into(),
-                "Install the Codex CLI (it provides `codex app-server`), or set its path in Settings › Assistant, then re-check.".into(),
+                "Install the Codex CLI (it provides `codex app-server`), or set its path in Settings › Codex, then re-check.".into(),
             )),
             CodexStatus::BadPath { path, reason } => Some((
                 "codex_path_invalid",
                 format!("The Codex path {path} {reason}"),
-                "Correct the path in Settings › Assistant, or clear it so the app searches PATH, /opt/homebrew/bin and /usr/local/bin, then re-check.".into(),
+                "Correct the path in Settings › Codex, or clear it so the app searches PATH, /opt/homebrew/bin and /usr/local/bin, then re-check.".into(),
             )),
             CodexStatus::Incompatible { detail } => Some((
                 "codex_incompatible",
@@ -441,7 +441,7 @@ mod tests {
         exe(&plain, 0o600);
         let bad = resolve_with(plain.as_str(), Some(&path_var), &fallbacks);
         assert_eq!(bad, CodexLookup::BadPath { path: plain.to_string(), reason: "isn't executable".into() });
-        assert!(bad.problem().contains(plain.as_str()) && bad.problem().contains("Settings › Assistant"));
+        assert!(bad.problem().contains(plain.as_str()) && bad.problem().contains("Settings › Codex"));
         assert_eq!(
             resolve_with(other.as_str(), None, &[]),
             CodexLookup::BadPath { path: other.to_string(), reason: "isn't a file".into() }

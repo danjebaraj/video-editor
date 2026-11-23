@@ -1,5 +1,5 @@
-// The Settings window (spec §18; Ctrl+,): General, Finish, Assistant, Claude, cutline, ElevenLabs,
-// Storage, Editor.
+// The Settings window (spec §18; Ctrl+,): General, Finish, Assistant, Claude, Codex, cutline,
+// ElevenLabs, Storage, Editor.
 // Settings are the library's settings.json, shared with the CLI.
 
 import { h, clear, button, iconButton, Icons, field, textInput, numberInput, select, checkbox, bytes, spinner, when } from '../dom';
@@ -12,12 +12,13 @@ import { copyable } from '../text-tools';
 import { finishEditor, filledFinish, sameFinish, DEFAULT_FINISH } from '../finish';
 import type { Settings } from '../types';
 
-type Pane = 'general' | 'finish' | 'assistant' | 'claude' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
+type Pane = 'general' | 'finish' | 'assistant' | 'claude' | 'codex' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
 const PANES: [Pane, string, string][] = [
   ['general', 'General', Icons.settings],
   ['finish', 'Finish', Icons.video],
   ['assistant', 'Assistant', Icons.chat],
   ['claude', 'Claude', Icons.chat],
+  ['codex', 'Codex', Icons.chat],
   ['cutline', 'cutline', Icons.video],
   ['elevenlabs', 'ElevenLabs', Icons.audio],
   ['storage', 'Storage', Icons.folder],
@@ -74,18 +75,26 @@ export async function mount(root: HTMLElement) {
           h('div', { class: 'row' }, button('Restore Defaults', () => save((x) => (x.finish = { ...DEFAULT_FINISH })), { disabled: sameFinish(s.finish, DEFAULT_FINISH), title: 'Smooth transitions of 0.4 s, cuts on the beat, a short lead-in, and gentle music fades' })));
         break;
       case 'assistant': {
-        // FEAT-spry-alpaca-5RQZ: Claude Code or Codex drives the Assistant and runs. Claude's models
-        // stay in the Claude pane; Codex has its own executable and model. The Codex check is the
-        // app-wide one every project window follows.
-        const codex = codexStatus.value;
-        const checking = codexChecking.value;
+        // FEAT-spry-alpaca-5RQZ, BUG-fond-crane-62ZP: only who drives the Assistant and runs, Claude
+        // Code or Codex. Each provider's executable, readiness and models have their own pane;
+        // opening either doesn't select it.
         const radio = (value: string, label: string) => {
           const input = h('input', { type: 'radio', name: 'provider', value, checked: (s.provider || 'claude') === value }) as HTMLInputElement;
           // Saving broadcasts the change; every window then re-checks the selected provider.
           input.addEventListener('change', () => input.checked && save((x) => (x.provider = value)));
           return h('label', { class: 'check' }, input, h('span', null, label));
         };
-        const isCodex = s.provider === 'codex';
+        clear(body, h('h2', null, 'Assistant'),
+          h('fieldset', { class: 'plain', 'aria-label': 'Provider' }, h('legend', null, 'Assistant and runs'), radio('claude', 'Claude Code'), radio('codex', 'Codex')),
+          h('p', { class: 'muted small' }, 'Used by the Assistant in every open project and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.'),
+          h('p', { class: 'muted small' }, 'Set up each provider’s executable and models in the Claude and Codex panes. Projects keep separate model choices for each, so switching back restores them.'));
+        break;
+      }
+      case 'codex': {
+        // BUG-fond-crane-62ZP: Codex's executable, readiness and default model. Viewing or editing it
+        // never changes the selected provider. The Codex check is the one every window follows.
+        const codex = codexStatus.value;
+        const checking = codexChecking.value;
         const status = checking
           ? h('p', { class: 'grow', role: 'status' }, spinner('Checking'), ' Checking…')
           : !codex
@@ -96,18 +105,16 @@ export async function mount(root: HTMLElement) {
         const models = codex?.models ?? [];
         const modelOptions: [string, string][] = [['', 'Codex default'], ...models.map((m) => [m.id, `${m.name}${m.is_default ? ' (default)' : ''}`] as [string, string])];
         if (s.codex_model && !models.some((m) => m.id === s.codex_model)) modelOptions.push([s.codex_model, s.codex_model]);
-        clear(body, h('h2', null, 'Assistant'),
-          h('fieldset', { class: 'plain', 'aria-label': 'Provider' }, h('legend', null, 'Assistant and runs'), radio('claude', 'Claude Code'), radio('codex', 'Codex')),
-          h('p', { class: 'muted small' }, 'Used by the Assistant in every open project and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.'),
-          isCodex ? h('h3', null, 'Codex') : null,
-          isCodex ? h('div', { class: 'row' }, status, button('Re-check', () => checkCodex(), { glyph: Icons.refresh, disabled: checking })) : null,
-          isCodex ? field('Codex path', h('div', { class: 'row' }, textInput(s.codex_path, (v) => save((x) => (x.codex_path = v)).then(() => checkCodex()), { placeholder: 'codex on PATH', class: 'grow' }), button('Browse…', async () => {
+        clear(body, h('h2', null, 'Codex'),
+          s.provider === 'codex' ? null : h('p', { class: 'muted small' }, 'Claude Code is selected in the Assistant pane. These settings apply when Codex is selected.'),
+          h('div', { class: 'row' }, status, button('Re-check', () => checkCodex(), { glyph: Icons.refresh, disabled: checking })),
+          field('Codex path', h('div', { class: 'row' }, textInput(s.codex_path, (v) => save((x) => (x.codex_path = v)).then(() => checkCodex()), { placeholder: 'codex on PATH', class: 'grow' }), button('Browse…', async () => {
             const [f] = await openFiles('codex.exe', [{ name: 'Codex', spec: 'codex.exe;codex.cmd' }, ...Filters.any]);
             if (f) save((x) => (x.codex_path = f)).then(() => checkCodex());
-          }))) : null,
-          isCodex ? field('Model', select(modelOptions, s.codex_model, (v) => save((x) => (x.codex_model = v)), { 'aria-label': 'Codex model', title: 'The models come from Codex once it is ready. Claude’s model choices are kept separately in the Claude pane.' })) : null,
-          isCodex ? h('p', { class: 'muted small' }, 'Sign-in is handled by the Codex CLI (codex login). The app never asks for or stores OpenAI credentials.') : null);
-        if (isCodex && !codex && !checking) checkCodex();
+          }))),
+          field('Default model', select(modelOptions, s.codex_model, (v) => save((x) => (x.codex_model = v)), { 'aria-label': 'Codex model', title: 'The models come from Codex once it is ready. Claude’s model choices are kept separately in the Claude pane.' }), 'Projects use this model unless they choose their own Codex model in Project › Models or on a run config.'),
+          h('p', { class: 'muted small' }, 'Sign-in is handled by the Codex CLI (codex login). The app never asks for or stores OpenAI credentials.'));
+        if (!codex && !checking) checkCodex();
         break;
       }
       case 'claude': {

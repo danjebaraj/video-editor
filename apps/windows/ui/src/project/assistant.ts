@@ -154,7 +154,11 @@ export class Assistant {
         session_dir: `${this.sessionsDir}\\${s.id}`,
         spec: this.getSpec(),
         prompt: full,
+        // Claude's model; it never reaches Codex. Codex gets the project's Codex assistant model, else
+        // Settings › Codex, else its own default (BUG-fond-crane-62ZP). The core picks the provider
+        // from Settings as the turn starts and uses only that provider's field.
         model: this.doc.assistantModel,
+        codex_model: (this.doc.p.models.codex_assistant ?? '').trim() || null,
         effort: this.doc.p.models.effort ?? null,
         web_access: !!this.doc.p.models.web_access,
         resume: s.claudeSession ?? null,

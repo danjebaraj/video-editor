@@ -68,6 +68,47 @@ fn an_app_assistant_turn_uses_codex_without_claude() {
     let sent = std::fs::read_to_string(&log).unwrap();
     assert!(sent.contains("\"thread/start\"") && sent.contains("\"turn/start\""), "{sent}");
 
+    // BUG-fond-crane-62ZP: Claude's model ("opus" above) never reaches Codex; Codex default
+    // sends no model, and the project's Codex assistant model reaches Codex as is
+    let thread_starts = |log: &Utf8Path| -> Vec<Value> {
+        std::fs::read_to_string(log)
+            .unwrap()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|m| m["method"] == "thread/start" || m["method"] == "turn/start")
+            .collect()
+    };
+    for m in thread_starts(&log) {
+        assert!(m["params"].get("model").is_none(), "{m}");
+    }
+    let log2 = root.join("codex2.ndjson");
+    let mut req2 = request.clone();
+    req2["codex_model"] = json!("gpt-5.5-codex");
+    req2["session_dir"] = json!(root.join("assistant/p1/c2"));
+    req2["extra_env"]["FAKE_CODEX_LOG"] = json!(log2);
+    let (tx, rx) = channel();
+    let turn = video_studio_ffi::start_assistant(req2.to_string(), Box::new(Listener(Mutex::new(tx)))).unwrap();
+    while let Ok(e) = rx.recv_timeout(Duration::from_secs(30)) {
+        if e.to_string().contains("\"finished\"") {
+            break;
+        }
+    }
+    turn.wait();
+    let starts = thread_starts(&log2);
+    assert!(!starts.is_empty() && starts.iter().all(|m| m["params"]["model"] == "gpt-5.5-codex"), "{starts:?}");
+    // the display answer matches what was sent
+    let shown: Value = serde_json::from_str(
+        &video_studio_ffi::call(
+            "models.effective".into(),
+            json!({"models": {"assistant": "fable", "dry_run": "", "codex_assistant": ""}, "use": "assistant"})
+                .to_string(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(shown["model"], Value::Null, "{shown}");
+    assert_eq!(shown["codex_default"], true);
+
     // a configured path that can't run is reported with that path, not as "isn't installed"
     s.codex_path = root.join("nope/codex").to_string();
     s.save(&lib).unwrap();

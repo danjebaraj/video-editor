@@ -561,6 +561,7 @@ fn cmd_validate(project: &Utf8Path, config: Option<&str>, dry_run: bool, json: b
             run_config: config.unwrap_or_default().to_string(),
             kind: RunKind::DryRun,
             model: None,
+            codex_model: None,
             output: None,
             revise: None,
             audio_output: None,
@@ -726,6 +727,7 @@ fn cmd_run(
                 run_config: rc.id.clone(),
                 kind: RunKind::DryRun,
                 model: None,
+                codex_model: None,
                 output: None,
                 revise: None,
                 audio_output: None,
@@ -777,7 +779,9 @@ fn cmd_run(
             project_path: l.path.clone(),
             run_config: rc.id.clone(),
             kind,
-            model: model.clone(),
+            // `--model` overrides the selected provider's model for this run
+            model: model.clone().filter(|_| !codex_selected()),
+            codex_model: model.clone().filter(|_| codex_selected()),
             output: output.clone(),
             revise: None,
             audio_output: audio_review.clone().filter(|o| !o.is_empty()),
@@ -1189,4 +1193,9 @@ fn cmd_hook(policy_file: &Utf8Path) -> i32 {
     };
     println!("{out}");
     0
+}
+
+/// Codex is the provider in Settings › Assistant.
+fn codex_selected() -> bool {
+    video_studio_core::settings::Settings::load(&library()).provider == video_studio_core::codex::Provider::Codex
 }

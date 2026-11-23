@@ -28,7 +28,12 @@ pub struct AssistantRequest {
     /// The spec as it is in the editor now.
     pub spec: String,
     pub prompt: String,
+    /// Claude's model. Never sent to Codex.
     pub model: String,
+    /// The project's Codex assistant model, when Codex is the provider (BUG-fond-crane-62ZP).
+    /// Empty or absent follows Settings › Codex, then Codex's own default.
+    #[serde(default)]
+    pub codex_model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
     #[serde(default)]

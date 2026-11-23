@@ -462,7 +462,7 @@ struct ProviderSetupOverlay: View {
                         if app.usesCodex {
                             Text("1. Install the Codex CLI, which provides `codex app-server`.").font(.callout)
                             Text("2. Run `codex login` once and sign in. The app never asks for your OpenAI credentials.").font(.callout)
-                            Text("3. Come back and choose Re-check. If Codex is installed somewhere unusual, set its path in Settings › Assistant, or choose Claude Code there.").font(.callout)
+                            Text("3. Come back and choose Re-check. If Codex is installed somewhere unusual, set its path in Settings › Codex, or choose Claude Code in Settings › Assistant.").font(.callout)
                         } else {
                             Text("1. Install it in Terminal:").font(.callout)
                             Text("curl -fsSL https://claude.ai/install.sh | bash").font(.system(.callout, design: .monospaced)).textSelection(.enabled)
@@ -474,7 +474,7 @@ struct ProviderSetupOverlay: View {
                     .frame(maxWidth: 440, alignment: .leading)
                     HStack {
                         Button("Edit the Spec Anyway") { dismissed = true }
-                        Button("Settings…") { AppDelegate.shared.showSettings(pane: app.usesCodex ? "assistant" : "claude") }
+                        Button("Settings…") { AppDelegate.shared.showSettings(pane: app.usesCodex ? "codex" : "claude") }
                         Button {
                             if app.usesCodex { app.checkCodex() } else { app.detect(force: true) }
                         } label: {

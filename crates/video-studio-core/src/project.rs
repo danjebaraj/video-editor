@@ -207,6 +207,13 @@ pub struct Models {
     pub assistant: String,
     /// Dry run model. Empty follows the default in Settings.
     pub dry_run: String,
+    /// The assistant model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows
+    /// Settings › Codex, then Codex's own default. `assistant` stays Claude's.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub codex_assistant: String,
+    /// The dry run model when Codex is the provider. Empty follows Settings › Codex.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub codex_dry_run: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     #[serde(default)]
@@ -231,7 +238,60 @@ impl Models {
 
 impl Default for Models {
     fn default() -> Self {
-        Models { assistant: "sonnet".into(), dry_run: "haiku".into(), effort: None, web_access: false }
+        Models {
+            assistant: "sonnet".into(),
+            dry_run: "haiku".into(),
+            codex_assistant: String::new(),
+            codex_dry_run: String::new(),
+            effort: None,
+            web_access: false,
+        }
+    }
+}
+
+/// What a model is for.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelUse {
+    Assistant,
+    DryRun,
+    /// Production runs and Audio Reviews.
+    Production,
+}
+
+/// The model the next operation uses, for display and for dispatch alike (BUG-fond-crane-62ZP):
+/// an override for the active provider, then the project's (or run config's) choice for that
+/// provider, then that provider's default in Settings, then its CLI default. Claude always gets
+/// a model; for Codex `None` means Codex's own default. Claude's choices are never sent to Codex
+/// and are kept for when Claude is selected again.
+pub fn effective_model(
+    models: &Models,
+    run_config: Option<&RunConfig>,
+    settings: &crate::settings::Settings,
+    provider: crate::codex::Provider,
+    use_: ModelUse,
+    override_: Option<&str>,
+) -> Option<String> {
+    let given = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(o) = override_.and_then(given) {
+        return Some(o);
+    }
+    match provider {
+        crate::codex::Provider::Codex => {
+            let own = match use_ {
+                ModelUse::Assistant => models.codex_assistant.as_str(),
+                ModelUse::DryRun => models.codex_dry_run.as_str(),
+                ModelUse::Production => run_config.map(|r| r.codex_production_model.as_str()).unwrap_or(""),
+            };
+            given(own).or_else(|| crate::codex::model_for(&settings.codex_model))
+        }
+        crate::codex::Provider::Claude => Some(match use_ {
+            ModelUse::Assistant => models.assistant_or(settings),
+            ModelUse::DryRun => models.dry_run_or(settings),
+            ModelUse::Production => run_config
+                .and_then(|r| given(&r.production_model))
+                .unwrap_or_else(|| Models::chosen("", &settings.default_production_model, "opus")),
+        }),
     }
 }
 
@@ -250,7 +310,12 @@ pub struct RunConfig {
     /// IDs of the selected output configs.
     #[serde(default)]
     pub outputs: Vec<String>,
+    /// Claude's production model (a CLI alias or a full ID).
     pub production_model: String,
+    /// The production model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows
+    /// Settings › Codex, then Codex's own default. `production_model` stays Claude's.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub codex_production_model: String,
     #[serde(default)]
     pub quality: Quality,
     #[serde(default)]
@@ -289,6 +354,7 @@ impl RunConfig {
             name: name.to_string(),
             outputs: Vec::new(),
             production_model: "opus".into(),
+            codex_production_model: String::new(),
             quality: Quality::Final,
             locales: Vec::new(),
             output_folder: String::new(),
@@ -852,6 +918,46 @@ pub fn record_run(project_path: &Utf8Path, record: &RunRecord) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    /// BUG-fond-crane-62ZP: one precedence for display and dispatch, per provider.
+    #[test]
+    fn the_effective_model_follows_the_active_provider() {
+        use crate::codex::Provider::{Claude, Codex};
+        let mut settings = crate::settings::Settings::default();
+        let mut models = Models { assistant: "fable".into(), dry_run: String::new(), ..Models::default() };
+        let mut rc = RunConfig::new("Test");
+        rc.production_model = "opus".into();
+        let m = |models: &Models, rc: &RunConfig, s: &crate::settings::Settings, p, u, o: Option<&str>| {
+            effective_model(models, Some(rc), s, p, u, o)
+        };
+        // Claude: the legacy choices
+        assert_eq!(m(&models, &rc, &settings, Claude, ModelUse::Assistant, None).as_deref(), Some("fable"));
+        assert_eq!(m(&models, &rc, &settings, Claude, ModelUse::Production, None).as_deref(), Some("opus"));
+        assert_eq!(m(&models, &rc, &settings, Claude, ModelUse::DryRun, None).as_deref(), Some("haiku"));
+        // Codex with nothing chosen: Codex's own default, never Claude's models
+        for u in [ModelUse::Assistant, ModelUse::DryRun, ModelUse::Production] {
+            assert_eq!(m(&models, &rc, &settings, Codex, u, None), None, "{u:?}");
+        }
+        // then Settings › Codex, then the project's Codex choice, then a per-operation override
+        settings.codex_model = "gpt-5.5-codex".into();
+        assert_eq!(m(&models, &rc, &settings, Codex, ModelUse::Production, None).as_deref(), Some("gpt-5.5-codex"));
+        rc.codex_production_model = "o4".into();
+        models.codex_assistant = "o4-mini".into();
+        assert_eq!(m(&models, &rc, &settings, Codex, ModelUse::Production, None).as_deref(), Some("o4"));
+        assert_eq!(m(&models, &rc, &settings, Codex, ModelUse::Assistant, None).as_deref(), Some("o4-mini"));
+        assert_eq!(m(&models, &rc, &settings, Codex, ModelUse::DryRun, None).as_deref(), Some("gpt-5.5-codex"));
+        assert_eq!(m(&models, &rc, &settings, Codex, ModelUse::Production, Some("x1")).as_deref(), Some("x1"));
+        // switching back: Claude's choices are where they were
+        assert_eq!(m(&models, &rc, &settings, Claude, ModelUse::Production, None).as_deref(), Some("opus"));
+        assert_eq!(m(&models, &rc, &settings, Claude, ModelUse::Assistant, None).as_deref(), Some("fable"));
+        // legacy JSON without the Codex fields loads, and an empty Codex field isn't written
+        let legacy: RunConfig =
+            serde_json::from_value(serde_json::json!({"id": "rc", "name": "Test", "production_model": "opus"}))
+                .unwrap();
+        assert_eq!(legacy.codex_production_model, "");
+        assert!(serde_json::to_value(&legacy).unwrap().get("codex_production_model").is_none());
+    }
+
     use super::*;
 
     #[test]
@@ -861,7 +967,7 @@ mod tests {
             default_assistant_model: "fable".into(),
             ..Default::default()
         };
-        let mut m = Models { assistant: String::new(), dry_run: " ".into(), effort: None, web_access: false };
+        let mut m = Models { assistant: String::new(), dry_run: " ".into(), ..Models::default() };
         assert_eq!((m.dry_run_or(&settings), m.assistant_or(&settings)), ("opus".to_string(), "fable".to_string()));
         m.dry_run = "haiku".into();
         assert_eq!(m.dry_run_or(&settings), "haiku", "the project's own choice wins");

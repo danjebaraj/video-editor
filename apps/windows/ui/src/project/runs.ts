@@ -4,7 +4,7 @@
 
 import { core, request, on, errorText } from '../bridge';
 import { Signal } from '../store';
-import { settings, assistantAvailable, assistantSetupProblem, provider } from '../app-state';
+import { settings, assistantAvailable, assistantSetupProblem, provider, effectiveModelLabel } from '../app-state';
 import { toast } from '../dialogs';
 import type { ProjectDocument } from './document';
 import type { Readiness, Report, ResolvedOutput, ClaudeQuestion, RunRecord } from '../types';
@@ -65,6 +65,9 @@ export interface RunPlan {
   kind: 'production' | 'audio_review';
   /** Audio Review: the output (ID) whose timing and audio settings are auditioned. */
   audioOutput?: string;
+  /** This run's Codex model when Codex is selected (BUG-fond-crane-62ZP): starts as the run config's
+   *  Codex choice; empty follows Settings › Codex, then Codex's default. `model` stays Claude's. */
+  codexModel?: string;
 }
 
 export interface Live {
@@ -135,11 +138,11 @@ export class RunController {
       if (opts.audioReview) {
         // Allowed as a project's first run: no dry run, and the review goes in the library.
         const audioOutput = outputs.find((o) => o.id === opts.audioOutput)?.id ?? outputs[0]?.id;
-        this.plan.value = { runConfig: rc.id, outputs, report, outputFolder: '', model: rc.production_model, dryRunFirst: false, revise, kind: 'audio_review', audioOutput };
+        this.plan.value = { runConfig: rc.id, outputs, report, outputFolder: '', model: rc.production_model, codexModel: rc.codex_production_model ?? '', dryRunFirst: false, revise, kind: 'audio_review', audioOutput };
         return;
       }
       const outputFolder = await core<string>('outputs.root', { project: this.doc.p, run_config: rc.id }).catch(() => '');
-      this.plan.value = { runConfig: rc.id, outputs, report, outputFolder, model: rc.production_model, dryRunFirst: rc.dry_run_first && !revise, revise, kind: 'production' };
+      this.plan.value = { runConfig: rc.id, outputs, report, outputFolder, model: rc.production_model, codexModel: rc.codex_production_model ?? '', dryRunFirst: rc.dry_run_first && !revise, revise, kind: 'production' };
     } finally {
       this.preparing.value = false;
     }
@@ -163,17 +166,17 @@ export class RunController {
     for (const i of plan.report.issues) if (i.severity === 'warning') this.doc.acknowledged.add(i.id);
     if (plan.kind === 'audio_review') {
       this.continuation = null;
-      await this.launch('audio_review', plan.model, plan.report, plan.revise, {}, plan.audioOutput);
+      await this.launch('audio_review', plan.model, plan.report, plan.revise, {}, plan.audioOutput, plan.codexModel);
     } else if (plan.dryRunFirst) {
       this.continuation = plan;
       await this.launch('dry_run', this.doc.dryRunModel, plan.report);
     } else {
       this.continuation = null;
-      await this.launch('production', plan.model, plan.report, plan.revise);
+      await this.launch('production', plan.model, plan.report, plan.revise, {}, undefined, plan.codexModel);
     }
   }
 
-  async launch(kind: RunKindName, model: string, report: Report, revise?: { previous_run: string; feedback: string }, testOptions: Record<string, unknown> = {}, audioOutput?: string) {
+  async launch(kind: RunKindName, model: string, report: Report, revise?: { previous_run: string; feedback: string }, testOptions: Record<string, unknown> = {}, audioOutput?: string, codexModel?: string) {
     const rc = this.doc.currentRunConfig()!;
     await this.doc.save().catch(() => {});
     const request_: Record<string, unknown> = {
@@ -183,9 +186,12 @@ export class RunController {
       assume_answers: false,
       validation: report,
     };
-    // A Claude model isn't sent to Codex: Codex runs use the model in Settings › Assistant.
+    // A Claude model isn't sent to Codex, and a Codex model isn't sent to Claude
+    // (BUG-fond-crane-62ZP). Dry runs use the project's dry run model for the provider.
     const runProvider = provider();
     if (kind !== 'dry_run' && runProvider === 'claude' && model && model !== rc.production_model) request_.model = model;
+    const codexOverride = (codexModel ?? '').trim();
+    if (kind !== 'dry_run' && runProvider === 'codex' && codexOverride && codexOverride !== (rc.codex_production_model ?? '')) request_.codex_model = codexOverride;
     if (kind !== 'dry_run' && revise) request_.revise = revise;
     if (kind === 'audio_review' && audioOutput) request_.audio_output = audioOutput;
     if (rc.question_timeout_s) request_.question_timeout_s = rc.question_timeout_s;
@@ -196,7 +202,7 @@ export class RunController {
         kind,
         runId: started.run_id,
         folder: started.folder,
-        model: runProvider === 'codex' ? settings.value?.codex_model || 'Codex default' : kind === 'dry_run' ? model : model || rc.production_model,
+        model: runProvider === 'codex' ? effectiveModelLabel(this.doc.p.models, rc, kind === 'dry_run' ? 'dry_run' : 'production', kind === 'dry_run' ? null : codexOverride) : kind === 'dry_run' ? model : model || rc.production_model,
         provider: runProvider,
         started: Date.now(),
         stages: STAGES.filter(([id]) => showsStage(id, kind)).map(([id, label]) => ({ id, label, state: 'pending', seconds: 0 })),
@@ -338,7 +344,7 @@ export class RunController {
       }
       const clean = readiness && readiness.ready && !readiness.ambiguities.length && !readiness.missing_media.length && !readiness.risks.length;
       if (clean) {
-        await this.launch('production', plan.model, this.doc.report.value ?? plan.report, plan.revise);
+        await this.launch('production', plan.model, this.doc.report.value ?? plan.report, plan.revise, {}, undefined, plan.codexModel);
       } else {
         this.findings.value = readiness;
         this.pendingPlan = plan;
@@ -355,7 +361,7 @@ export class RunController {
     const plan = this.pendingPlan;
     this.pendingPlan = null;
     this.findings.value = null;
-    if (plan) await this.launch('production', plan.model, this.doc.report.value ?? plan.report, plan.revise);
+    if (plan) await this.launch('production', plan.model, this.doc.report.value ?? plan.report, plan.revise, {}, undefined, plan.codexModel);
   }
 
   /** Reloads run history from disk (the orchestrator appends it). */

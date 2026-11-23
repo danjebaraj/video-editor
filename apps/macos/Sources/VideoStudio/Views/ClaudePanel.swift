@@ -76,6 +76,97 @@ struct ModelPicker: View {
     }
 }
 
+/// Codex's model picker (BUG-fond-crane-62ZP): an explicit empty choice — Codex default, or the
+/// model in Settings › Codex when one is set there — then the models Codex reports, plus a custom
+/// ID, which is offered even when Codex hasn't answered with a list. The label is the effective
+/// model, the same one the core sends.
+struct CodexModelPicker: View {
+    var title: String
+    /// Empty follows Settings › Codex, then Codex's own default.
+    @Binding var model: String
+    @ObservedObject private var app = AppState.shared
+    @State private var customDraft = ""
+    @State private var showCustom = false
+
+    private var choices: [(id: String, name: String)] { app.codexModelChoices }
+    private var isListed: Bool { choices.contains { $0.id == model } }
+    private var emptyLabel: String { ModelResolution.codexEmptyChoiceLabel(settingsCodexModel: app.settings.codex_model, codexModels: choices) }
+
+    var body: some View {
+        Field(title) {
+            Menu {
+                Button { model = "" } label: { check(emptyLabel, model.trimmingCharacters(in: .whitespaces).isEmpty) }
+                if !choices.isEmpty { Divider() }
+                ForEach(app.codexStatus?.models ?? []) { m in
+                    Button { model = m.id } label: { check(m.name + (m.is_default ? " (default)" : ""), model == m.id) }
+                }
+                if !model.isEmpty && !isListed {
+                    Button {} label: { check(model, true) }
+                }
+                Divider()
+                Button("Custom ID…") {
+                    customDraft = isListed ? "" : model
+                    showCustom = true
+                }
+            } label: {
+                Text(shown).lineLimit(1)
+            }
+            .fixedSize()
+            .accessibilityLabel(title.isEmpty ? "Codex model" : title)
+            .accessibilityValue(shown)
+        }
+        .popover(isPresented: $showCustom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Custom Codex model ID").font(.headline)
+                TextField("gpt-…", text: $customDraft).textFieldStyle(.roundedBorder).frame(width: 260)
+                    .onSubmit { apply() }
+                Text("Passed to Codex as it is.").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showCustom = false }
+                    Button("Use") { apply() }.keyboardShortcut(.defaultAction).disabled(customDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    private var shown: String {
+        let effective = ModelResolution.effective(codex: true, own: model, settingsDefault: app.settings.codex_model, claudeFallback: "")
+        return ModelResolution.label(effective: effective, codex: true, codexModels: choices, claudeName: { $0 })
+    }
+
+    private func apply() {
+        let v = customDraft.trimmingCharacters(in: .whitespaces)
+        if !v.isEmpty { model = v }
+        showCustom = false
+    }
+
+    @ViewBuilder private func check(_ title: String, _ on: Bool) -> some View {
+        if on { Label(title, systemImage: "checkmark") } else { Text(title) }
+    }
+}
+
+/// A model choice that follows the selected provider (BUG-fond-crane-62ZP): Claude's menu bound
+/// to Claude's field, or Codex's bound to the Codex field. Each provider's choice is kept while
+/// the other is selected.
+struct ProviderModelPicker: View {
+    var title: String
+    @Binding var claude: String
+    @Binding var codex: String
+    /// Claude's "Settings default" choice, as `ModelPicker.settingsDefault`.
+    var claudeSettingsDefault: String?
+    @ObservedObject private var app = AppState.shared
+
+    var body: some View {
+        if app.usesCodex {
+            CodexModelPicker(title: title, model: $codex)
+        } else {
+            ModelPicker(title: title, model: $claude, settingsDefault: claudeSettingsDefault)
+        }
+    }
+}
+
 /// Effort level, shown only when `claude --help` lists `--effort` (spec §4.2).
 struct EffortPicker: View {
     @Binding var effort: String?
@@ -123,7 +214,7 @@ struct ClaudePanel: View {
             if !app.assistantAvailable && app.assistantChecked {
                 // The provider selected in Settings › Assistant, named with the executable looked for.
                 EmptyState(symbol: "terminal", title: app.assistantSetupProblem.title, message: app.assistantSetupProblem.detail,
-                           action: ("Open Settings…", { AppDelegate.shared.showSettings(pane: app.usesCodex ? "assistant" : "claude") }))
+                           action: ("Open Settings…", { AppDelegate.shared.showSettings(pane: app.usesCodex ? "codex" : "claude") }))
             } else if let session = chat.current, !session.messages.isEmpty {
                 transcript(session)
             } else {
@@ -239,8 +330,9 @@ struct ClaudePanel: View {
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityLabel("Assistant session")
             Spacer()
-            Text(app.models.displayName(document.assistantModel)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                .help("The spec assistant model. Change it in the Project inspector.")
+            // The model the next turn uses under the selected provider (BUG-fond-crane-62ZP).
+            Text(document.effectiveModelLabel(.assistant)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .help("The spec assistant model for \(app.providerName). Change it in the Project inspector.")
             Button { chat.newSession() } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.borderless).help("New session (⇧⌘N)").disabled(chat.isRunning)
                 .accessibilityLabel("New session")

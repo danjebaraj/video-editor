@@ -629,6 +629,19 @@ pub fn call(method: String, args: String) -> R<String> {
             core::eleven::clear_cache(&core::eleven::cache_dir(&lib))?;
             out(true)
         }
+        // The model the next operation uses, as the run or turn will use it (BUG-fond-crane-62ZP).
+        // `models` and `run_config` are the project's as edited; `provider` defaults to Settings.
+        "models.effective" => {
+            let settings = Settings::load(&lib);
+            let provider: core::codex::Provider = opt(&args, "provider")?.unwrap_or(settings.provider);
+            let models: core::project::Models = opt(&args, "models")?.unwrap_or_default();
+            let rc: Option<core::project::RunConfig> = opt(&args, "run_config")?;
+            let use_: core::project::ModelUse = arg(&args, "use")?;
+            let over: Option<String> = opt(&args, "override")?;
+            let model =
+                core::project::effective_model(&models, rc.as_ref(), &settings, provider, use_, over.as_deref());
+            out(json!({"provider": provider, "model": model, "codex_default": model.is_none()}))
+        }
         "assistant.gather_info_prompt" => out(core::run::prompt::GATHER_INFO_PROMPT),
         "assistant.sessions_dir" => {
             out(assistant::sessions_dir(&lib, &arg::<String>(&args, "project_id")?).to_string())
@@ -755,6 +768,23 @@ impl AssistantTurn {
     }
 }
 
+/// The Codex model for an assistant turn: the project's Codex assistant model, then
+/// Settings › Codex, then Codex's own default (`None`). Claude's `model` is never used.
+fn codex_assistant_model(request: &AssistantRequest, settings: &Settings) -> Option<String> {
+    let models = video_studio_core::project::Models {
+        codex_assistant: request.codex_model.clone().unwrap_or_default(),
+        ..Default::default()
+    };
+    video_studio_core::project::effective_model(
+        &models,
+        None,
+        settings,
+        video_studio_core::codex::Provider::Codex,
+        video_studio_core::project::ModelUse::Assistant,
+        None,
+    )
+}
+
 /// Starts one assistant turn. `request_json` is an `AssistantRequest`. The provider comes from
 /// Settings › Assistant: the Claude CLI or Codex, each found with its path from Settings.
 #[uniffi::export]
@@ -776,8 +806,7 @@ pub fn start_assistant(request_json: String, listener: Box<dyn EventListener>) -
             video_studio_core::codex::CodexLookup::Found(p) => p,
             other => return Err(CoreError::Failed { code: "environment".into(), message: other.problem() }),
         };
-        let setup =
-            assistant::CodexSetup { executable, model: video_studio_core::codex::model_for(&settings.codex_model) };
+        let setup = assistant::CodexSetup { executable, model: codex_assistant_model(&request, &settings) };
         let handle = assistant::start_codex(&request, &setup, Arc::new(ChatSink(listener)))?;
         return Ok(Arc::new(AssistantTurn { handle }));
     }
@@ -857,7 +886,7 @@ mod tests {
             (Some("bad_path"), Some("codex_path_invalid"))
         );
         assert!(codex["finding"]["title"].as_str().unwrap().contains("no-codex-here"));
-        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Settings › Assistant"));
+        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Settings › Codex"));
         let missing = core::codex::CodexStatus::Missing.finding().unwrap();
         assert!(missing.0 == "codex_missing" && missing.2.contains("Install the Codex CLI"));
         // validation with a supplied environment (no tools are run)

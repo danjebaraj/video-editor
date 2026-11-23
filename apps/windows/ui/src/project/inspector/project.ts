@@ -4,9 +4,9 @@
 import { h, clear, field, textInput, numberInput, select, checkbox, button, iconButton, Icons } from '../../dom';
 import { core } from '../../bridge';
 import { effect } from '../../store';
-import { platforms, settings } from '../../app-state';
+import { platforms, settings, provider, codexStatus } from '../../app-state';
 import { openFolders } from '../../dialogs';
-import { modelPicker, effortPicker } from '../../widgets';
+import { providerModelPicker, effortPicker } from '../../widgets';
 import { INTENTS } from '../../types';
 import { finishEditor, finishSummary, filledFinish, sameFinish } from '../../finish';
 import type { ProjectWindow } from '../window';
@@ -24,7 +24,7 @@ export function projectTab(w: ProjectWindow): HTMLElement {
   const refreshPerms = () => core<CapturePermissions>('capture.permissions', { request: false }).then((p) => ((perms = p), d.project.emit())).catch(() => {});
   refreshPerms();
 
-  effect([d.project, d.path, settings], () => {
+  effect([d.project, d.path, settings, codexStatus], () => {
     const p = d.p;
     const defaults = platforms.value?.intents[p.intent.kind];
     const capture = p.app_capture ?? { enabled: true, apps: [] };
@@ -52,8 +52,17 @@ export function projectTab(w: ProjectWindow): HTMLElement {
       finishSection(),
       h('section', null,
         h('h3', null, 'Models'),
-        field('Spec assistant', modelPicker(p.models.assistant, (v) => d.update((x) => (x.models.assistant = v), { outputs: false }), { label: 'Spec assistant model', settingsDefault: settings.value?.default_assistant_model ?? '' }), 'Used for chat, spec edits and questions'),
-        field('Dry run', modelPicker(p.models.dry_run, (v) => d.update((x) => (x.models.dry_run = v), { outputs: false }), { label: 'Dry run model', settingsDefault: settings.value?.default_dry_run_model ?? '' }), 'Rehearses the run before the production model is used. Settings default follows Settings › Claude. Codex runs use the model in Settings › Assistant.'),
+        // The selected provider's choices (BUG-fond-crane-62ZP); the other provider's stay saved.
+        field('Spec assistant', providerModelPicker(
+          { value: p.models.assistant, onChange: (v) => d.update((x) => (x.models.assistant = v), { outputs: false }), settingsDefault: settings.value?.default_assistant_model ?? '' },
+          { value: p.models.codex_assistant, onChange: (v) => d.update((x) => (x.models.codex_assistant = v), { outputs: false }) },
+          'Spec assistant model'), 'Used for chat, spec edits and questions'),
+        field('Dry run', providerModelPicker(
+          { value: p.models.dry_run, onChange: (v) => d.update((x) => (x.models.dry_run = v), { outputs: false }), settingsDefault: settings.value?.default_dry_run_model ?? '' },
+          { value: p.models.codex_dry_run, onChange: (v) => d.update((x) => (x.models.codex_dry_run = v), { outputs: false }) },
+          'Dry run model'), provider() === 'codex'
+          ? 'Rehearses the run before the production model is used. Codex default follows Settings › Codex.'
+          : 'Rehearses the run before the production model is used. Settings default follows Settings › Claude.'),
         (() => {
           const e = effortPicker(p.models.effort ?? null, (v) => d.update((x) => (x.models.effort = v), { outputs: false }), 'Assistant effort');
           return e ? field('Effort', e) : null;

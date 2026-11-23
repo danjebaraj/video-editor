@@ -261,12 +261,19 @@ struct ProjectInspector: View {
                 }
                 FinishSection(document: document)
                 InspectorSection(title: "Models") {
-                    ModelPicker(title: "Spec assistant", model: Binding(get: { document.project.models.assistant }, set: { v in document.update { $0.models.assistant = v } }),
-                                settingsDefault: AppState.shared.settings.default_assistant_model)
+                    // The selected provider's choices (BUG-fond-crane-62ZP); the other provider's stay saved.
+                    ProviderModelPicker(title: "Spec assistant",
+                                        claude: Binding(get: { document.project.models.assistant }, set: { v in document.update { $0.models.assistant = v } }),
+                                        codex: Binding(get: { document.project.models.codex_assistant }, set: { v in document.update { $0.models.codex_assistant = v } }),
+                                        claudeSettingsDefault: app.settings.default_assistant_model)
                         .help("Used for chat, spec edits and questions")
-                    ModelPicker(title: "Dry run", model: Binding(get: { document.project.models.dry_run }, set: { v in document.update { $0.models.dry_run = v } }),
-                                settingsDefault: AppState.shared.settings.default_dry_run_model)
-                        .help("The model that rehearses the run before the production model is used. Settings default follows Settings › Claude. Codex runs use the model in Settings › Assistant.")
+                    ProviderModelPicker(title: "Dry run",
+                                        claude: Binding(get: { document.project.models.dry_run }, set: { v in document.update { $0.models.dry_run = v } }),
+                                        codex: Binding(get: { document.project.models.codex_dry_run }, set: { v in document.update { $0.models.codex_dry_run = v } }),
+                                        claudeSettingsDefault: app.settings.default_dry_run_model)
+                        .help(app.usesCodex
+                              ? "The model that rehearses the run before the production model is used. Codex default follows Settings › Codex."
+                              : "The model that rehearses the run before the production model is used. Settings default follows Settings › Claude.")
                     EffortPicker(effort: Binding(get: { document.project.models.effort }, set: { v in document.update { $0.models.effort = v } }))
                     Text("The production model is set on each run config, in Outputs.").font(.caption).foregroundStyle(.secondary)
                 }
@@ -422,7 +429,8 @@ struct RunConfigEditor: View {
             .fixedSize()
         }
         InspectorSection(title: "Production") {
-            ModelPicker(title: "Model", model: bind(\.production_model))
+            // Claude's production model, or Codex's while Codex is selected (BUG-fond-crane-62ZP).
+            ProviderModelPicker(title: "Model", claude: bind(\.production_model), codex: bind(\.codex_production_model))
             EffortPicker(effort: bind(\.effort))
             Picker("Quality", selection: bind(\.quality)) {
                 Text("Final").tag("final")

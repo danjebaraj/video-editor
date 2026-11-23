@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, finish, assistant, claude, cutline, elevenlabs, storage, editor
+    case general, finish, assistant, claude, codex, cutline, elevenlabs, storage, editor
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -10,6 +10,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .finish: return "Finish"
         case .assistant: return "Assistant"
         case .claude: return "Claude"
+        case .codex: return "Codex"
         case .cutline: return "cutline"
         case .elevenlabs: return "ElevenLabs"
         case .storage: return "Storage"
@@ -22,6 +23,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .finish: return "wand.and.stars"
         case .assistant: return "person.crop.circle.badge.questionmark"
         case .claude: return "sparkles"
+        case .codex: return "chevron.left.forwardslash.chevron.right"
         case .cutline: return "scissors"
         case .elevenlabs: return "waveform"
         case .storage: return "internaldrive"
@@ -68,6 +70,7 @@ struct SettingsView: View {
                     case .finish: FinishSettings()
                     case .assistant: AssistantSettings()
                     case .claude: ClaudeSettings()
+                    case .codex: CodexSettings()
                     case .cutline: CutlineSettings()
                     case .elevenlabs: ElevenSettings()
                     case .storage: StorageSettings()
@@ -78,7 +81,7 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(width: 720, height: 520)
+        .frame(width: 760, height: 520)
         .onChange(of: app.settings) { app.saveSettings() }
     }
 }
@@ -131,13 +134,11 @@ struct GeneralSettings: View {
     }
 }
 
-/// Settings › Assistant (FEAT-spry-alpaca-5RQZ): who drives the spec assistant and runs, Claude
-/// Code or Codex, and for Codex its executable and model. Claude's models stay in Settings › Claude.
+/// Settings › Assistant (FEAT-spry-alpaca-5RQZ, BUG-fond-crane-62ZP): only who drives the spec
+/// assistant and runs, Claude Code or Codex. Each provider's executable, readiness and models have
+/// their own pane, Settings › Claude and Settings › Codex; opening either doesn't select it.
 struct AssistantSettings: View {
     @ObservedObject private var app = AppState.shared
-    // The shared readiness every project window follows (FEAT-spry-alpaca-5RQZ).
-    private var codex: CodexStatus? { app.codexStatus }
-    private var checking: Bool { app.isCheckingCodex }
 
     var body: some View {
         Form {
@@ -150,45 +151,64 @@ struct AssistantSettings: View {
                 .accessibilityLabel("Provider")
                 Text("Used by the Assistant in every open project and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Set up each provider's executable and models in Settings › Claude and Settings › Codex. Projects keep separate model choices for each, so switching back restores them.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if app.settings.provider == "codex" {
-                Section("Codex") {
-                    HStack(alignment: .top) {
-                        if checking {
-                            ProgressView().controlSize(.small)
-                            Text("Checking…")
-                        } else if let c = codex {
-                            Image(systemName: c.ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(c.ready ? Color.green : Color.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                if c.ready {
-                                    Text("Codex is ready" + (c.plan.map { " (\($0) plan)" } ?? ""))
-                                } else if let f = c.finding {
-                                    Text(f.title)
-                                    Text(f.remedy).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                                } else {
-                                    Text(c.state)
-                                }
+        }
+    }
+}
+
+/// Settings › Codex (BUG-fond-crane-62ZP): Codex's executable, readiness and default model.
+/// Viewing or editing it never changes the selected provider.
+struct CodexSettings: View {
+    @ObservedObject private var app = AppState.shared
+    // The shared readiness every project window follows (FEAT-spry-alpaca-5RQZ).
+    private var codex: CodexStatus? { app.codexStatus }
+    private var checking: Bool { app.isCheckingCodex }
+
+    var body: some View {
+        Form {
+            if !app.usesCodex {
+                Text("Claude Code is selected in Settings › Assistant. These settings apply when Codex is selected.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Codex") {
+                HStack(alignment: .top) {
+                    if checking {
+                        ProgressView().controlSize(.small)
+                        Text("Checking…")
+                    } else if let c = codex {
+                        Image(systemName: c.ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(c.ready ? Color.green : Color.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if c.ready {
+                                Text("Codex is ready" + (c.plan.map { " (\($0) plan)" } ?? ""))
+                            } else if let f = c.finding {
+                                Text(f.title)
+                                Text(f.remedy).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                            } else {
+                                Text(c.state)
                             }
-                        } else {
-                            Text("Not checked yet").foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Button("Re-check") { check() }.disabled(checking)
+                    } else {
+                        Text("Not checked yet").foregroundStyle(.secondary)
                     }
-                    TextField("Codex path", text: $app.settings.codex_path, prompt: Text("codex on PATH"))
-                        .onSubmit { check() }
-                    Picker("Model", selection: $app.settings.codex_model) {
-                        Text("Codex default").tag("")
-                        ForEach(codex?.models ?? []) { m in Text(m.name + (m.is_default ? " (default)" : "")).tag(m.id) }
-                        if !app.settings.codex_model.isEmpty, !(codex?.models ?? []).contains(where: { $0.id == app.settings.codex_model }) {
-                            Text(app.settings.codex_model).tag(app.settings.codex_model)
-                        }
-                    }
-                    .help("The models come from Codex once it is ready. Claude's model choices are kept separately in Settings › Claude.")
-                    Text("Sign-in is handled by the Codex CLI (`codex login`). The app never asks for or stores OpenAI credentials.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Re-check") { check() }.disabled(checking)
                 }
-                .task { if codex == nil && !checking { check() } }
+                TextField("Codex path", text: $app.settings.codex_path, prompt: Text("codex on PATH"))
+                    .onSubmit { check() }
+                Picker("Model", selection: $app.settings.codex_model) {
+                    Text("Codex default").tag("")
+                    ForEach(codex?.models ?? []) { m in Text(m.name + (m.is_default ? " (default)" : "")).tag(m.id) }
+                    if !app.settings.codex_model.isEmpty, !(codex?.models ?? []).contains(where: { $0.id == app.settings.codex_model }) {
+                        Text(app.settings.codex_model).tag(app.settings.codex_model)
+                    }
+                }
+                .help("The models come from Codex once it is ready. Claude's model choices are kept separately in Settings › Claude.")
+                Text("Projects use this model unless they choose their own Codex model in Project › Models or on a run config.").font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text("Sign-in is handled by the Codex CLI (`codex login`). The app never asks for or stores OpenAI credentials.").font(.caption).foregroundStyle(.secondary)
             }
+            .task { if codex == nil && !checking { check() } }
         }
         .textFieldStyle(.roundedBorder)
     }

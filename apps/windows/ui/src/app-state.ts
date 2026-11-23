@@ -4,6 +4,7 @@
 import { core, request, on, errorText } from './bridge';
 import { Signal } from './store';
 import type { BrandPreset, CodexStatus, Environment, KeyStatus, ModelList, Platforms, Settings } from './types';
+import { effectiveModel, modelLabel, type ModelChoices, type ModelUse, type RunConfigChoices } from './model-resolution';
 
 export const settings = new Signal<Settings | null>(null);
 export const models = new Signal<ModelList | null>(null);
@@ -119,12 +120,12 @@ export function assistantChecked(): boolean {
 }
 
 /** Why the selected provider can't be used, naming the executable, and the Settings pane to fix it. */
-export function assistantSetupProblem(): { title: string; detail: string; pane: 'assistant' | 'claude' } {
+export function assistantSetupProblem(): { title: string; detail: string; pane: 'codex' | 'claude' } {
   const exe = providerExecutable();
   if (provider() === 'codex') {
     const f = codexStatus.value?.finding;
-    if (!codexStatus.value) return { title: 'Checking Codex…', detail: `Looking for ${exe}.`, pane: 'assistant' };
-    return { title: f?.title ?? 'Codex isn’t ready', detail: `Looked for ${exe}. ${f?.remedy ?? 'Install the Codex CLI, or set its path in Settings › Assistant, then re-check.'}`, pane: 'assistant' };
+    if (!codexStatus.value) return { title: 'Checking Codex…', detail: `Looking for ${exe}.`, pane: 'codex' };
+    return { title: f?.title ?? 'Codex isn’t ready', detail: `Looked for ${exe}. ${f?.remedy ?? 'Install the Codex CLI, or set its path in Settings › Codex, then re-check.'}`, pane: 'codex' };
   }
   const e = environment.value;
   const c = e?.claude;
@@ -149,7 +150,7 @@ function providerChanged() {
   else detect(true).catch(() => {});
 }
 
-/** Asks Codex whether it is ready (Settings › Assistant › Re-check, a switch, focus). */
+/** Asks Codex whether it is ready (Settings › Codex › Re-check, a switch, focus). */
 export async function checkCodex(): Promise<void> {
   const generation = ++readinessGeneration;
   codexChecking.value = true;
@@ -159,8 +160,9 @@ export async function checkCodex(): Promise<void> {
   } catch (e) {
     status = { state: 'missing', finding: { code: 'codex_check_failed', title: 'Codex couldn’t be checked', remedy: errorText(e) } };
   }
-  // A newer switch or check has started since: this answer is stale.
-  if (generation !== readinessGeneration || provider() !== 'codex') return;
+  // A newer switch or check has started since: this answer is stale. Settings › Codex checks Codex
+  // while Claude is selected too, so the answer is kept either way.
+  if (generation !== readinessGeneration) return;
   codexStatus.value = status;
   codexChecking.value = false;
   readiness.value++;
@@ -179,6 +181,22 @@ export function modelName(id: string | undefined | null): string {
     if (v) return v.name;
   }
   return id;
+}
+
+/** The models Codex offers, from the last check (empty until Codex answers). */
+export function codexModelChoices(): { id: string; name: string }[] {
+  return (codexStatus.value?.models ?? []).map((m) => ({ id: m.id, name: m.name }));
+}
+
+/** The model the next operation of `use` runs with under the selected provider, as the core's
+ *  `models.effective` resolves it (BUG-fond-crane-62ZP); `null` is Codex's own default. */
+export function effectiveModelFor(models: ModelChoices | null | undefined, runConfig: RunConfigChoices | null | undefined, use: ModelUse, override?: string | null): string | null {
+  return effectiveModel(models, runConfig, settings.value, provider(), use, override);
+}
+
+/** What pickers and headers show for `effectiveModelFor`: "Codex default" when Codex chooses. */
+export function effectiveModelLabel(models: ModelChoices | null | undefined, runConfig: RunConfigChoices | null | undefined, use: ModelUse, override?: string | null): string {
+  return modelLabel(effectiveModelFor(models, runConfig, use, override), provider(), codexModelChoices(), modelName);
 }
 
 // Re-detect when the window comes back to the front, as the macOS app does on activation.
