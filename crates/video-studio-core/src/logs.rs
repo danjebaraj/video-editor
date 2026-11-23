@@ -192,10 +192,10 @@ fn export_readme(run_folder: &Utf8Path, redacted: bool) -> String {
         s.push_str(&format!("- Message: {m}\n"));
     }
     s.push_str(&format!(
-        "- App core {}, cutline {}, Claude Code {}, model {}\n",
+        "- App core {}, cutline {}, {}, model {}\n",
         text(&run["app"]["core_version"]),
         text(&run["cutline"]["version"]),
-        text(&run["claude"]["version"]),
+        assistant_line(&run),
         text(&run["model_used"])
     ));
     s.push_str(&format!(
@@ -250,7 +250,7 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
         get(&run["status"]).replace('_', " ")
     ));
     s.push_str(&format!("- cutline: {} at `{}`\n", get(&run["cutline"]["version"]), get(&run["cutline"]["path"])));
-    s.push_str(&format!("- Claude Code: {} · model {}\n", get(&run["claude"]["version"]), get(&run["model_used"])));
+    s.push_str(&format!("- Assistant: {} · model {}\n", assistant_line(&run), get(&run["model_used"])));
     s.push_str(&format!(
         "- OS: {} {}\n- App core: {}\n",
         get(&run["os"]["family"]),
@@ -291,14 +291,9 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
             .find_map(|l| l.strip_prefix("# exit: "))
             .and_then(|c| c.trim().parse::<i32>().ok())
             .unwrap_or(0);
-        for l in text.lines() {
-            let body = l.trim_start_matches("[err] ").trim_start_matches("[out] ");
-            let lower = body.to_ascii_lowercase();
-            if (lower.contains("warning") || body.contains("W_"))
-                && warn_lines.len() < 40
-                && !warn_lines.iter().any(|w| w == body)
-            {
-                warn_lines.push(body.to_string());
+        for w in emitted_warnings(&text) {
+            if warn_lines.len() < 40 && !warn_lines.contains(&w) {
+                warn_lines.push(w);
             }
         }
         if code != 0 {
@@ -378,11 +373,121 @@ pub fn issue_report(run_folder: &Utf8Path) -> String {
         }
     }
     if let Ok(summary) = std::fs::read_to_string(run_folder.join("summary.md")) {
-        s.push_str("\n## Claude's summary\n\n");
-        s.push_str(summary.trim());
-        s.push('\n');
+        let who = match assistant(&run) {
+            Assistant::Codex => "Codex's",
+            Assistant::Claude => "Claude's",
+            Assistant::Unknown => "The assistant's",
+        };
+        let status = run["status"].as_str().unwrap_or("");
+        if matches!(status, "succeeded" | "succeeded_with_warnings") {
+            s.push_str(&format!("\n## {who} summary\n\n"));
+            s.push_str(summary.trim());
+            s.push('\n');
+        } else {
+            // written while the run was going: evidence of what the assistant thought, not the result
+            s.push_str(&format!(
+                "\n## {who} draft summary\n\nWritten before the run ended; the run's result is the outcome above (status **{}**). Kept as evidence:\n\n",
+                if status.is_empty() { "unknown".to_string() } else { status.replace('_', " ") }
+            ));
+            for l in summary.trim().lines() {
+                s.push_str(if l.is_empty() { ">" } else { "> " });
+                s.push_str(l);
+                s.push('\n');
+            }
+        }
     }
     s
+}
+
+/// Which assistant made a run, from what the run recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Assistant {
+    Claude,
+    Codex,
+    /// An older record that doesn't say.
+    Unknown,
+}
+
+fn assistant(run: &Value) -> Assistant {
+    match run["provider"].as_str() {
+        Some("codex") => Assistant::Codex,
+        Some("claude") => Assistant::Claude,
+        // before `provider` was recorded only Claude Code ran, and a version says it did
+        _ if run["claude"]["version"].as_str().is_some_and(|v| !v.is_empty()) => Assistant::Claude,
+        _ => Assistant::Unknown,
+    }
+}
+
+/// "Codex 0.171.0", "Claude Code 2.1.311 (Claude Code)", or a neutral label for a record that
+/// doesn't say which assistant ran (BUG-amber-walrus-72VP).
+fn assistant_line(run: &Value) -> String {
+    match assistant(run) {
+        Assistant::Codex => match run["codex"]["version"].as_str().filter(|v| !v.is_empty()) {
+            Some(v) => format!("Codex {v}"),
+            None => "Codex (version not recorded)".into(),
+        },
+        Assistant::Claude => format!("Claude Code {}", run["claude"]["version"].as_str().unwrap_or("unknown")),
+        Assistant::Unknown => "assistant not recorded".into(),
+    }
+}
+
+/// The warnings a cutline log shows cutline emitting: `⚠ CODE path: message` lines, `warning:`
+/// lines, `WARN` log lines, and the `warnings` of a `--json` result. Text that only mentions
+/// warnings (the schema's descriptions, `--help`, an empty `"warnings": []`) isn't one
+/// (BUG-amber-walrus-72VP).
+fn emitted_warnings(log: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |w: String| {
+        if !w.is_empty() && !out.contains(&w) {
+            out.push(w);
+        }
+    };
+    let mut json_out = String::new();
+    for l in log.lines() {
+        if l.starts_with("# ") {
+            continue;
+        }
+        if let Some(o) = l.strip_prefix("[out] ") {
+            json_out.push_str(o);
+            json_out.push('\n');
+        } else if l == "[out]" {
+            json_out.push('\n');
+        }
+        let body = l.trim_start_matches("[err] ").trim_start_matches("[out] ").trim();
+        if let Some(rest) = body.strip_prefix("⚠ ") {
+            push(rest.trim().to_string());
+        } else if body.len() >= 8 && body[..8].eq_ignore_ascii_case("warning:") {
+            push(body.to_string());
+        } else {
+            // tracing: `2026-11-23T16:36:39.690359Z  WARN text`
+            let mut words = body.split_whitespace();
+            if let (Some(ts), Some("WARN")) = (words.next(), words.next()) {
+                if ts.ends_with('Z') && ts.contains('T') {
+                    let rest = body.split_once("WARN").map(|(_, r)| r.trim()).unwrap_or("");
+                    push(format!("warning: {rest}"));
+                }
+            }
+        }
+    }
+    if let Ok(v) = serde_json::from_str::<Value>(json_out.trim()) {
+        if let Some(ws) = v["warnings"].as_array() {
+            for w in ws {
+                let line = match w {
+                    Value::String(s) => s.clone(),
+                    Value::Object(_) => {
+                        let code = w["code"].as_str().unwrap_or("");
+                        let path = w["path"].as_str().unwrap_or("");
+                        let msg = w["message"].as_str().unwrap_or("");
+                        let path = if path.is_empty() { "/" } else { path };
+                        format!("{code} {path}: {msg}").trim().to_string()
+                    }
+                    _ => continue,
+                };
+                push(line);
+            }
+        }
+    }
+    out
 }
 
 fn dir_size(dir: &Utf8Path) -> u64 {
@@ -620,6 +725,70 @@ mod tests {
         assert!(export_logs(&root.join("nope"), &plain, false).is_err());
     }
 
+    /// BUG-amber-walrus-72VP: a failed Codex Audio Review. The report names Codex, gives the
+    /// host's result precedence over the draft summary, and lists only warnings cutline emitted:
+    /// the schema's descriptions and an empty `warnings` list aren't, the real ones are.
+    #[test]
+    fn a_codex_issue_report_names_codex_and_only_emitted_warnings() {
+        let d = tempfile::tempdir().unwrap();
+        let run = Utf8Path::from_path(d.path()).unwrap().join("run");
+        let w = |name: &str, text: &str| {
+            let p = run.join(name);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        w("logs/run.json", &json!({"run_id": "run_01m84n2c6e9z9p3yamvm", "kind": "audio_review", "status": "failed", "provider": "codex", "codex": {"path": "/opt/homebrew/bin/codex", "version": "0.171.0"}, "model_used": "gpt-6.1-sol", "cutline": {"version": "0.1.0", "path": "/bin/cutline"}, "message": "Codex's change to `audio/scene1.txt` was accepted but Codex didn't report it applied within 120 s, so the run was stopped. No soundtrack was mixed (outputs/audio-review.wav).", "outputs": [{"name": "YouTube Shorts", "target": "shorts", "width": 1080, "height": 1920}]}).to_string());
+        let schema = json!({"properties": {"fit": {"description": "W_FIT_HOLD: a warning when the clip holds its last frame"}, "script": {"description": "Emits W_SCRIPT_MISMATCH as a warning when words differ"}}});
+        let out = |v: &Value| serde_json::to_string_pretty(v).unwrap().lines().map(|l| format!("[out] {l}\n")).collect::<String>();
+        w("logs/cutline/001-schema.log", &format!("# argv: [\"/bin/cutline\",\"schema\"]\n{}# exit: 0\n", out(&schema)));
+        w("logs/cutline/002-validate.log", &format!("# argv: [\"/bin/cutline\",\"validate\",\"--json\",\"project.json5\"]\n{}# exit: 0\n", out(&json!({"ok": true, "errors": [], "warnings": []}))));
+        w("logs/cutline/003-init.log", "# argv: [\"/bin/cutline\",\"init\",\"--help\"]\n[out] Scaffold a project. Prints a warning when the folder isn't empty.\n# exit: 0\n");
+        w("summary.md", "## What you will hear\nAudio generation is in progress.\n");
+        let r = issue_report(&run);
+        for needle in [
+            "status **failed**",
+            "- Assistant: Codex 0.171.0 · model gpt-6.1-sol",
+            "No cutline command failed (3 ran).",
+            "outputs/audio-review.wav",
+            "## Codex's draft summary",
+            "> Audio generation is in progress.",
+        ] {
+            assert!(r.contains(needle), "missing {needle:?} in\n{r}");
+        }
+        assert!(!r.contains("Claude"), "{r}");
+        assert!(!r.contains("## cutline warnings") && !r.contains("W_FIT_HOLD") && !r.contains("W_SCRIPT_MISMATCH"), "{r}");
+
+        // real diagnostics on commands that exited zero are kept
+        w("logs/cutline/004-validate.log", &format!("# argv: [\"/bin/cutline\",\"validate\",\"--json\",\"project.json5\"]\n{}# exit: 0\n", out(&json!({"ok": true, "errors": [], "warnings": [{"code": "W_FIT_HOLD", "path": "/main/2", "message": "the clip holds its last frame for 1.2 s"}]}))));
+        w("logs/cutline/005-validate.log", "# argv: [\"/bin/cutline\",\"validate\",\"project.json5\"]\n[out] ⚠ W_SCRIPT_MISMATCH /assets/vo: 2 words differ\n[out] ✔ valid (1 warning)\n# exit: 0\n");
+        w("logs/cutline/006-beats.log", "# argv: [\"/bin/cutline\",\"beats\",\"project.json5\"]\n[err] 2026-11-23T16:36:39.690359Z  WARN couldn't save to the cache\n[out] bed: 90 BPM\n# exit: 0\n");
+        let r = issue_report(&run);
+        for needle in [
+            "## cutline warnings",
+            "W_FIT_HOLD /main/2: the clip holds its last frame for 1.2 s",
+            "W_SCRIPT_MISMATCH /assets/vo: 2 words differ",
+            "warning: couldn't save to the cache",
+        ] {
+            assert!(r.contains(needle), "missing {needle:?} in\n{r}");
+        }
+        assert!(!r.contains("a warning when the clip holds"), "{r}");
+
+        // Claude, and an older record that doesn't say which assistant ran
+        let mut v: Value = paths::read_json(&run.join("logs/run.json")).unwrap();
+        v["provider"] = json!("claude");
+        v["claude"] = json!({"version": "2.1.311 (Claude Code)"});
+        v["status"] = json!("succeeded");
+        w("logs/run.json", &v.to_string());
+        let r = issue_report(&run);
+        assert!(r.contains("- Assistant: Claude Code 2.1.311 (Claude Code)") && r.contains("## Claude's summary"), "{r}");
+        let o = v.as_object_mut().unwrap();
+        o.remove("provider");
+        o.remove("claude");
+        w("logs/run.json", &v.to_string());
+        let r = issue_report(&run);
+        assert!(r.contains("- Assistant: assistant not recorded") && r.contains("## The assistant's summary"), "{r}");
+    }
+
     #[test]
     fn issue_report_has_errors_warnings_qa_and_excerpts() {
         let d = tempfile::tempdir().unwrap();
@@ -640,8 +809,8 @@ mod tests {
             "**black_frames** (error): 0.8 s of black at 12.4 s",
             "## Blocked tool calls",
             "`ls -la`",
-            "## Claude's summary",
-            "Nothing rendered.",
+            "## Claude's draft summary",
+            "> Nothing rendered.",
         ] {
             assert!(r.contains(needle), "missing {needle:?} in\n{r}");
         }

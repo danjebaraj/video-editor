@@ -2,7 +2,7 @@
 id: BUG-deft-lily-344X
 type: bug
 title: Audio Review helper reports a configured ElevenLabs key as missing and misreports two pending Codex patches
-status: fixed
+status: verified
 fix: fixed
 verified: yes
 approved: yes

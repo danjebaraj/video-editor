@@ -101,6 +101,7 @@ fn a_codex_run_produces_the_outputs_with_tool_progress() {
     }
     let run_json: Value = serde_json::from_str(&std::fs::read_to_string(run.join("logs/run.json")).unwrap()).unwrap();
     assert_eq!(run_json["provider"], "codex");
+    assert_eq!(run_json["codex"]["version"], "0.171.0", "the issue report names the Codex CLI that ran");
     assert!(run_json["claude_session"].as_str().unwrap().starts_with("codex:thr-"));
     // the known read gap is traced on start, without counting as a run warning
     let trace = std::fs::read_to_string(run.join("logs/codex.jsonl")).unwrap();
@@ -421,6 +422,8 @@ fn a_codex_patch_never_reported_applied_stops_the_run_with_the_files_named() {
         "{msg}"
     );
     assert!(msg.contains("outputs/audio-review.wav"), "{msg}");
+    // BUG-amber-walrus-72VP: each file's state on disk, not "unknown"
+    assert!(msg.contains("On disk, `audio/scene1.txt` is missing") && msg.contains("`audio/scene4.txt` is missing"), "{msg}");
     assert_eq!(responses_to(&w, json!(2)).len(), 1);
     let tools = tool_texts(&ev);
     assert!(!tools.iter().any(|t| t.starts_with("Wrote")), "{tools:?}");
@@ -437,6 +440,38 @@ fn a_codex_patch_never_reported_applied_stops_the_run_with_the_files_named() {
     let o = run_codex_audio_review(&w);
     let fin = events(&o).pop().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
     assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}");
+}
+
+/// BUG-amber-walrus-72VP: Codex writes an accepted patch but never reports it applied. At the
+/// deadline the files on disk match the change, so it counts as written and the review goes on
+/// to a WAV; the protocol log says why. Codex's late completion isn't reported a second time.
+#[test]
+fn a_codex_patch_written_but_never_reported_counts_once_its_files_match() {
+    let w = codex_world(json!([
+        four_scripts("silent"),
+        {"sleep": 1900},
+        {"finish_patch": 2},
+        {"write": {"path": "project.json5", "content": PROJECT_JSON5}},
+        {"command": "cutline validate project.json5"},
+        {"command": "cutline audio project.json5 --export youtube-shorts --out outputs/audio-review.wav"},
+        {"write": {"path": "summary.md", "content": "## What you will hear\nThe tone.\n"}}
+    ]));
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}\n{}", stderr(&o));
+    assert_eq!(responses_to(&w, json!(2)).len(), 1, "one answer to the patch approval");
+    let tools = tool_texts(&ev);
+    for i in 1..=4 {
+        let wrote = format!("Wrote `audio/scene{i}.txt`");
+        assert_eq!(tools.iter().filter(|t| **t == wrote).count(), 1, "{tools:?}");
+    }
+    let r = w.load_project().runs.pop().unwrap();
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    assert!(folder.join("outputs/audio-review.wav").is_file());
+    let trace = std::fs::read_to_string(folder.join("logs/codex.jsonl")).unwrap();
+    let note = trace.lines().find(|l| l.contains("patch_applied_unreported")).expect("host note");
+    assert!(note.contains("audio/scene1.txt") && note.contains("audio/scene4.txt"), "{note}");
 }
 
 /// BUG-green-cricket-P6HQ: a patch Codex reports failed is a failure of those writes, not a

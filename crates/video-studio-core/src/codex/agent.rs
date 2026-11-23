@@ -368,6 +368,8 @@ impl CodexProcess {
             turn: None,
             pending: HashMap::new(),
             file_items: HashMap::new(),
+            file_changes: HashMap::new(),
+            confirmed_items: HashMap::new(),
             command_items: HashMap::new(),
             declined_items: HashMap::new(),
             usage_updates: 0,
@@ -494,6 +496,11 @@ struct Driver {
     pending: HashMap<String, Pending>,
     /// File-change items by ID: the paths they touch (approval requests only carry the item ID).
     file_items: HashMap<String, Vec<String>>,
+    /// The changes of each file-change item (`item/started`), to check them on disk.
+    file_changes: HashMap<String, Vec<Value>>,
+    /// Changes past their deadline that were found applied on disk: Codex's late completion of
+    /// one is not reported a second time (BUG-amber-walrus-72VP).
+    confirmed_items: HashMap<String, ()>,
     /// Command items by ID: the command, for approvals that leave it out.
     command_items: HashMap<String, String>,
     /// Items the host declined: their completion isn't reported as a failed tool call (the host
@@ -516,6 +523,8 @@ struct Driver {
 #[derive(Debug, Clone)]
 struct Applying {
     paths: Vec<String>,
+    /// The change's entries (`path`, `kind`, `diff`), as Codex announced them.
+    changes: Vec<Value>,
     accepted: Instant,
 }
 
@@ -694,7 +703,8 @@ impl Driver {
             session_id: token_for(&thread),
             model: started["model"].as_str().map(str::to_string).or(self.options.model.clone()),
             tools: Vec::new(),
-            cli_version: None,
+            // the issue report names the Codex CLI that ran (BUG-amber-walrus-72VP)
+            cli_version: started["thread"]["cliVersion"].as_str().or(started["cliVersion"].as_str()).map(str::to_string),
         });
         match self.call("turn/start", self.options.turn_params(&thread, prompt), t) {
             Ok(r) => self.turn = r["turn"]["id"].as_str().map(str::to_string),
@@ -708,7 +718,9 @@ impl Driver {
                 self.interrupted = true;
                 self.send_interrupt();
             }
-            // an accepted change Codex never reports applied stops the run, naming the files
+            // an accepted change Codex never reports applied, but which is on disk, was applied
+            self.confirm_on_disk(false);
+            // one that isn't stops the run, naming the files and their state
             if let Some(why) = self.overdue_change() {
                 self.abort(why);
             }
@@ -754,7 +766,8 @@ impl Driver {
         if let Some((why, _)) = self.aborted.clone() {
             return self.fail(why);
         }
-        // a turn that ends with an accepted change still unapplied didn't finish it
+        // a change still unreported whose files match it was applied; one that doesn't wasn't
+        self.confirm_on_disk(true);
         if let Some(paths) = self.unapplied_paths() {
             return self.fail(format!(
                 "The Codex turn ended while its change to {paths} was accepted but never reported applied, so whether those files are on disk is unknown. Run the Audio Review or production run again."
@@ -890,7 +903,8 @@ impl Driver {
         } else if let Some(i) = &item {
             // accepted: written only once Codex reports it applied, within the deadline
             let paths = self.file_items.get(i).cloned().unwrap_or_default();
-            self.applying.insert(i.clone(), Applying { paths, accepted: Instant::now() });
+            let changes = self.file_changes.get(i).cloned().unwrap_or_default();
+            self.applying.insert(i.clone(), Applying { paths, changes, accepted: Instant::now() });
         }
         let decision = match (v1, &denied) {
             (false, None) => json!("accept"),
@@ -1095,7 +1109,8 @@ impl Driver {
                         input: json!({"file_path": path}),
                     });
                 }
-                self.file_items.insert(id, paths);
+                self.file_items.insert(id.clone(), paths);
+                self.file_changes.insert(id, changes);
             }
             "webSearch" => self.event(StreamEvent::ToolUse {
                 id,
@@ -1154,6 +1169,33 @@ impl Driver {
         self.paths_of(self.applying.values())
     }
 
+    /// Closes each accepted change past its deadline (or every one, when the turn has ended)
+    /// whose files on disk already match it: Codex applied it and didn't say so, so the run goes
+    /// on. The protocol log says so, and the change's tool calls end as written
+    /// (BUG-amber-walrus-72VP).
+    fn confirm_on_disk(&mut self, all: bool) {
+        let limit = self.options.patch_timeout.unwrap_or(PATCH_TIMEOUT);
+        let now = Instant::now();
+        let applied: Vec<String> = self
+            .applying
+            .iter()
+            .filter(|(_, a)| all || now.duration_since(a.accepted) >= limit)
+            .filter(|(_, a)| !a.changes.is_empty() && a.changes.iter().all(|c| change_state(c) == ChangeState::Applied))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in applied {
+            let Some(a) = self.applying.remove(&id) else { continue };
+            self.confirmed_items.insert(id.clone(), ());
+            let paths: Vec<String> = a.paths.iter().map(|p| self.shown_path(p)).collect();
+            self.shared.log_line(
+                &json!({"type": "host_note", "code": "patch_applied_unreported", "item": id, "paths": paths, "text": "Codex didn't report this change applied, but every file on disk matches it, so it counts as written."}).to_string(),
+            );
+            for i in 0..a.changes.len() {
+                self.event(StreamEvent::ToolResult { tool_use_id: format!("{id}#{i}"), content: String::new(), is_error: false });
+            }
+        }
+    }
+
     /// The failure for an accepted change past its own deadline, once. Only the expired change
     /// is said to have timed out; younger ones still waiting are named apart, with their own
     /// age (BUG-deft-lily-344X).
@@ -1169,10 +1211,22 @@ impl Driver {
             waiting.into_iter().partition(|a| now.duration_since(a.accepted) >= limit);
         let paths = self.paths_of(expired.iter().copied())?;
         let mut why = format!(
-            "Codex's change to {paths} was accepted but Codex didn't report it applied within {:.0} s, so the run was stopped. Whether {} on disk is unknown.",
+            "Codex's change to {paths} was accepted but Codex didn't report it applied within {:.0} s, so the run was stopped.",
             limit.as_secs_f64(),
-            if expired.iter().map(|a| a.paths.len()).sum::<usize>() == 1 { "that file is" } else { "those files are" },
         );
+        let states: Vec<String> = expired
+            .iter()
+            .flat_map(|a| a.changes.iter())
+            .filter_map(|c| Some(format!("`{}` {}", self.shown_path(c["path"].as_str()?), change_state(c).text())))
+            .collect();
+        if states.is_empty() {
+            why.push_str(&format!(
+                " Whether {} on disk is unknown.",
+                if expired.iter().map(|a| a.paths.len()).sum::<usize>() == 1 { "that file is" } else { "those files are" }
+            ));
+        } else {
+            why.push_str(&format!(" On disk, {}.", states.join("; ")));
+        }
         for a in &younger {
             if let Some(p) = self.paths_of(std::iter::once(*a)) {
                 why.push_str(&format!(
@@ -1222,6 +1276,8 @@ impl Driver {
                 }
                 self.event(StreamEvent::ToolResult { tool_use_id: id, content, is_error: failed });
             }
+            // already closed as written when the files on disk matched it
+            "fileChange" if self.confirmed_items.contains_key(&id) => {}
             "fileChange" => {
                 // applied, failed or declined by Codex itself: each said as such
                 self.applying.remove(&id);
@@ -1270,9 +1326,143 @@ pub fn record_thread(session_dir: &Utf8Path, thread: &str) {
     );
 }
 
+/// Where one entry of a file change stands on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChangeState {
+    /// The file is as the change leaves it.
+    Applied,
+    /// An added or updated file isn't there.
+    Missing,
+    /// A deleted (or moved) file is still there.
+    StillThere,
+    /// The file is there but doesn't match the change.
+    Differs,
+}
+
+impl ChangeState {
+    fn text(self) -> &'static str {
+        match self {
+            ChangeState::Applied => "matches the change",
+            ChangeState::Missing => "is missing",
+            ChangeState::StillThere => "is still there",
+            ChangeState::Differs => "doesn't match the change",
+        }
+    }
+}
+
+/// Checks one entry of a Codex file change (`{path, kind: {type, move_path}, diff}`) against the
+/// disk. An added file must hold exactly the added text; a deleted one must be gone; an updated
+/// one must contain the new side of every hunk, in order, and a hunk that only removes lines
+/// must leave none of its old side.
+fn change_state(change: &Value) -> ChangeState {
+    let Some(path) = change["path"].as_str() else { return ChangeState::Differs };
+    let diff = change["diff"].as_str().unwrap_or("");
+    let read = |p: &str| std::fs::read(p).ok().map(|b| String::from_utf8_lossy(&b).replace("\r\n", "\n"));
+    match change["kind"]["type"].as_str().unwrap_or("") {
+        "add" => match read(path) {
+            None => ChangeState::Missing,
+            Some(text) if text == diff || text.trim_end_matches('\n') == diff.trim_end_matches('\n') => ChangeState::Applied,
+            Some(_) => ChangeState::Differs,
+        },
+        "delete" => {
+            if Utf8Path::new(path).exists() {
+                ChangeState::StillThere
+            } else {
+                ChangeState::Applied
+            }
+        }
+        "update" => {
+            let target = change["kind"]["move_path"].as_str().unwrap_or(path);
+            if target != path && Utf8Path::new(path).exists() {
+                return ChangeState::StillThere;
+            }
+            let Some(text) = read(target) else { return ChangeState::Missing };
+            if hunks_applied(&text, diff) {
+                ChangeState::Applied
+            } else {
+                ChangeState::Differs
+            }
+        }
+        _ => ChangeState::Differs,
+    }
+}
+
+/// Whether `text` holds the new side of every hunk of a unified diff, in order.
+fn hunks_applied(text: &str, diff: &str) -> bool {
+    let mut hunks: Vec<(Vec<&str>, Vec<&str>, bool)> = Vec::new();
+    for line in diff.lines() {
+        if line.starts_with("@@") {
+            hunks.push((Vec::new(), Vec::new(), false));
+            continue;
+        }
+        let Some((old, new, added)) = hunks.last_mut() else { continue };
+        if let Some(l) = line.strip_prefix('+') {
+            new.push(l);
+            *added = true;
+        } else if let Some(l) = line.strip_prefix('-') {
+            old.push(l);
+        } else if let Some(l) = line.strip_prefix(' ') {
+            old.push(l);
+            new.push(l);
+        } else if line.is_empty() {
+            old.push("");
+            new.push("");
+        }
+    }
+    if hunks.is_empty() {
+        return false;
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    let find = |block: &[&str], from: usize| -> Option<usize> {
+        if block.is_empty() {
+            return Some(from);
+        }
+        (from..=lines.len().saturating_sub(block.len())).find(|&i| lines[i..].starts_with(block))
+    };
+    let mut at = 0;
+    for (old, new, added) in &hunks {
+        match find(new, at) {
+            Some(i) => at = i + new.len(),
+            None => return false,
+        }
+        if !added && old.len() > new.len() && find(old, 0).is_some() {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BUG-amber-walrus-72VP: a change's entries checked against the disk.
+    #[test]
+    fn a_file_change_is_checked_on_disk() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = Utf8Path::from_path(d.path()).unwrap();
+        let p = |n: &str| dir.join(n).to_string();
+        let add = |n: &str, text: &str| json!({"path": p(n), "kind": {"type": "add"}, "diff": text});
+        std::fs::write(p("a.txt"), "Hello.\n").unwrap();
+        assert_eq!(change_state(&add("a.txt", "Hello.\n")), ChangeState::Applied);
+        assert_eq!(change_state(&add("a.txt", "Hello.")), ChangeState::Applied, "a final newline doesn't matter");
+        assert_eq!(change_state(&add("a.txt", "Bye.\n")), ChangeState::Differs);
+        assert_eq!(change_state(&add("b.txt", "Hello.\n")), ChangeState::Missing);
+
+        let del = json!({"path": p("a.txt"), "kind": {"type": "delete"}, "diff": ""});
+        assert_eq!(change_state(&del), ChangeState::StillThere);
+
+        std::fs::write(p("c.json5"), "{\n  a: 1,\n  b: 3,\n  c: 4,\n}\n").unwrap();
+        let upd = |diff: &str| json!({"path": p("c.json5"), "kind": {"type": "update", "move_path": null}, "diff": diff});
+        assert_eq!(change_state(&upd("@@ -1,4 +1,4 @@\n {\n   a: 1,\n-  b: 2,\n+  b: 3,\n   c: 4,\n")), ChangeState::Applied);
+        assert_eq!(change_state(&upd("@@ -1,4 +1,4 @@\n {\n   a: 1,\n-  b: 3,\n+  b: 5,\n   c: 4,\n")), ChangeState::Differs);
+        // a hunk that only removes lines: applied once they're gone
+        assert_eq!(change_state(&upd("@@ -2,3 +2,2 @@\n   a: 1,\n-  b: 3,\n   c: 4,\n")), ChangeState::Differs);
+        assert_eq!(change_state(&upd("@@ -2,3 +2,2 @@\n   a: 1,\n-  z: 9,\n   b: 3,\n")), ChangeState::Applied);
+
+        let moved = json!({"path": p("c.json5"), "kind": {"type": "update", "move_path": p("d.json5")}, "diff": "@@ -1 +1 @@\n-x\n+y\n"});
+        assert_eq!(change_state(&moved), ChangeState::StillThere);
+    }
 
     #[test]
     fn tokens_shell_wrappers_and_effort() {

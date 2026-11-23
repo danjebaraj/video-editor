@@ -26,7 +26,8 @@
 //!   file change adding several files, approved once (with that request ID, `null` grantRoot and
 //!   reason). When accepted, `complete` decides what follows: `ok` writes the files and reports
 //!   the item completed, `fail` writes nothing and reports it failed, `withhold` writes nothing
-//!   and never reports it.
+//!   and never reports it, `silent` writes the files and never reports it. Each change's `diff`
+//!   is the added text, as real Codex sends it.
 //! - `{"finish_patch": 2}`: a patch withheld earlier (by its request ID) is applied and reported
 //!   completed now.
 //! - `{"sleep": 500}`: wait that many milliseconds.
@@ -263,7 +264,7 @@ impl Fake {
                 .unwrap_or_default();
             let item_id = self.next_id("item");
             let changes: Vec<Value> =
-                files.iter().map(|(path, _)| json!({"path": path, "kind": {"type": "add"}, "diff": ""})).collect();
+                files.iter().map(|(path, c)| json!({"path": path, "kind": {"type": "add"}, "diff": c})).collect();
             self.item(
                 "item/started",
                 json!({"type": "fileChange", "id": item_id, "changes": changes, "status": "inProgress"}),
@@ -278,6 +279,16 @@ impl Fake {
             } else {
                 match p["complete"].as_str().unwrap_or("ok") {
                     "withhold" => {
+                        self.withheld.push((rid.clone(), item_id, changes, files));
+                        return Some(());
+                    }
+                    "silent" => {
+                        for (path, content) in &files {
+                            if let Some(d) = path.parent() {
+                                let _ = std::fs::create_dir_all(d);
+                            }
+                            let _ = std::fs::write(path, content);
+                        }
                         self.withheld.push((rid.clone(), item_id, changes, files));
                         return Some(());
                     }

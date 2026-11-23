@@ -186,6 +186,8 @@ struct Driver {
     eleven_credits: u64,
     session: Option<String>,
     model_used: Option<String>,
+    /// The assistant CLI's version, as it reported it when the session started.
+    cli_version: Option<String>,
     result_error: Option<String>,
     /// The first tool call that failed (not one the broker refused): kept for the outcome so a
     /// missing output comes with what went wrong first (BUG-rustic-olive-U4PY).
@@ -351,6 +353,7 @@ impl Driver {
             eleven_credits: 0,
             session: None,
             model_used: None,
+            cli_version: None,
             result_error: None,
             first_failure: None,
             help_calls: Default::default(),
@@ -603,8 +606,11 @@ impl Driver {
 
     fn handle(&mut self, process: &AgentProcess, e: StreamEvent) {
         match e {
-            StreamEvent::Init { session_id, model, .. } => {
+            StreamEvent::Init { session_id, model, cli_version, .. } => {
                 self.session = Some(session_id);
+                if cli_version.is_some() {
+                    self.cli_version = cli_version;
+                }
                 if model.is_some() {
                     self.model_used = model;
                 }
@@ -1208,6 +1214,9 @@ impl Driver {
                 o.insert("seconds".into(), json!(seconds));
                 o.insert("claude_session".into(), json!(self.session));
                 o.insert("model_used".into(), json!(record.model));
+                if let (Some(c), Some(v)) = (o.get_mut("codex").and_then(Value::as_object_mut), &self.cli_version) {
+                    c.insert("version".into(), json!(v));
+                }
                 o.insert("cost_usd".into(), json!(cost));
                 o.insert("usage".into(), json!(self.final_usage));
                 o.insert("eleven_credits".into(), json!(self.eleven_credits));
