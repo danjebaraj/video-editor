@@ -604,6 +604,14 @@
           "description": "Spec assistant model: a CLI alias (`sonnet`) or a full model ID. Empty follows the\ndefault in Settings.",
           "type": "string"
         },
+        "codex_assistant": {
+          "description": "The assistant model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows\nSettings › Codex, then Codex's own default. `assistant` stays Claude's.",
+          "type": "string"
+        },
+        "codex_dry_run": {
+          "description": "The dry run model when Codex is the provider. Empty follows Settings › Codex.",
+          "type": "string"
+        },
         "dry_run": {
           "description": "Dry run model. Empty follows the default in Settings.",
           "type": "string"
@@ -868,6 +876,10 @@
     },
     "RunConfig": {
       "properties": {
+        "codex_production_model": {
+          "description": "The production model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows\nSettings › Codex, then Codex's own default. `production_model` stays Claude's.",
+          "type": "string"
+        },
         "dry_run_first": {
           "default": true,
           "type": "boolean"
@@ -926,6 +938,7 @@
           "type": "array"
         },
         "production_model": {
+          "description": "Claude's production model (a CLI alias or a full ID).",
           "type": "string"
         },
         "quality": {

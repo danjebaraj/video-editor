@@ -150,3 +150,43 @@ fn a_codex_run_without_its_outputs_fails_and_refusals_hold() {
     assert_eq!(declined, 3);
     assert_eq!(run_json["blocked_tool_calls"], 3);
 }
+
+/// BUG-fond-crane-62ZP: a Codex run never gets Claude's model. With Codex default it sends no
+/// model, so Codex picks; with a Codex model on the run config, that exact ID reaches Codex.
+#[test]
+fn a_codex_run_uses_codex_models_not_claudes() {
+    let turn = json!([
+        {"write": {"path": "project.json5", "content": PROJECT_JSON5}},
+        {"command": "cutline render project.json5"},
+        {"write": {"path": "summary.md", "content": "## What I made\nTwo outputs.\n"}}
+    ]);
+    let w = codex_world(turn.clone());
+    // the run config keeps Claude's Opus, as a project made before Codex did
+    w.edit_project(|p| p.run_configs[0].production_model = "opus".into());
+    let o = run_codex(&w);
+    let fin = events(&o).last().cloned().unwrap_or_default();
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}\n{}", stderr(&o));
+    let sent = ndjson(&w.root.join("codex.ndjson"));
+    for m in ["thread/start", "turn/start"] {
+        let msg = sent.iter().find(|x| x["method"] == m).unwrap();
+        assert!(msg["params"].get("model").is_none(), "Codex default: no model in {m}: {msg}");
+    }
+    let record = w.load_project().runs.pop().unwrap();
+    assert_ne!(record.model.as_deref(), Some("opus"));
+
+    // a Codex model chosen on the run config reaches Codex as is; Claude's choice is kept
+    let w = codex_world(turn);
+    w.edit_project(|p| {
+        p.run_configs[0].production_model = "opus".into();
+        p.run_configs[0].codex_production_model = "gpt-5.5-codex".into();
+    });
+    let o = run_codex(&w);
+    let fin = events(&o).last().cloned().unwrap_or_default();
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}\n{}", stderr(&o));
+    let sent = ndjson(&w.root.join("codex.ndjson"));
+    for m in ["thread/start", "turn/start"] {
+        let msg = sent.iter().find(|x| x["method"] == m).unwrap();
+        assert_eq!(msg["params"]["model"], "gpt-5.5-codex", "{m}");
+    }
+    assert_eq!(w.load_project().run_configs[0].production_model, "opus", "Claude's choice stays for Claude");
+}

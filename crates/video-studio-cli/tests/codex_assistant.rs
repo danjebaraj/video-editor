@@ -54,6 +54,7 @@ impl World {
             spec: SPEC.into(),
             prompt: prompt.into(),
             model: "opus".into(),
+            codex_model: None,
             effort: Some("max".into()),
             web_access: false,
             resume: resume.map(str::to_string),

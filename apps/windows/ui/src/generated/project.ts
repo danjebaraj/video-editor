@@ -386,6 +386,15 @@ export interface Models {
  */
 assistant: string
 /**
+ * The assistant model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows
+ * Settings › Codex, then Codex's own default. `assistant` stays Claude's.
+ */
+codex_assistant?: string
+/**
+ * The dry run model when Codex is the provider. Empty follows Settings › Codex.
+ */
+codex_dry_run?: string
+/**
  * Dry run model. Empty follows the default in Settings.
  */
 dry_run: string
@@ -424,6 +433,11 @@ width?: (number | null)
  * via the `definition` "RunConfig".
  */
 export interface RunConfig {
+/**
+ * The production model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows
+ * Settings › Codex, then Codex's own default. `production_model` stays Claude's.
+ */
+codex_production_model?: string
 dry_run_first?: boolean
 effort?: (string | null)
 eleven_credit_cap?: number
@@ -440,6 +454,9 @@ output_folder?: string
  * IDs of the selected output configs.
  */
 outputs?: string[]
+/**
+ * Claude's production model (a CLI alias or a full ID).
+ */
 production_model: string
 quality?: ("draft" | "final")
 /**
@@ -577,6 +594,15 @@ export interface Models1 {
  * default in Settings.
  */
 assistant: string
+/**
+ * The assistant model when Codex is the provider (BUG-fond-crane-62ZP). Empty follows
+ * Settings › Codex, then Codex's own default. `assistant` stays Claude's.
+ */
+codex_assistant?: string
+/**
+ * The dry run model when Codex is the provider. Empty follows Settings › Codex.
+ */
+codex_dry_run?: string
 /**
  * Dry run model. Empty follows the default in Settings.
  */
