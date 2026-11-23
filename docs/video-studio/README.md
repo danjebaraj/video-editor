@@ -254,4 +254,4 @@ Validation (before any run) also checks what a run would otherwise find the expe
 
 ## The brand in a run folder
 
-The app writes the brand twice: `brand-preset.json` is the preset as the user entered it (rules, voice, music mood, styles in their own words), for Claude to read. `brand/default.json` is the same brand in cutline's brand format, which cutline loads without being told. cutline draws text only with its bundled fonts (Anton, Bebas Neue, Inter, Poppins); another brand font becomes Inter and Claude is told to say so.
+The app writes the brand twice: `brand-preset.json` is the preset as the user entered it (rules, voice, music mood, styles in their own words), for Claude to read. `brand/default.json` is the same brand in cutline's brand format, which cutline loads without being told. cutline draws text only with its bundled fonts (Anton, Bebas Neue, Inter, Poppins, Source Serif 4); another brand font becomes Inter and Claude is told to say so.

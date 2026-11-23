@@ -209,6 +209,8 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
                         }
                     }
                     "qa" => s("qa", "QA"),
+                    // Audio Review: the soundtrack is mixed without a picture (FEAT-neat-osprey-DKK7)
+                    "audio" => s("mix", "Mix"),
                     "transcribe" | "probe" | "record" | "init" | "templates" | "guide" | "doctor" => {
                         s("authoring", "Authoring")
                     }
@@ -344,6 +346,10 @@ mod tests {
         assert_eq!(bash("cutline render project.json5 --export shorts").as_deref(), Some("Render shorts"));
         assert_eq!(bash("cutline --variant teaser render project.json5").as_deref(), Some("Render"));
         assert_eq!(bash("cutline qa outputs/a/a.mp4").as_deref(), Some("QA"));
+        assert_eq!(
+            bash("cutline audio project.json5 --export full --out outputs/audio-review.wav").as_deref(),
+            Some("Mix")
+        );
         assert_eq!(bash("video-studio eleven tts --voice v --text-file t --out a.mp3").as_deref(), Some("Audio"));
         assert_eq!(bash("video-studio eleven quote tts --text-file t"), None);
         assert_eq!(bash("/abs/path/cutline validate p.json5 && cutline review p.json5").as_deref(), Some("Review"));

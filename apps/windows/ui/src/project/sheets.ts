@@ -1,6 +1,6 @@
 // Project sheets: Relink (spec §6.3), the run confirmation (§12.1) and the dry run findings (§11.2).
 
-import { h, clear, button, icon, Icons, usd } from '../dom';
+import { h, clear, button, icon, Icons, usd, select } from '../dom';
 import { effect } from '../store';
 import { sheet, openFiles, openFolders, Filters, toast } from '../dialogs';
 import { modelName } from '../app-state';
@@ -57,9 +57,11 @@ export async function locate(w: ProjectWindow, id: string) {
   }
 }
 
-/** “Run …” confirmation: outputs, model, quality, estimate, folder, dry run first. */
+/** “Run …” confirmation: outputs, model, quality, estimate, folder, dry run first. For an Audio
+ *  Review: the output to audition (a picker when there are several), model and estimate. */
 export function showRunConfirm(w: ProjectWindow, plan: RunPlan) {
   const rc = w.doc.p.run_configs.find((r) => r.id === plan.runConfig)!;
+  if (plan.kind === 'audio_review') return showAudioReviewConfirm(w, plan, rc.name);
   const s = sheet(plan.revise ? `Revise with “${rc.name}”` : `Run “${rc.name}”`, { wide: true });
   s.el.dataset.sheet = 'run-confirm';
   const warnings = plan.report.issues.filter((i) => i.severity === 'warning');
@@ -92,6 +94,46 @@ export function showRunConfirm(w: ProjectWindow, plan: RunPlan) {
     const b = s.footer.lastElementChild as HTMLElement;
     b.lastChild!.textContent = dryToggle.checked ? 'Start Dry Run' : 'Run';
   });
+  s.done.then(() => {
+    if (w.runs.plan.value === plan) w.runs.plan.value = null;
+  });
+}
+
+function showAudioReviewConfirm(w: ProjectWindow, plan: RunPlan, rcName: string) {
+  const s = sheet(plan.revise ? 'Revise the Audio Review' : `Audio Review with “${rcName}”`, { wide: true });
+  s.el.dataset.sheet = 'audio-review-confirm';
+  const warnings = plan.report.issues.filter((i) => i.severity === 'warning');
+  const est = plan.report.estimates;
+  const label = (o: { name: string; width: number; height: number }) => `${o.name} ${o.width}×${o.height}`;
+  const chosen = plan.outputs.find((o) => o.id === plan.audioOutput) ?? plan.outputs[0];
+  const output =
+    plan.outputs.length > 1 && !plan.revise
+      ? select(plan.outputs.map((o) => [o.id, label(o)] as [string, string]), plan.audioOutput ?? plan.outputs[0].id, (v) => (plan.audioOutput = v), {
+          'aria-label': 'Output to audition',
+          title: 'The output whose timing and audio settings to audition',
+        })
+      : h('span', null, chosen ? label(chosen) : '—');
+  clear(s.body,
+    h('p', { class: 'hint' }, 'Builds the soundtrack of one output from the spec (voice-over, music, effects and the clips’ own sound) so you can listen before any video is rendered.'),
+    h('dl', { class: 'summary-grid' },
+      h('dt', null, 'Output'), h('dd', null, output),
+      h('dt', null, 'Model'), h('dd', null, modelPicker(plan.model, (v) => (plan.model = v), { label: 'Model for this Audio Review' })),
+      h('dt', null, 'Estimated cost'), h('dd', null, `${usd(est.claude_usd_low)} – ${usd(est.claude_usd_high)} (approximate)${est.eleven_credits ? ` · ${est.eleven_credits} ElevenLabs credits` : ''}`),
+    ),
+    plan.revise ? h('blockquote', null, plan.revise.feedback) : null,
+    warnings.length ? h('div', { class: 'note warn' }, h('strong', null, `${warnings.length} warning(s) will be accepted for this run`), h('ul', { class: 'small' }, warnings.slice(0, 5).map((i) => h('li', null, i.title)))) : null,
+  );
+  s.footer.append(
+    button('Show Validation', () => {
+      s.close();
+      w.showTab('validation');
+    }, { appearance: 'subtle' }),
+    button('Cancel', () => s.close()),
+    button('Build Soundtrack', () => {
+      s.close();
+      w.runs.confirm(plan);
+    }, { appearance: 'primary', glyph: Icons.audio }),
+  );
   s.done.then(() => {
     if (w.runs.plan.value === plan) w.runs.plan.value = null;
   });

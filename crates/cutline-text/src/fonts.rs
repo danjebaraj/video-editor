@@ -89,11 +89,18 @@ impl FontDb {
         self.fonts.iter().any(|f| f.names.iter().any(|n| n.eq_ignore_ascii_case(family)))
     }
 
-    /// Best match for (family, bold). Falls back to the first font.
+    /// Best match for (family, bold), upright before italic. Falls back to the first font.
     pub fn get(&self, family: &str, bold: bool) -> Option<&FontEntry> {
         let cands: Vec<&FontEntry> =
             self.fonts.iter().filter(|f| f.names.iter().any(|n| n.eq_ignore_ascii_case(family))).collect();
-        cands.iter().find(|f| f.bold == bold).or(cands.first()).copied().or(self.fonts.first())
+        cands
+            .iter()
+            .find(|f| f.bold == bold && !f.italic)
+            .or_else(|| cands.iter().find(|f| f.bold == bold))
+            .or_else(|| cands.iter().find(|f| !f.italic))
+            .or(cands.first())
+            .copied()
+            .or(self.fonts.first())
     }
 }
 
@@ -148,5 +155,17 @@ mod tests {
         assert!(w1 > 100.0 && w2 > 2.0 * w1);
         assert!((m.line_height() - 100.0).abs() < 1.0, "{}", m.line_height());
         assert!(f.win_ratio > 0.5 && f.win_ratio <= 1.5);
+    }
+
+    #[test]
+    fn bundled_serif_has_regular_italic_and_bold() {
+        let db = FontDb::bundled().unwrap();
+        assert!(db.has("Source Serif 4"), "{:?}", db.families());
+        let regular = db.get("Source Serif 4", false).unwrap();
+        assert!(!regular.bold && !regular.italic, "{regular:?}");
+        let bold = db.get("Source Serif 4", true).unwrap();
+        assert!(bold.bold && !bold.italic, "{bold:?}");
+        assert!(db.fonts.iter().any(|f| f.names.iter().any(|n| n == "Source Serif 4") && f.italic));
+        assert!(db.has("Source Serif 4 Italic") && db.has("Source Serif 4 Bold"));
     }
 }

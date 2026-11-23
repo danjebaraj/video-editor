@@ -253,7 +253,8 @@ impl BrandPreset {
 }
 
 /// The font families cutline bundles. It draws text only with these.
-pub const CUTLINE_FONTS: [&str; 6] = ["Anton", "Bebas Neue", "Inter", "Poppins", "Poppins Bold", "Poppins ExtraBold"];
+pub const CUTLINE_FONTS: [&str; 7] =
+    ["Anton", "Bebas Neue", "Inter", "Poppins", "Source Serif 4", "Poppins Bold", "Poppins ExtraBold"];
 
 const CUTLINE_CORNERS: [&str; 4] = ["top_left", "top_right", "bottom_left", "bottom_right"];
 const CUTLINE_CAPTION_STYLES: [&str; 5] = ["bold_pop", "karaoke", "word_by_word", "clean_sentence", "boxed"];
@@ -286,7 +287,7 @@ impl BrandPreset {
                     None => {
                         notes.push(format!(
                             "The {role} font \"{name}\" isn't one cutline can draw (it has {}); Inter is used instead.",
-                            CUTLINE_FONTS[..4].join(", ")
+                            CUTLINE_FONTS[..5].join(", ")
                         ));
                         Some("Inter".into())
                     }
@@ -294,7 +295,7 @@ impl BrandPreset {
                 None if f.file.is_some() => {
                     notes.push(format!(
                         "The {role} font is a font file, which cutline can't load (it has {}); Inter is used instead.",
-                        CUTLINE_FONTS[..4].join(", ")
+                        CUTLINE_FONTS[..5].join(", ")
                     ));
                     Some("Inter".into())
                 }

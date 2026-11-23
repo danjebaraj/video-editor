@@ -58,6 +58,7 @@ const VIEW: &[Item] = &[
 const PROJECT: &[Item] = &[
     ("validate", "&Validate\tCtrl+Shift+B"),
     ("run", "&Run\tF5"),
+    ("audio_review", "&Audio Review…\tCtrl+F5"),
     ("stop", "&Stop\tShift+F5"),
     ("", ""),
     ("relink", "Re&link Media…"),

@@ -125,6 +125,7 @@ enum MainMenu {
             item("Dry Run", #selector(W.dryRun(_:)), "r", [.command, .option]),
             sep(),
             item("Run", #selector(W.runProject(_:)), "r"),
+            item("Audio Review…", #selector(W.audioReview(_:)), "r", [.command, .shift]),
             item("Stop", #selector(W.stopRun(_:)), "."),
             sep(),
             item("Gather Missing Info", #selector(W.gatherInfo(_:)), "g", [.command, .control]),

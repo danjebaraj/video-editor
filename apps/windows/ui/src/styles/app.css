@@ -206,6 +206,10 @@ fluent-button.danger-button { --colorBrandBackground: var(--danger); margin: 0 0
 .composer-area { border-top: 1px solid var(--stroke); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .composer { min-height: 72px; }
 .note.warn { color: var(--warn); }
+.note.danger { color: var(--danger, #c42b1c); }
+.note.blocking ul { margin: 4px 0 0; padding-left: 18px; }
+.audio-controls { align-items: center; gap: 8px; margin: 6px 0; }
+.audio-controls .mono { font-variant-numeric: tabular-nums; min-width: 3.2em; }
 .question-card { background: var(--card); border: 1px solid var(--accent); border-radius: 8px; padding: 12px; }
 .question-card .eyebrow { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.04em; }
 .question-card .question-text { font-weight: 600; }

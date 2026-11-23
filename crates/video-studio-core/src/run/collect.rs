@@ -236,6 +236,72 @@ pub struct RunResults {
     pub readiness: Option<ReadinessReport>,
     pub project_json5: Option<String>,
     pub logs: Vec<LogFile>,
+    /// What stopped a failed run, when its logs name it: a missing audio source or the credit
+    /// cap (FEAT-neat-osprey-DKK7). Empty for runs that didn't fail.
+    #[serde(default)]
+    pub blocking: Vec<BlockingInput>,
+}
+
+/// One input or limit that stopped a run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BlockingInput {
+    /// `missing_source` (a file the edit refers to isn't there) or `credit_cap` (a generation
+    /// was refused because it would go over the run's credit cap).
+    pub kind: String,
+    /// What is missing or refused, in the words of the log: the file, or the quote and the cap.
+    pub detail: String,
+}
+
+/// The missing sources and refused generations of a failed run, from its last
+/// `cutline validate` or `cutline audio` log and from the helper's call log.
+pub fn blocking_inputs(folder: &Utf8Path) -> Vec<BlockingInput> {
+    let mut out: Vec<BlockingInput> = Vec::new();
+    let mut push = |kind: &str, detail: &str| {
+        let detail = detail.trim().to_string();
+        if !detail.is_empty() && !out.iter().any(|b| b.kind == kind && b.detail == detail) {
+            out.push(BlockingInput { kind: kind.into(), detail });
+        }
+    };
+    // Only the last check counts: an earlier missing file may have been fixed since.
+    let checks = folder.join("logs/cutline");
+    let last_check = std::fs::read_dir(&checks).ok().and_then(|rd| {
+        rd.flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with("-validate.log") || n.ends_with("-audio.log"))
+            .max()
+    });
+    if let Some(name) = last_check {
+        let text = std::fs::read_to_string(checks.join(name)).unwrap_or_default();
+        for line in text.lines().filter(|l| l.contains("E_ASSET_NOT_FOUND")) {
+            let body = line.trim_start_matches("[out] ").trim_start_matches("[err] ");
+            if let Ok(v) = serde_json::from_str::<Value>(body) {
+                // `--json`: {"ok": false, "errors": [{"code", "path", "message"}]}, maybe nested
+                let mut stack = vec![&v];
+                while let Some(x) = stack.pop() {
+                    match x {
+                        Value::Object(m) if m.get("code").and_then(Value::as_str) == Some("E_ASSET_NOT_FOUND") => {
+                            push("missing_source", m.get("message").and_then(Value::as_str).unwrap_or(""))
+                        }
+                        Value::Object(m) => stack.extend(m.values()),
+                        Value::Array(a) => stack.extend(a.iter()),
+                        _ => {}
+                    }
+                }
+            } else if let Some(i) = body.find("E_ASSET_NOT_FOUND") {
+                // human output: "✘ E_ASSET_NOT_FOUND /assets/vo/path: asset file not found: vo.mp3"
+                let rest = &body[i + "E_ASSET_NOT_FOUND".len()..];
+                push("missing_source", rest.split_once(": ").map(|(_, m)| m).unwrap_or(rest));
+            }
+        }
+    }
+    let calls = std::fs::read_to_string(folder.join("logs/eleven.ndjson")).unwrap_or_default();
+    for v in calls.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        let error = v["error"].as_str().unwrap_or("");
+        if v["ok"] == false && error.contains("credit cap") {
+            push("credit_cap", &format!("{}: {error}", v["command"].as_str().unwrap_or("generation")));
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -331,6 +397,7 @@ pub fn load_results(folder: &Utf8Path) -> RunResults {
         readiness: ReadinessReport::load(folder),
         project_json5: project.is_file().then(|| project.to_string()),
         logs: list_logs(folder),
+        blocking: if status == "failed" { blocking_inputs(folder) } else { Vec::new() },
         run,
     }
 }
@@ -468,6 +535,54 @@ mod tests {
             vec!["app", "app", "claude", "eleven", "cutline", "cutline", "qa"]
         );
         let r = load_results(folder);
-        assert!(r.exists && r.outputs.is_empty() && r.summary.is_none());
+        assert!(r.exists && r.outputs.is_empty() && r.summary.is_none() && r.blocking.is_empty());
+    }
+
+    #[test]
+    fn a_failed_run_names_its_missing_source_and_the_credit_cap() {
+        let d = tempfile::tempdir().unwrap();
+        let folder = Utf8Path::from_path(d.path()).unwrap();
+        let write = |f: &str, text: &str| {
+            let p = folder.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        // an earlier check missed a file that was fixed since: only the last check counts
+        write(
+            "logs/cutline/001-validate.log",
+            "[out] ✘ E_ASSET_NOT_FOUND /assets/old/path: asset file not found: old.mp3\n",
+        );
+        write(
+            "logs/cutline/002-validate.log",
+            "# argv: []\n[out] ✘ E_ASSET_NOT_FOUND /assets/vo/path: asset file not found: audio/vo.mp3\n[out]     hint: paths are relative to the project file\n",
+        );
+        write("logs/cutline/003-review.log", "[out] E_ASSET_NOT_FOUND ignored: not a check\n");
+        write(
+            "logs/eleven.ndjson",
+            &[
+                r#"{"command":"tts","ok":true,"error":null,"credits":12}"#,
+                r#"{"command":"music","ok":false,"error":"This call needs about 900 credits, but the run has used 200 of its 1000 credit cap (800 left). Shorten the text or prompt.","credits":0}"#,
+                r#"{"command":"sfx","ok":false,"error":"network down","credits":0}"#,
+            ]
+            .join("\n"),
+        );
+        write("logs/run.json", r#"{"kind":"audio_review","status":"failed","outputs":[]}"#);
+        let b = load_results(folder).blocking;
+        assert_eq!(b.len(), 2, "{b:?}");
+        assert_eq!(
+            (b[0].kind.as_str(), b[0].detail.as_str()),
+            ("missing_source", "asset file not found: audio/vo.mp3")
+        );
+        assert_eq!(b[1].kind, "credit_cap");
+        assert!(b[1].detail.starts_with("music: This call needs about 900 credits"), "{}", b[1].detail);
+        // the JSON form of the same finding, from `cutline audio`
+        write(
+            "logs/cutline/004-audio.log",
+            r#"[out] {"ok":false,"errors":[{"code":"E_ASSET_NOT_FOUND","path":"/assets/m/path","message":"asset file not found: music.wav","severity":"error"}]}"#,
+        );
+        assert_eq!(blocking_inputs(folder)[0].detail, "asset file not found: music.wav");
+        // a run that didn't fail names nothing
+        write("logs/run.json", r#"{"kind":"audio_review","status":"succeeded_with_warnings","outputs":[]}"#);
+        assert!(load_results(folder).blocking.is_empty());
     }
 }

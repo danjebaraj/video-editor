@@ -51,8 +51,25 @@ impl RunEnv {
     /// or Claude Code is too old (CLI exit code 5).
     pub fn detect(library: &Utf8Path, helper: &Utf8Path) -> Result<RunEnv> {
         let settings = Settings::load(library);
-        let claude = locate::find_claude(&settings.claude_path).ok_or_else(|| Error::Environment("Claude Code isn't installed. Install the Claude Code CLI (https://claude.com/claude-code), then try again.".into()))?;
-        if !claude.supported {
+        // With Codex as the provider Claude Code isn't needed (FEAT-spry-alpaca-5RQZ).
+        let codex = settings.provider == crate::codex::Provider::Codex;
+        if codex && crate::codex::find_codex(&settings.codex_path).is_none() {
+            return Err(Error::Environment(CODEX_MISSING.into()));
+        }
+        let claude = match locate::find_claude(&settings.claude_path) {
+            Some(c) => c,
+            None if codex => ClaudeInfo {
+                path: String::new(),
+                version: String::new(),
+                version_text: String::new(),
+                effort_levels: Vec::new(),
+                login_path: None,
+                supported: false,
+                git_bash: None,
+            },
+            None => return Err(Error::Environment("Claude Code isn't installed. Install the Claude Code CLI (https://claude.com/claude-code), then try again.".into())),
+        };
+        if !claude.supported && !codex {
             return Err(Error::Environment(format!(
                 "Claude Code {} is too old; this app needs {} or later. Update the CLI and try again.",
                 claude.version,
@@ -197,6 +214,8 @@ pub struct Prepared {
     pub record: RunRecord,
     pub helper_context: HelperContext,
     pub request: RunRequest,
+    /// Set when Codex drives the run instead of Claude Code (`options` is then unused).
+    pub codex: Option<crate::codex::agent::CodexOptions>,
 }
 
 fn unique_folder(parent: &Utf8Path, name: &str) -> Utf8PathBuf {
@@ -250,17 +269,23 @@ fn copy_tree(from: &Utf8Path, to: &Utf8Path) {
     }
 }
 
-/// Builds the run folder and everything in it. Nothing is launched yet.
-/// What a run or assistant session says when Codex is the chosen provider: the readiness check
-/// and transport exist (`crate::codex`), the Codex-driven assistant and runs don't yet, and
-/// nothing falls back to Claude without the user choosing it.
-pub const CODEX_NOT_WIRED: &str = "Codex is selected in Settings › Assistant, but this version still runs the assistant and productions with Claude Code only. Choose Claude there to continue.";
+/// What a run says when Codex is the provider and can't be found.
+pub const CODEX_MISSING: &str = "Codex is selected in Settings › Assistant, but it isn't installed. Install the Codex CLI (it provides `codex app-server`) or set its path in Settings › Assistant, then try again.";
 
+/// What Codex is told on top of the production instructions (FEAT-spry-alpaca-5RQZ): its tools
+/// aren't Claude's, and the app checks every command and write.
+pub const CODEX_RUN_NOTE: &str = "\n\n## Working in Codex\n\n- You run as Codex inside Syncfusion Video Studio. Your working folder is this run's folder; write only there (with apply_patch). Media, brand and reference folders are read-only. `logs/`, `.bin/`, `run.json` and `media-manifest.json` are written by the app.\n- Run `cutline …` and `video-studio eleven …` / `video-studio capture …` as plain commands by those bare names, one per command, with no pipes, redirections or substitutions. Every command is checked by the app and anything else is refused; don't try other tools to get around a refusal.\n- When you need a decision from the user, ask with the request_user_input tool.";
+
+/// Builds the run folder and everything in it. Nothing is launched yet.
 pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
-    // the provider is captured at run start: changing Settings later affects only later runs
-    if env.settings.provider == crate::codex::Provider::Codex {
-        return Err(Error::Environment(CODEX_NOT_WIRED.into()));
-    }
+    // The provider is captured at run start: changing Settings later affects only later runs.
+    let codex_exe = match env.settings.provider {
+        crate::codex::Provider::Codex => Some(
+            crate::codex::find_codex(&env.settings.codex_path)
+                .ok_or_else(|| Error::Environment(CODEX_MISSING.into()))?,
+        ),
+        crate::codex::Provider::Claude => None,
+    };
     let mut project = Project::load(&request.project_path)?;
     let rc = project.run_config(&request.run_config).cloned().ok_or_else(|| {
         let names: Vec<&str> = project.run_configs.iter().map(|r| r.name.as_str()).collect();
@@ -450,9 +475,16 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
 
     // An empty model in the request means "not chosen", as it does in the project.
     let requested_model = request.model.clone().filter(|m| !m.trim().is_empty());
-    let model = match request.kind {
-        RunKind::DryRun => requested_model.unwrap_or_else(|| project.models.dry_run_or(&env.settings)),
-        RunKind::Production | RunKind::AudioReview => requested_model.unwrap_or_else(|| rc.production_model.clone()),
+    let model = match (&codex_exe, request.kind) {
+        // Codex: the model chosen for this run, else Settings' Codex model, else Codex's default
+        (Some(_), _) => requested_model
+            .clone()
+            .or_else(|| crate::codex::model_for(&env.settings.codex_model))
+            .unwrap_or_else(|| CODEX_DEFAULT_MODEL.to_string()),
+        (None, RunKind::DryRun) => requested_model.unwrap_or_else(|| project.models.dry_run_or(&env.settings)),
+        (None, RunKind::Production | RunKind::AudioReview) => {
+            requested_model.unwrap_or_else(|| rc.production_model.clone())
+        }
     };
     let mut child_env = locate::child_env(env.claude.login_path.as_deref());
     let base_path = child_env.get("PATH").cloned().unwrap_or_default();
@@ -519,6 +551,39 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         log: Some(logs.join("claude.jsonl")),
     };
 
+    let codex = codex_exe.map(|exe| {
+        let mut shell_env = std::collections::BTreeMap::new();
+        for k in ["PATH", CONTEXT_ENV] {
+            if let Some(v) = options.env.get(k) {
+                shell_env.insert(k.to_string(), v.clone());
+            }
+        }
+        crate::codex::agent::CodexOptions {
+            executable: exe,
+            working_dir: folder.clone(),
+            env: options.env.clone(),
+            shell_env,
+            model: (model != CODEX_DEFAULT_MODEL).then(|| model.clone()),
+            effort: crate::codex::agent::codex_effort(
+                rc.effort
+                    .as_deref()
+                    .filter(|e| !e.is_empty())
+                    .or(project.models.effort.as_deref().filter(|e| !e.is_empty()))
+                    .or(Some(env.settings.effort.as_str()).filter(|e| !e.is_empty())),
+            ),
+            developer_instructions: format!("{}{CODEX_RUN_NOTE}", options.system_prompt_append),
+            // only a Codex thread from the revised run is resumed
+            resume_thread: previous
+                .as_ref()
+                .and_then(|p| p.claude_session.as_deref())
+                .and_then(crate::codex::agent::thread_of)
+                .map(str::to_string),
+            writable_roots: vec![folder.clone()],
+            web_access: rc.web_access,
+            log: Some(logs.join("codex.jsonl")),
+        }
+    });
+
     let record = RunRecord {
         id: run_id.clone(),
         run_config: rc.id.clone(),
@@ -555,7 +620,19 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
     let mut log_run = resolved.clone();
     if let Some(o) = log_run.as_object_mut() {
         o.insert("app".into(), json!({"name": crate::APP_NAME, "core_version": CORE_VERSION}));
-        o.insert("claude".into(), json!({"path": env.claude.path, "version": env.claude.version_text}));
+        match &codex {
+            Some(c) => {
+                o.insert("provider".into(), json!("codex"));
+                o.insert(
+                    "codex".into(),
+                    json!({"path": c.executable, "model": c.model, "sandbox": c.sandbox_policy()}),
+                );
+            }
+            None => {
+                o.insert("provider".into(), json!("claude"));
+                o.insert("claude".into(), json!({"path": env.claude.path, "version": env.claude.version_text}));
+            }
+        }
         o.insert("cutline".into(), json!({"path": env.cutline.path, "version": env.cutline.version, "doctor": env.cutline_doctor.as_ref().map(doctor_brief)}));
         o.insert(
             "os".into(),
@@ -588,8 +665,12 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         record,
         helper_context,
         request: request.clone(),
+        codex,
     })
 }
+
+/// The model a Codex run records when none is chosen: Codex picks its own default.
+pub const CODEX_DEFAULT_MODEL: &str = "codex-default";
 
 /// The parts of `cutline doctor --json` worth keeping in every run log.
 fn doctor_brief(d: &Value) -> Value {

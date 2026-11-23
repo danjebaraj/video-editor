@@ -1,6 +1,6 @@
 // Runs of a project (the macOS RunController): validation first, the confirmation sheet, an
-// optional dry run, the production run with live stages, questions, cost and transcript, Stop,
-// and the end (notification, taskbar, results).
+// optional dry run, the production run or an Audio Review with live stages, questions, cost and
+// transcript, Stop, and the end (notification, taskbar, results).
 
 import { core, request, on, errorText } from '../bridge';
 import { Signal } from '../store';
@@ -17,10 +17,25 @@ export const STAGES: [string, string][] = [
   ['authoring', 'Authoring'],
   ['validate', 'Validate'],
   ['review', 'Review'],
+  ['mix', 'Mix'],
   ['render', 'Render'],
   ['qa', 'QA'],
   ['done', 'Done'],
 ];
+
+export type RunKindName = 'dry_run' | 'production' | 'audio_review';
+
+/** The stages a run of this kind goes through: a dry run renders nothing and makes no audio; an
+ *  Audio Review makes audio and mixes it, but records, reviews and renders no picture. */
+export function showsStage(stage: string, kind: RunKindName): boolean {
+  if (kind === 'dry_run') return !['audio', 'capture', 'mix', 'render', 'qa'].includes(stage);
+  if (kind === 'audio_review') return !['capture', 'review', 'render', 'qa'].includes(stage);
+  return stage !== 'mix';
+}
+
+export function kindLabel(kind: string): string {
+  return kind === 'dry_run' ? 'Dry run' : kind === 'audio_review' ? 'Audio Review' : 'Production run';
+}
 
 export interface StageState {
   id: string;
@@ -46,11 +61,15 @@ export interface RunPlan {
   model: string;
   dryRunFirst: boolean;
   revise?: { previous_run: string; feedback: string };
+  /** `production`, or `audio_review` for an Audio Review (FEAT-neat-osprey-DKK7). */
+  kind: 'production' | 'audio_review';
+  /** Audio Review: the output (ID) whose timing and audio settings are auditioned. */
+  audioOutput?: string;
 }
 
 export interface Live {
   token: number;
-  kind: 'dry_run' | 'production';
+  kind: RunKindName;
   runId: string;
   folder: string;
   model: string;
@@ -85,8 +104,9 @@ export class RunController {
     return !!this.live.value;
   }
 
-  /** Run (F5): validate, then the confirmation sheet. */
-  async requestRun(revise?: { previous_run: string; feedback: string }) {
+  /** Run (F5): validate, then the confirmation sheet. With `audioReview` (Ctrl+F5) the sheet
+   *  starts an Audio Review: the soundtrack of one output, with no dry run and no picture. */
+  async requestRun(revise?: { previous_run: string; feedback: string }, opts: { audioReview?: boolean; audioOutput?: string } = {}) {
     if (this.running || this.preparing.value) return;
     const rc = this.doc.currentRunConfig();
     if (!rc) {
@@ -100,7 +120,7 @@ export class RunController {
     }
     this.preparing.value = true;
     try {
-      const report = await this.doc.validate('production');
+      const report = await this.doc.validate(opts.audioReview ? 'audio_review' : 'production');
       if (!report) return;
       if (report.blockers > 0) {
         this.showTab('validation');
@@ -108,8 +128,14 @@ export class RunController {
         return;
       }
       const outputs = this.doc.outputs.value.filter((o) => rc.outputs.includes(o.id));
+      if (opts.audioReview) {
+        // Allowed as a project's first run: no dry run, and the review goes in the library.
+        const audioOutput = outputs.find((o) => o.id === opts.audioOutput)?.id ?? outputs[0]?.id;
+        this.plan.value = { runConfig: rc.id, outputs, report, outputFolder: '', model: rc.production_model, dryRunFirst: false, revise, kind: 'audio_review', audioOutput };
+        return;
+      }
       const outputFolder = await core<string>('outputs.root', { project: this.doc.p, run_config: rc.id }).catch(() => '');
-      this.plan.value = { runConfig: rc.id, outputs, report, outputFolder, model: rc.production_model, dryRunFirst: rc.dry_run_first && !revise, revise };
+      this.plan.value = { runConfig: rc.id, outputs, report, outputFolder, model: rc.production_model, dryRunFirst: rc.dry_run_first && !revise, revise, kind: 'production' };
     } finally {
       this.preparing.value = false;
     }
@@ -131,7 +157,10 @@ export class RunController {
   async confirm(plan: RunPlan) {
     this.plan.value = null;
     for (const i of plan.report.issues) if (i.severity === 'warning') this.doc.acknowledged.add(i.id);
-    if (plan.dryRunFirst) {
+    if (plan.kind === 'audio_review') {
+      this.continuation = null;
+      await this.launch('audio_review', plan.model, plan.report, plan.revise, {}, plan.audioOutput);
+    } else if (plan.dryRunFirst) {
       this.continuation = plan;
       await this.launch('dry_run', this.doc.dryRunModel, plan.report);
     } else {
@@ -140,7 +169,7 @@ export class RunController {
     }
   }
 
-  async launch(kind: 'dry_run' | 'production', model: string, report: Report, revise?: { previous_run: string; feedback: string }, testOptions: Record<string, unknown> = {}) {
+  async launch(kind: RunKindName, model: string, report: Report, revise?: { previous_run: string; feedback: string }, testOptions: Record<string, unknown> = {}, audioOutput?: string) {
     const rc = this.doc.currentRunConfig()!;
     await this.doc.save().catch(() => {});
     const request_: Record<string, unknown> = {
@@ -150,8 +179,9 @@ export class RunController {
       assume_answers: false,
       validation: report,
     };
-    if (kind === 'production' && model && model !== rc.production_model) request_.model = model;
-    if (kind === 'production' && revise) request_.revise = revise;
+    if (kind !== 'dry_run' && model && model !== rc.production_model) request_.model = model;
+    if (kind !== 'dry_run' && revise) request_.revise = revise;
+    if (kind === 'audio_review' && audioOutput) request_.audio_output = audioOutput;
     if (rc.question_timeout_s) request_.question_timeout_s = rc.question_timeout_s;
     try {
       const started = await request<{ token: number; run_id: string; folder: string }>('run.start', { request: request_, options: { ...this.extraOptions, ...testOptions } });
@@ -162,10 +192,10 @@ export class RunController {
         folder: started.folder,
         model: kind === 'dry_run' ? model : model || rc.production_model,
         started: Date.now(),
-        stages: STAGES.filter(([id]) => kind === 'production' || !['audio', 'capture', 'render', 'qa'].includes(id)).map(([id, label]) => ({ id, label, state: 'pending', seconds: 0 })),
+        stages: STAGES.filter(([id]) => showsStage(id, kind)).map(([id, label]) => ({ id, label, state: 'pending', seconds: 0 })),
         fraction: null,
         detail: '',
-        status: kind === 'dry_run' ? 'Dry run' : 'Running',
+        status: kind === 'dry_run' ? 'Dry run' : kind === 'audio_review' ? 'Audio Review' : 'Running',
         stopping: false,
         question: null,
         cost: null,
@@ -283,7 +313,7 @@ export class RunController {
     await this.refreshHistory();
     this.selectedRun.value = outcome?.run_id ?? live.runId;
     const rcName = this.doc.currentRunConfig()?.name ?? 'Run';
-    const title = live.kind === 'dry_run' ? `Dry run: ${STATUS_LABEL[status] ?? status}` : `${rcName}: ${STATUS_LABEL[status] ?? status}`;
+    const title = live.kind === 'production' ? `${rcName}: ${STATUS_LABEL[status] ?? status}` : `${kindLabel(live.kind)}: ${STATUS_LABEL[status] ?? status}`;
     const body = outcome?.message ?? `${outcome?.outputs?.length ?? 0} output(s)`;
     if (settings.value?.notifications !== false && !document.hasFocus()) request('shell.notify', { title, body });
     if (live.kind === 'dry_run') {
@@ -342,9 +372,9 @@ export class RunController {
     return this.doc.p.runs.find((r) => r.id === id) ?? this.lastRun();
   }
 
-  /** Re-run: the same run config again. */
-  rerun(record: RunRecord) {
+  /** Re-run: the same run config again (an Audio Review auditions the same output again). */
+  rerun(record: RunRecord, audioOutput?: string) {
     this.doc.runConfig.value = record.run_config;
-    this.requestRun();
+    this.requestRun(undefined, { audioReview: record.kind === 'audio_review', audioOutput });
   }
 }

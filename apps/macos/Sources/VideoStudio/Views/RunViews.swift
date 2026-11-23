@@ -185,13 +185,33 @@ struct RunConfirmSheet: View {
     var body: some View {
         let warnings = plan.report.issues.filter { $0.severity == "warning" }
         VStack(alignment: .leading, spacing: 14) {
-            Text(plan.revise == nil ? "Run “\(plan.runConfig.name)”" : "Revise with “\(plan.runConfig.name)”").font(.title3.weight(.semibold))
+            Text(title).font(.title3.weight(.semibold))
+            if plan.isAudioReview {
+                Text("Builds the soundtrack of one output from the spec (voice-over, music, effects and the clips' own sound) so you can listen before any video is rendered.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 8) {
-                GridRow {
-                    Text("Outputs").foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(plan.outputs) { o in
-                            Text("\(o.name ?? o.id)  ").font(.callout) + Text("\(o.width ?? 0)×\(o.height ?? 0)").font(.caption).foregroundColor(.secondary)
+                if plan.isAudioReview {
+                    GridRow {
+                        Text("Output").foregroundStyle(.secondary)
+                        if plan.outputs.count > 1 && plan.revise == nil {
+                            Picker("Output", selection: Binding(get: { plan.audioOutput ?? plan.outputs.first?.id ?? "" }, set: { plan.audioOutput = $0 })) {
+                                ForEach(plan.outputs) { o in Text("\(o.name ?? o.id)  \(o.width ?? 0)×\(o.height ?? 0)").tag(o.id) }
+                            }
+                            .labelsHidden().fixedSize()
+                            .help("The output whose timing and audio settings to audition")
+                            .accessibilityLabel("Output to audition")
+                        } else {
+                            Text(auditioned.map { $0.name ?? $0.id } ?? "—").font(.callout)
+                        }
+                    }
+                } else {
+                    GridRow {
+                        Text("Outputs").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(plan.outputs) { o in
+                                Text("\(o.name ?? o.id)  ").font(.callout) + Text("\(o.width ?? 0)×\(o.height ?? 0)").font(.caption).foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
@@ -199,9 +219,11 @@ struct RunConfirmSheet: View {
                     Text("Model").foregroundStyle(.secondary)
                     ModelPicker(title: "", model: $plan.model).labelsHidden()
                 }
-                GridRow {
-                    Text("Quality").foregroundStyle(.secondary)
-                    Text(plan.runConfig.quality == "draft" ? "Draft" : "Final")
+                if !plan.isAudioReview {
+                    GridRow {
+                        Text("Quality").foregroundStyle(.secondary)
+                        Text(plan.runConfig.quality == "draft" ? "Draft" : "Final")
+                    }
                 }
                 GridRow {
                     Text("Estimated cost").foregroundStyle(.secondary)
@@ -211,11 +233,13 @@ struct RunConfirmSheet: View {
                     }
                     .font(.callout)
                 }
-                GridRow {
-                    Text("Output folder").foregroundStyle(.secondary)
-                    Text(plan.outputFolder).font(.callout).lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                if !plan.isAudioReview {
+                    GridRow {
+                        Text("Output folder").foregroundStyle(.secondary)
+                        Text(plan.outputFolder).font(.callout).lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                    }
                 }
-                if plan.revise == nil {
+                if plan.revise == nil && !plan.isAudioReview {
                     GridRow {
                         Text("Dry run").foregroundStyle(.secondary)
                         Toggle("Do a dry run first with \(app.models.displayName(document.dryRunModel))", isOn: $plan.dryRunFirst)
@@ -241,11 +265,22 @@ struct RunConfirmSheet: View {
                 }
                 Spacer()
                 Button("Cancel") { document.runs.plan = nil }.keyboardShortcut(.cancelAction)
-                Button(plan.dryRunFirst ? "Start Dry Run" : "Run") { document.runs.confirm(plan) }.keyboardShortcut(.defaultAction)
+                Button(plan.isAudioReview ? "Build Soundtrack" : plan.dryRunFirst ? "Start Dry Run" : "Run") { document.runs.confirm(plan) }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(22)
         .frame(width: 520)
+    }
+
+    private var auditioned: ResolvedOutput? { plan.outputs.first { $0.id == plan.audioOutput } ?? plan.outputs.first }
+
+    private var title: String {
+        switch (plan.isAudioReview, plan.revise != nil) {
+        case (true, false): return "Audio Review with “\(plan.runConfig.name)”"
+        case (true, true): return "Revise the Audio Review"
+        case (false, false): return "Run “\(plan.runConfig.name)”"
+        case (false, true): return "Revise with “\(plan.runConfig.name)”"
+        }
     }
 }
 
@@ -352,8 +387,14 @@ struct RunInspector: View {
         } else if let id = document.selectedRunID ?? document.project.runs.last?.id, let record = document.project.runs.first(where: { $0.id == id }) {
             RunResultView(document: document, record: record).id(record.id + record.status)
         } else {
-            EmptyState(symbol: "play.circle", title: "No run yet", message: "Run validates the project, then Claude Code drives cutline to produce the outputs. Progress, results and logs appear here.",
-                       action: ("Run", { runs.requestRun() }))
+            VStack(spacing: 8) {
+                EmptyState(symbol: "play.circle", title: "No run yet", message: "Run validates the project, then Claude Code drives cutline to produce the outputs. Audio Review builds only the soundtrack, to listen to before any video is rendered. Progress, results and logs appear here.",
+                           action: ("Run", { runs.requestRun() }))
+                Button("Audio Review…") { runs.requestRun(audioReview: true) }
+                    .disabled(!AppState.shared.claudeAvailable || runs.isPreparing)
+                    .help("Build and play the soundtrack from the spec, without rendering video")
+                    .padding(.bottom, 16)
+            }
         }
     }
 }
@@ -406,7 +447,7 @@ struct LiveRunView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(runs.kind == "dry_run" ? "Dry run" : "Production run").font(.headline)
+                    Text(runs.kind == "dry_run" ? "Dry run" : runs.kind == "audio_review" ? "Audio Review" : "Production run").font(.headline)
                     Text(runs.liveModel).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -454,7 +495,7 @@ struct LiveRunView: View {
 
     private var stageList: some View {
         VStack(alignment: .leading, spacing: 5) {
-            ForEach(runs.stages.filter { runs.kind != "dry_run" || !["audio", "render", "qa"].contains($0.id) }) { s in
+            ForEach(runs.stages.filter { RunController.shows(stage: $0.id, kind: runs.kind) }) { s in
                 HStack(spacing: 8) {
                     Group {
                         switch s.state {
@@ -596,12 +637,20 @@ struct RunResultView: View {
                     Text(RunStatus.label(record.status)).font(.headline)
                     Spacer()
                     if record.kind == "dry_run" { Text("Dry run").font(.caption).padding(.horizontal, 6).background(Color(nsColor: .quaternaryLabelColor), in: Capsule()) }
+                    if record.kind == "audio_review" { Text("Audio Review").font(.caption).padding(.horizontal, 6).background(Color(nsColor: .quaternaryLabelColor), in: Capsule()) }
                 }
                 Text([record.run_config_name ?? "", Fmt.when(record.started), record.model.map { AppState.shared.models.displayName($0) } ?? "", record.cost_usd.map { Fmt.money($0) } ?? "",
                       (record.eleven_credits ?? 0) > 0 ? "\(record.eleven_credits!) credits" : ""].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption).foregroundStyle(.secondary)
                 if let m = results?.run?["message"]?.stringValue { Text(m).font(.callout).foregroundStyle(record.status == "failed" ? Color.red : Color.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).copyable("Copy the message") { m } }
+                if let blocking = results?.blocking, !blocking.isEmpty { BlockingInputsView(items: blocking) }
+                // An Audio Review's warnings (a silent timeline among them) come before the player.
+                if record.kind == "audio_review", let warnings = results?.run?["warnings"]?.arrayValue?.compactMap(\.stringValue), !warnings.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(warnings, id: \.self) { w in Label(w, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+                    }
+                }
                 Picker("", selection: $tab) { ForEach(RunResultTab.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                     .pickerStyle(.segmented).labelsHidden().accessibilityLabel("Run detail")
             }
@@ -620,12 +669,12 @@ struct RunResultView: View {
             HStack {
                 Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: record.folder)]) }
                 Spacer()
-                if record.kind == "production" {
+                if record.kind == "production" || record.kind == "audio_review" {
                     Button("Revise…") { showRevise = true }.disabled(document.runs.isRunning || record.claude_session == nil || !AppState.shared.claudeAvailable)
-                        .help("Give feedback and continue this run's Claude session in a new run folder")
+                        .help(record.kind == "audio_review" ? "Give feedback and build a new take of the soundtrack; this take stays playable" : "Give feedback and continue this run's Claude session in a new run folder")
                     Button("Re-run") {
                         if document.project.runConfig(record.run_config) != nil { document.selectedRunConfigID = record.run_config }
-                        document.runs.requestRun()
+                        document.runs.requestRun(audioReview: record.kind == "audio_review", audioOutput: auditionedOutput)
                     }
                     .disabled(document.runs.isRunning || !AppState.shared.claudeAvailable)
                     .help("Run this run config again")
@@ -637,8 +686,8 @@ struct RunResultView: View {
         .task(id: record.id + record.status) { load() }
         .sheet(isPresented: $showRevise) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Revise this run").font(.title3.weight(.semibold))
-                Text("Say what to change. Claude continues from this run's edit and audio, and writes a new run folder linked to this one.").font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(record.kind == "audio_review" ? "Revise this Audio Review" : "Revise this run").font(.title3.weight(.semibold))
+                Text(record.kind == "audio_review" ? "Say what to change in the soundtrack. Claude mixes it again, reusing audio that hasn't changed, into a new review; this take stays playable to compare." : "Say what to change. Claude continues from this run's edit and audio, and writes a new run folder linked to this one.").font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 TextEditor(text: $feedback).font(.body).frame(height: 120).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
                     .accessibilityLabel("Feedback")
                 HStack {
@@ -647,7 +696,7 @@ struct RunResultView: View {
                     Button("Continue…") {
                         showRevise = false
                         if document.project.runConfig(record.run_config) != nil { document.selectedRunConfigID = record.run_config }
-                        document.runs.requestRun(revise: (record.id, feedback))
+                        document.runs.requestRun(revise: (record.id, feedback), audioReview: record.kind == "audio_review", audioOutput: auditionedOutput)
                     }
                     .keyboardShortcut(.defaultAction)
                     .disabled(feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -656,6 +705,9 @@ struct RunResultView: View {
             .padding(20).frame(width: 460)
         }
     }
+
+    /// The output an Audio Review auditioned, so a revision or a re-run auditions the same one.
+    private var auditionedOutput: String? { results?.outputs.first?.output_id }
 
     private func load() {
         let folder = record.folder
@@ -677,7 +729,9 @@ struct RunResultView: View {
     private var resultsTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if let outputs = results?.outputs, !outputs.isEmpty {
+                if record.kind == "audio_review", let outputs = results?.outputs, !outputs.isEmpty {
+                    ForEach(outputs) { o in AudioReviewCard(file: o, failed: record.status == "failed" || record.status == "cancelled") }
+                } else if let outputs = results?.outputs, !outputs.isEmpty {
                     ForEach(outputs) { o in OutputCard(file: o) }
                 } else if record.kind == "dry_run" {
                     Text("A dry run renders no outputs. Its findings are in Summary and in the Validation tab.").font(.callout).foregroundStyle(.secondary)
@@ -719,6 +773,142 @@ struct RunResultView: View {
         }
     }
 }
+
+/// What stopped a failed run: the missing audio source or the credit cap, named from its logs.
+struct BlockingInputsView: View {
+    var items: [BlockingInput]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Blocked by").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ForEach(items, id: \.self) { b in
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(b.title).font(.callout.weight(.medium))
+                        Text(b.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    }
+                } icon: {
+                    Image(systemName: b.kind == "credit_cap" ? "gauge.with.dots.needle.100percent" : "waveform.slash").foregroundStyle(.red)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .copyable("Copy this") { "\(b.title): \(b.detail)" }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// An Audio Review's result (FEAT-neat-osprey-DKK7): the auditioned output, play/pause, a seek
+/// bar with the position and the duration. It plays the saved WAV; nothing is built again.
+struct AudioReviewCard: View {
+    var file: OutputFile
+    /// A failed or stopped review offers nothing to play, even if a file is there.
+    var failed: Bool
+    @StateObject private var audio = AudioReviewPlayer()
+
+    private var playable: Bool { file.exists && !file.incomplete && !failed }
+    private var total: Double { audio.duration ?? file.duration_s ?? 0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(file.output_name).font(.callout.weight(.semibold))
+                    Text("Soundtrack of this output" + (file.platform.isEmpty ? "" : " · \(file.platform)")).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if file.exists && !playable { Text("Incomplete").font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 1).background(Color.orange, in: Capsule()).foregroundStyle(.white) }
+            }
+            if playable {
+                HStack(spacing: 10) {
+                    Button { audio.toggle() } label: { Image(systemName: audio.isPlaying ? "pause.fill" : "play.fill").frame(width: 18) }
+                        .help(audio.isPlaying ? "Pause" : "Play")
+                        .accessibilityLabel(audio.isPlaying ? "Pause" : "Play")
+                    Text(Fmt.elapsed(audio.position)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .accessibilityLabel("Position \(Fmt.elapsed(audio.position))")
+                    Slider(value: Binding(get: { min(audio.position, max(0.01, total)) }, set: { audio.seek(to: $0) }), in: 0...max(0.01, total))
+                        .controlSize(.small)
+                        .accessibilityLabel("Seek")
+                        .accessibilityValue("\(Fmt.elapsed(audio.position)) of \(Fmt.elapsed(total))")
+                    Text(Fmt.elapsed(total)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .accessibilityLabel("Duration \(Fmt.elapsed(total))")
+                }
+                Text([Fmt.duration(total), Fmt.bytes(file.bytes), (file.path as NSString).lastPathComponent].joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                HStack {
+                    Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)]) }
+                    Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }
+                    Button("Copy Path") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(file.path, forType: .string)
+                    }
+                }
+                .controlSize(.small)
+            } else {
+                Label(failed ? "The soundtrack wasn't completed, so there is nothing to play." : "The soundtrack wasn't produced.", systemImage: "xmark.circle").font(.callout).foregroundStyle(.red)
+            }
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Audio Review of \(file.output_name)")
+        .task(id: file.path) { if playable { await audio.load(URL(fileURLWithPath: file.path)) } }
+        .onDisappear { audio.stop() }
+    }
+}
+
+/// Plays one saved WAV and publishes its position for the seek bar.
+@MainActor
+final class AudioReviewPlayer: ObservableObject {
+    @Published private(set) var isPlaying = false
+    @Published private(set) var position: Double = 0
+    @Published private(set) var duration: Double?
+    private(set) var player: AVPlayer?
+    private var observer: Any?
+    private var endObserver: NSObjectProtocol?
+
+    func load(_ url: URL) async {
+        stop()
+        let item = AVPlayerItem(url: url)
+        let p = AVPlayer(playerItem: item)
+        player = p
+        observer = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.1, preferredTimescale: 600), queue: .main) { [weak self] t in
+            MainActor.assumeIsolated { if self?.isPlaying == true { self?.position = t.seconds.isFinite ? t.seconds : 0 } }
+        }
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.isPlaying = false
+                self?.seek(to: 0)
+            }
+        }
+        if let d = try? await AVURLAsset(url: url).load(.duration), d.seconds.isFinite, d.seconds > 0 { duration = d.seconds }
+    }
+
+    func toggle() {
+        guard let player else { return }
+        if isPlaying { player.pause() } else { player.play() }
+        isPlaying.toggle()
+    }
+
+    func seek(to seconds: Double) {
+        position = max(0, seconds)
+        player?.seek(to: CMTime(seconds: position, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    func stop() {
+        player?.pause()
+        if let observer { player?.removeTimeObserver(observer) }
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        observer = nil
+        endObserver = nil
+        player = nil
+        isPlaying = false
+    }
+}
+
 
 /// One rendered output: player, duration, size, QA verdict, Reveal, Open With, Copy path.
 struct OutputCard: View {

@@ -412,3 +412,8 @@ These touch code the macOS app also uses. The macOS paths are unchanged in behav
 - `media.rs` and the schema: `file_id_windows`; prefix rewrite is case-insensitive for Windows prefixes. `project.rs`: reserved Windows names in generated file names.
 - `capture/mod.rs`: recording extension per platform, Windows guarded apps, forward slashes in relative paths. `validation.rs`: the Git Bash blocker (Windows only). `standin.rs`: the paths it reports to Claude use forward slashes (a backslash in `audio\vo-1.json` would be an escape in project.json5). `logs.rs`: redaction also replaces the `C:/…` and Git Bash `/c/…` forms of the home folder and media paths. `platform::os_version`: on Windows, `ver` runs with no console window (the app has none, so one would flash up at each run) and only its version number is kept.
 - `cutline-html`: plain paths and UNC `file://` URLs. CLI: plain progress lines without VT support, a Ctrl-Break handler, and `vs-fake-claude` running Bash through Git Bash. End-to-end tests that were Unix-only now run on Windows.
+
+## 2026-11-22 — Bundle a serif (TASK-honest-cedar-A73E)
+
+- **Decision:** bundle Source Serif 4 (static Regular, Italic and Bold, from adobe-fonts/source-serif release 4.005, SIL OFL 1.1, `OFL-sourceserif4.txt`) so captions and text cards can be set in a serif without an HTML workaround.
+- **Reason:** a run that asked for Georgia hit `E_FONT_MISSING` and fell back to HTML cards. Static files, because libass uses only a variable font's default instance. `FontDb::get` now prefers upright faces, since `SourceSerif4-It.ttf` sorts before `-Regular.ttf`.

@@ -586,7 +586,13 @@ pub fn call(method: String, args: String) -> R<String> {
         // Settings › Assistant: is Codex installed, compatible and signed in, and which models?
         "codex.check" => {
             let path = opt::<String>(&args, "path")?.unwrap_or_else(|| Settings::load(&library()).codex_path);
-            out(core::codex::check(&path))
+            // the status, plus its finding (code, title, remedy) for Settings to show when not ready
+            let status = core::codex::check(&path);
+            let mut v = serde_json::to_value(&status).unwrap_or(Value::Null);
+            if let Some((code, title, remedy)) = status.finding() {
+                v["finding"] = json!({"code": code, "title": title, "remedy": remedy});
+            }
+            out(v)
         }
         "run.results" => out(core::run::collect::load_results(Utf8Path::new(&arg::<String>(&args, "folder")?))),
         "logs.export" => out(logs::export_logs(
@@ -729,25 +735,33 @@ impl AssistantTurn {
     }
 }
 
-/// Starts one assistant turn. `request_json` is an `AssistantRequest`; the Claude CLI is found
-/// with the path from Settings.
+/// Starts one assistant turn. `request_json` is an `AssistantRequest`. The provider comes from
+/// Settings › Assistant: the Claude CLI or Codex, each found with its path from Settings.
 #[uniffi::export]
 pub fn start_assistant(request_json: String, listener: Box<dyn EventListener>) -> R<Arc<AssistantTurn>> {
     let mut request: AssistantRequest =
         serde_json::from_str(&request_json).map_err(|e| bad(format!("request: {e}")))?;
     let settings = Settings::load(&library());
-    // the provider is read when the turn starts; Codex isn't wired into the assistant yet
-    if settings.provider == video_studio_core::codex::Provider::Codex {
-        return Err(CoreError::Failed {
-            code: "environment".into(),
-            message: video_studio_core::run::prepare::CODEX_NOT_WIRED.into(),
-        });
-    }
     // cutline makes the viewable copies of HEIC/HEIF photos: those in the media list before the
-    // turn, and (with `cutline still`) any other one Claude finds in a folder it may read
+    // turn, and (with `cutline still`) any other one the agent finds in a folder it may read
     if request.cutline.is_none() {
         request.cutline =
             locate::find_cutline(&settings.cutline_path, &settings.cutline_repo).map(|c| Utf8PathBuf::from(c.path));
+    }
+    // The provider is read when the turn starts (FEAT-spry-alpaca-5RQZ). With Codex, the session
+    // token is `codex:<thread>`; a Claude session token starts a separate Codex conversation and
+    // the other way round.
+    if settings.provider == video_studio_core::codex::Provider::Codex {
+        let executable =
+            video_studio_core::codex::find_codex(&settings.codex_path).ok_or_else(|| CoreError::Failed {
+                code: "environment".into(),
+                message: "Codex isn't installed. Install the Codex CLI, or set its path in Settings › Assistant."
+                    .into(),
+            })?;
+        let setup =
+            assistant::CodexSetup { executable, model: video_studio_core::codex::model_for(&settings.codex_model) };
+        let handle = assistant::start_codex(&request, &setup, Arc::new(ChatSink(listener)))?;
+        return Ok(Arc::new(AssistantTurn { handle }));
     }
     let claude = locate::find_claude(&settings.claude_path).ok_or_else(|| CoreError::Failed {
         code: "environment".into(),
@@ -817,6 +831,13 @@ mod tests {
         let mut s = c("settings.load", json!({}));
         s["words_per_minute"] = json!(170);
         assert_eq!(c("settings.save", json!({"settings": s}))["words_per_minute"], 170);
+        // Settings › Assistant: a Codex that isn't there comes back with its finding and remedy
+        let codex = c("codex.check", json!({"path": root.join("no-codex-here")}));
+        assert_eq!(
+            (codex["state"].as_str(), codex["finding"]["code"].as_str()),
+            (Some("missing"), Some("codex_missing"))
+        );
+        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Install the Codex CLI"));
         // validation with a supplied environment (no tools are run)
         let env =
             json!({"claude": null, "signed_in": null, "cutline": null, "doctor": null, "min_claude_version": "2.1.0"});

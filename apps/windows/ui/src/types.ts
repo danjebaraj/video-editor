@@ -41,6 +41,12 @@ export interface Settings {
   effort: string;
   web_access_default: boolean;
   headless_question_timeout_s: number;
+  /** Who drives the assistant and runs: `claude` (default) or `codex` (FEAT-spry-alpaca-5RQZ). */
+  provider: string;
+  /** Path to the `codex` CLI; empty means PATH. */
+  codex_path: string;
+  /** The Codex model; empty means Codex's default. Claude's models are kept apart. */
+  codex_model: string;
   cutline_path: string;
   cutline_repo: string;
   default_quality: string;
@@ -126,6 +132,16 @@ export interface LogFile { name: string; path: string; bytes: number; source: st
 export interface RunResults {
   folder: string; exists: boolean; run: any; outputs: OutputFile[]; summary?: string; readiness?: Readiness;
   project_json5?: string; logs: LogFile[];
+  /** What stopped a failed run, when its logs name it (a missing audio source, the credit cap). */
+  blocking?: BlockingInput[];
+}
+/** One input or limit that stopped a run: `missing_source` or `credit_cap`. */
+export interface BlockingInput { kind: string; detail: string }
+/** FFI `codex.check`: the readiness of Codex, its models, and what to do when it isn't ready. */
+export interface CodexStatus {
+  state: 'missing' | 'incompatible' | 'sign_in_required' | 'ready';
+  plan?: string | null; models?: { id: string; name: string; is_default: boolean }[]; detail?: string;
+  finding?: { code: string; title: string; remedy: string };
 }
 
 export interface BrandSummary { id: string; name: string }

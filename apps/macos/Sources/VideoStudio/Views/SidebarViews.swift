@@ -362,6 +362,7 @@ struct RunsList: View {
                             HStack(spacing: 4) {
                                 Text(r.run_config_name ?? r.run_config).lineLimit(1)
                                 if r.kind == "dry_run" { Text("Dry run").font(.caption2).padding(.horizontal, 4).background(Color(nsColor: .quaternaryLabelColor), in: Capsule()) }
+                                if r.kind == "audio_review" { Text("Audio Review").font(.caption2).padding(.horizontal, 4).background(Color(nsColor: .quaternaryLabelColor), in: Capsule()) }
                                 if r.previous_run != nil { Image(systemName: "arrow.uturn.backward").font(.caption2).foregroundStyle(.secondary).help("A revision of an earlier run") }
                             }
                             HStack(spacing: 4) {
@@ -397,7 +398,7 @@ struct RunsList: View {
                             .disabled(!FileManager.default.fileExists(atPath: r.folder + "/logs"))
                     }
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(r.kind == "dry_run" ? "Dry run" : "Run") \(r.run_config_name ?? ""), \(RunStatus.label(r.status)), \(Fmt.when(r.started))")
+                    .accessibilityLabel("\(r.kind == "dry_run" ? "Dry run" : r.kind == "audio_review" ? "Audio Review" : "Run") \(r.run_config_name ?? ""), \(RunStatus.label(r.status)), \(Fmt.when(r.started))")
                 }
             }
             .listStyle(.sidebar)

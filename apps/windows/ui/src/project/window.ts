@@ -186,6 +186,7 @@ export class ProjectWindow {
         live
           ? button(live.stopping ? 'Stopping…' : 'Stop', () => this.runs.stop(), { glyph: Icons.stop, title: 'Stop (Shift+F5)', disabled: live.stopping })
           : button('Run', () => this.runs.requestRun(), { appearance: 'primary', glyph: Icons.play, title: 'Run (F5)', disabled: !claudeAvailable() || this.runs.preparing.value }),
+        live ? null : button('Audio Review', () => this.runs.requestRun(undefined, { audioReview: true }), { glyph: Icons.audio, title: 'Build and play the soundtrack from the spec, without rendering video (Ctrl+F5)', disabled: !claudeAvailable() || this.runs.preparing.value }),
         h('span', { class: 'grow' }),
         chip,
         iconButton(this.previewOn.value ? Icons.code : Icons.preview, this.previewOn.value ? 'Show source (Ctrl+/)' : 'Show preview (Ctrl+/)', () => (this.previewOn.value = !this.previewOn.value), { 'aria-pressed': String(this.previewOn.value) }),
@@ -484,6 +485,7 @@ export class ProjectWindow {
       case 'inspector_run': this.showTab('run'); break;
       case 'validate': this.showTab('validation'); d.validate(); break;
       case 'run': this.runs.requestRun(); break;
+      case 'audio_review': this.runs.requestRun(undefined, { audioReview: true }); break;
       case 'stop': if (this.runs.running) this.runs.stop(); else this.assistant.stop(); break;
       case 'relink': this.showRelink(); break;
       case 'gather_info': this.showTab('claude'); this.assistant.gatherInfo(); break;
@@ -508,6 +510,7 @@ export class ProjectWindow {
     const ctrlAlt = (e.ctrlKey && e.altKey) || e.getModifierState('AltGraph');
     const map: [boolean, string][] = [
       [e.key === 'F5' && !e.shiftKey && !e.ctrlKey, 'run'],
+      [e.key === 'F5' && e.ctrlKey && !e.shiftKey, 'audio_review'],
       [e.key === 'F5' && e.shiftKey, 'stop'],
       [e.ctrlKey && e.shiftKey && k === 'b', 'validate'],
       [e.ctrlKey && !e.shiftKey && !e.altKey && (k === '/' || e.code === 'Slash'), 'toggle_preview'],
