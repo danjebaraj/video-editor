@@ -151,8 +151,10 @@ struct AssistantSettings: View {
                 .accessibilityLabel("Provider")
                 Text("Used by the Assistant in every open project and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 500, alignment: .leading)
                 Text("Set up each provider's executable and models in Settings › Claude and Settings › Codex. Projects keep separate model choices for each, so switching back restores them.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 500, alignment: .leading)
             }
         }
     }

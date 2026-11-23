@@ -70,12 +70,19 @@ Settings › Assistant selects the app-wide provider. Settings › Claude and Se
 ## Fix steps
 
 - [ ] Separate the three Settings destinations in `apps/macos/Sources/VideoStudio/Views/SettingsView.swift` and the corresponding Windows Settings UI. Retain saved paths, model choices and the active provider when loading existing settings.
+  - [x] macOS, seen in the running app: Settings › Assistant has only the provider, and Settings › Claude and Settings › Codex each have their executable, readiness and models. Opening the Codex pane with Claude selected left the provider on Claude, and a restart kept the provider and both panes' values.
+  - [ ] Windows.
 - [ ] Make the model picker and new-session header in `ClaudePanel.swift`, and the project and production pickers in `InspectorViews.swift`, resolve choices from the active provider. Apply the same behavior to the corresponding Windows project controls. Populate Codex choices from its model list with an explicit Codex default option, including when the list is empty.
+  - [x] macOS labels, seen in the running app: the Assistant header, Project › Models (Spec assistant, Dry run) and Outputs › Production show "Codex default" under Codex, and Fable, Settings default (Haiku) and Opus under Claude. Both open project windows update on a switch without reopening.
+  - [ ] macOS Codex menu contents (the model list, an empty list): not opened, because menus can't be opened in background control.
+  - [ ] Windows.
 - [x] Use consistent model precedence for display and dispatch: an applicable override for the active provider, its saved default, then its CLI default. Treat legacy Claude overrides as Claude-specific. Keep them available when switching back. Trace assistant dispatch in `crates/video-studio-ffi/src/lib.rs` and run preparation in `crates/video-studio-core/src/run/prepare.rs` so a visible choice takes effect.
 
 ## Verification
 
 - [ ] Repeat the reproduction with two open projects. Switch providers without reopening either project. Check the Outputs picker, Project model controls and new Assistant session in each. Switch back to Claude and verify the original Fable and Opus choices return.
+  - [x] macOS: two projects open, Claude → Codex → Claude → Codex without reopening either. Every surface showed the effective model each time, and Fable and Opus came back on Claude. Both project files kept `assistant: fable` and `production_model: opus`.
+  - [ ] Windows.
 - [x] Use the fake Codex app server with Claude unavailable. Start an assistant turn and a production run from Test. For Codex default, verify the outbound requests delegate model selection to Codex. Repeat with an explicit model from the fake catalog and verify its exact ID reaches the server for the corresponding operation.
 - [ ] Restart with Codex selected. Verify the provider choice, provider-specific overrides and both Settings panes persist. Opening Claude settings leaves the next assistant turn on Codex. Verify these flows on macOS and Windows.
 
@@ -125,3 +132,15 @@ The fix adds a Settings › Codex pane and narrows Settings › Assistant to the
 - Not done: the first and third Verification boxes need the running apps on macOS and Windows.
 - Files: `crates/video-studio-core/src/{project.rs,run/prepare.rs,assistant.rs}`, `crates/video-studio-ffi/src/lib.rs`, `crates/video-studio-cli/src/main.rs`, `crates/video-studio-cli/tests/{codex_runs.rs,codex_ffi.rs,codex_assistant.rs,e2e_tools.rs}`, `schema/cutproj.schema.json`, `apps/windows/ui/src/generated/project.ts`.
 - Commit/PR: `6f953b7` (core) and `5d23593` (desktop) on branch `fix-BUG-fond-crane-62ZP`.
+
+### 2026-11-22 — macOS check in the running app
+
+- Tested the debug build against a throwaway library and two copies of a test project (Claude assistant model Fable, production model Opus), with a ready Codex at `/opt/homebrew/bin/codex`. No assistant turns or runs were started.
+- Seen working: the three Settings panes; opening the Codex pane doesn't select Codex; and the provider switching across two open windows, with the labels described in the sub-boxes above. After a restart with Codex selected, the provider stayed Codex and both projects still showed "Codex default". The in-app self test passed all 117 checks, including the two new model-resolution checks.
+- Fixed: the explanation in Settings › Assistant ran past the window's right edge. Its captions now have a width limit (`SettingsView.swift`), and they wrap in the rebuilt app.
+- Not checked:
+  - the Codex menu contents
+  - opening Settings › Claude while Codex is selected and then starting a turn
+  - Windows
+  - real outbound Codex requests from the app
+- Commit/PR: "BUG-fond-crane-62ZP: wrap the Settings › Assistant captions; record the macOS check" on branch `fix-assistant-settings-wrap`.
