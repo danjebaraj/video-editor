@@ -42,7 +42,11 @@ check_cutline() { # $1 = configuration. The app must pick the cutline just built
   want="${$(realpath "$REPO/bin/cutline"):-$REPO/bin/cutline}"
   got=$("$vs" cutline --json | plutil -extract cutline.path raw -o - - 2>/dev/null)
   if [[ $got == "$want" ]]; then
-    echo "✔ the app uses $want"
+    if [[ $("$vs" cutline --json | plutil -extract current raw -o - - 2>/dev/null) != true ]]; then
+      echo "✘ $want isn't the cutline build this Video Studio expects (cutline build-info)." >&2
+      return 1
+    fi
+    echo "✔ the app uses $want, built from the same sources"
     return 0
   fi
   echo "✘ the app would use ${got:-no cutline} instead of the one just built ($want)." >&2

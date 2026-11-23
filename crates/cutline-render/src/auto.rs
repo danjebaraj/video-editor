@@ -438,7 +438,7 @@ pub fn silences(l: &Loaded, asset: &str, from: f64, to: f64, noise_db: f64, min_
     if let Some(a) = cur {
         v.push((from + a, to));
     }
-    cache.put_json(&key, &v)?;
+    cache.store_json(&key, &v);
     Ok(v)
 }
 
@@ -696,7 +696,7 @@ pub fn beats_of(path: &std::path::Path, fingerprint: &str) -> Result<Option<cutl
     let tc = cutline_deps::toolchain()?;
     let samples = cutline_audio::wav::decode_mono(tc, path, cutline_audio::beats::RATE)?;
     let b = cutline_audio::beats::detect(&samples);
-    cache.put_json(&key, &b)?;
+    cache.store_json(&key, &b);
     Ok(b)
 }
 

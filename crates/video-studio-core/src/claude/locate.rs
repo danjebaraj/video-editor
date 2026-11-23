@@ -340,12 +340,32 @@ pub struct CutlineInfo {
     /// Builds from before FEAT-0004 report the same version but lack it (BUG-0002).
     #[serde(default)]
     pub still: bool,
+    /// Whether this cutline has `cutline audio`, which mixes an Audio Review's soundtrack.
+    /// Builds from before it report the same version (BUG-deft-lily-344X).
+    #[serde(default)]
+    pub audio: bool,
+    /// The fingerprint of the source it was built from (`cutline build-info`); `None` for a
+    /// build from before that command, which is out of date by definition.
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// The fingerprint of the cutline source this Video Studio was built with. A cutline that
+/// reports another one was built from other sources (BUG-deft-lily-344X).
+pub const EXPECTED_CUTLINE_SOURCE: &str = env!("VIDEO_STUDIO_CUTLINE_SOURCE");
+
+impl CutlineInfo {
+    /// Whether it was built from the cutline source this Video Studio expects.
+    pub fn current(&self) -> bool {
+        self.source.as_deref() == Some(EXPECTED_CUTLINE_SOURCE)
+    }
 }
 
 /// Finds cutline: the path from Settings, PATH, then `bin/cutline` in the configured repo.
-/// `VIDEO_STUDIO_CUTLINE` overrides everything. Of the working candidates, the first one that
-/// has `cutline still` wins; when none has it, the first working one is returned with
-/// `still: false`, so an old copy earlier on the list doesn't hide a current build (BUG-0002).
+/// `VIDEO_STUDIO_CUTLINE` overrides everything. Of the working candidates, the first one built
+/// from the expected source wins; otherwise the first with the most of `cutline still` and
+/// `cutline audio`, so an old copy earlier on the list doesn't hide a current build (BUG-0002,
+/// BUG-deft-lily-344X).
 pub fn find_cutline(custom_path: &str, repo: &str) -> Option<CutlineInfo> {
     let forced = std::env::var("VIDEO_STUDIO_CUTLINE").ok().filter(|s| !s.is_empty());
     let common: &[&str] = if cfg!(windows) {
@@ -363,7 +383,7 @@ pub fn find_cutline(custom_path: &str, repo: &str) -> Option<CutlineInfo> {
         list.push(repo.join(format!("bin/cutline{exe}")));
         list.push(repo.join(format!("target/release/cutline{exe}")));
     }
-    let mut first: Option<CutlineInfo> = None;
+    let mut best: Option<(u8, CutlineInfo)> = None;
     for c in list {
         if !is_executable(&c) {
             continue;
@@ -371,18 +391,42 @@ pub fn find_cutline(custom_path: &str, repo: &str) -> Option<CutlineInfo> {
         let Some((0, out, _)) = run_with_env(&c, &["--version"], None, Duration::from_secs(15)) else { continue };
         let version = out.split_whitespace().last().unwrap_or("").to_string();
         let still = has_still(&c);
-        let info = CutlineInfo { path: paths::canonical_or_normal(&c).to_string(), version, still };
-        if still {
+        let audio = has_audio(&c);
+        let source = build_source(&c);
+        let info = CutlineInfo { path: paths::canonical_or_normal(&c).to_string(), version, still, audio, source };
+        if info.current() {
             return Some(info);
         }
-        first.get_or_insert(info);
+        let score = still as u8 + audio as u8;
+        match &best {
+            Some((b, _)) if *b >= score => {}
+            _ => best = Some((score, info)),
+        }
     }
-    first
+    best.map(|(_, info)| info)
 }
 
 /// Whether `cutline still --help` succeeds (clap rejects an unknown subcommand with exit 2).
 pub fn has_still(cutline: &Utf8Path) -> bool {
-    matches!(run_with_env(cutline, &["still", "--help"], None, Duration::from_secs(15)), Some((0, _, _)))
+    has_subcommand(cutline, "still")
+}
+
+/// Whether `cutline audio --help` succeeds: Audio Reviews mix their soundtrack with it.
+pub fn has_audio(cutline: &Utf8Path) -> bool {
+    has_subcommand(cutline, "audio")
+}
+
+/// The source fingerprint a cutline reports (`cutline build-info --json`), if it has the command.
+pub fn build_source(cutline: &Utf8Path) -> Option<String> {
+    let Some((0, out, _)) = run_with_env(cutline, &["build-info", "--json"], None, Duration::from_secs(15)) else {
+        return None;
+    };
+    let v: serde_json::Value = serde_json::from_str(out.trim()).ok()?;
+    v["source"].as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+fn has_subcommand(cutline: &Utf8Path, name: &str) -> bool {
+    matches!(run_with_env(cutline, &[name, "--help"], None, Duration::from_secs(15)), Some((0, _, _)))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -491,6 +535,33 @@ mod tests {
         assert!(found.still, "{found:?}");
         assert_ne!(found.path, paths::canonical_or_normal(&old).to_string());
         assert_eq!(found.version, "0.1.0");
+        assert!(found.audio, "the stub answers every --help");
+    }
+
+    /// BUG-deft-lily-344X: a build with `still` but no `audio` doesn't hide one that has both.
+    #[cfg(unix)]
+    #[test]
+    fn find_cutline_prefers_one_with_audio() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(t.path().to_path_buf()).unwrap();
+        // `still` but no `audio`, like the 0.1.0 build in bin/ before `cutline audio`
+        let old = root.join("old/cutline");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(
+            &old,
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cutline 0.1.0'; exit 0; fi\nif [ \"$1\" = still ]; then exit 0; fi\necho \"error: unrecognized subcommand '$1'\" >&2; exit 2\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(has_still(&old) && !has_audio(&old));
+
+        let repo = root.join("repo");
+        std::fs::create_dir_all(repo.join("bin")).unwrap();
+        std::fs::write(repo.join("bin/cutline"), "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'cutline 0.2.0'; exit 0; fi\nexit 0\n").unwrap();
+        std::fs::set_permissions(repo.join("bin/cutline"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let found = find_cutline(old.as_str(), repo.as_str()).unwrap();
+        assert!(found.still && found.audio, "{found:?}");
     }
 
     #[test]

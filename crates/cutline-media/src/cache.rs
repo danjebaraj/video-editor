@@ -30,6 +30,15 @@ impl Cache {
         serde_json::from_str(&s).ok()
     }
 
+    /// Saves a value when it can. The cache only saves time, so a folder this process may not
+    /// write (a command run in Codex's sandbox can't write the global cache) must not fail the
+    /// work being cached: that failed `cutline beats` with "Operation not permitted".
+    pub fn store_json<T: Serialize>(&self, key: &str, v: &T) {
+        if let Err(e) = self.put_json(key, v) {
+            tracing::warn!("couldn't save to the cache in {}: {e:#}", self.root.display());
+        }
+    }
+
     pub fn put_json<T: Serialize>(&self, key: &str, v: &T) -> Result<PathBuf> {
         let p = self.path(key, "json");
         std::fs::create_dir_all(p.parent().unwrap())?;
@@ -107,6 +116,22 @@ pub fn parse_age(s: &str) -> Option<Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cache_that_cant_be_written_doesnt_fail_the_caller() {
+        let d = std::env::temp_dir().join(format!("cutline-cache-test-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let blocked = d.join("not-a-folder");
+        std::fs::write(&blocked, b"").unwrap();
+        let c = Cache::new(blocked.join("beats"));
+        assert!(c.put_json("abcd", &1).is_err());
+        c.store_json("abcd", &1);
+        assert_eq!(c.get_json::<i32>("abcd"), None);
+        let ok = Cache::new(d.join("beats"));
+        ok.store_json("abcd", &2);
+        assert_eq!(ok.get_json::<i32>("abcd"), Some(2));
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test]
     fn ages() {
         assert_eq!(parse_age("30d"), Some(Duration::from_secs(30 * 86400)));

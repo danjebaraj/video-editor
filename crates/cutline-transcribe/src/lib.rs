@@ -55,7 +55,7 @@ pub fn get(
     let work = cache.root.join("work").join(&key);
     let mut t = whisper::transcribe(tc, media, model, lang, &work)?;
     t.asset = asset_id.into();
-    cache.put_json(&key, &t)?;
+    cache.store_json(&key, &t);
     let _ = std::fs::remove_dir_all(&work);
     Ok(Some((t, Source::Whisper(model.into()))))
 }
@@ -68,6 +68,6 @@ pub fn put_cache(cache: &Cache, fingerprint: &str, model: &str, lang: Option<&st
         lang.unwrap_or("auto").as_bytes(),
         b"transcript-v1",
     ]);
-    cache.put_json(&key, t)?;
+    cache.store_json(&key, t);
     Ok(())
 }

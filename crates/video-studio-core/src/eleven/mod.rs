@@ -50,6 +50,24 @@ impl Pricing {
     }
 }
 
+/// The stored ElevenLabs key. A key store that can't be read, or a lookup from inside Codex's
+/// sandbox (which the key store answers as "no entry"), is said as such: the user's key isn't
+/// missing and they shouldn't be asked to add it again (BUG-deft-lily-344X).
+pub fn stored_key(secrets: &dyn Secrets) -> Result<String> {
+    match secrets.get(ELEVEN_KEY) {
+        Ok(Some(k)) if !k.trim().is_empty() => Ok(k.trim().to_string()),
+        Err(e) => Err(Error::Environment(format!(
+            "Couldn't read the ElevenLabs key from the system key store ({e}). This is a problem reading the key, not a missing key: don't ask the user to add it again; use media files for voice and music in this run."
+        ))),
+        Ok(_) if crate::run::relay::sandboxed() => Err(Error::Environment(
+            "The ElevenLabs key couldn't be looked up: this command ran inside Codex's sandbox, which can't reach the system key store or the network. The key in Settings is unchanged: don't ask the user to add it again; use media files for voice and music in this run.".into(),
+        )),
+        Ok(_) => Err(Error::Environment(
+            "No ElevenLabs API key is set. Ask the user to add one in Settings › ElevenLabs; until then, use media files for voice and music.".into(),
+        )),
+    }
+}
+
 /// What the app tells the helper about the run it is part of. Written to
 /// `<library>/run-contexts/<run id>/context.json`; Claude can't read that folder.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -94,6 +112,10 @@ pub struct HelperContext {
     /// Set when the run may drive and record apps (`video-studio capture …`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<crate::capture::CaptureSettings>,
+    /// Codex runs: where the helper hands ElevenLabs calls to the host, since Codex's sandbox
+    /// blocks the key store and the network (BUG-deft-lily-344X; see `run::relay`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_dir: Option<Utf8PathBuf>,
 }
 
 impl HelperContext {
@@ -138,10 +160,7 @@ impl HelperContext {
         if let Some(k) = self.test_api_key.as_deref().filter(|k| !k.is_empty()) {
             return Ok(k.to_string());
         }
-        match secrets.get(ELEVEN_KEY)? {
-            Some(k) if !k.trim().is_empty() => Ok(k.trim().to_string()),
-            _ => Err(Error::Environment("No ElevenLabs API key is set. Ask the user to add one in Settings › ElevenLabs; until then, use media files for voice and music.".into())),
-        }
+        stored_key(secrets)
     }
 
     /// The Cartesia client, when Cartesia speaks the voice-over.
@@ -558,6 +577,7 @@ mod tests {
             base_url: Some("http://127.0.0.1:9".into()),
             test_api_key: None,
             capture: None,
+            relay_dir: None,
         }
     }
 

@@ -203,6 +203,16 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "build-info" => {
+            // built from the sources the app expects, unless FAKE_CUTLINE_SOURCE says otherwise
+            let source = std::env::var("FAKE_CUTLINE_SOURCE")
+                .unwrap_or_else(|_| video_studio_core::claude::locate::EXPECTED_CUTLINE_SOURCE.to_string());
+            println!("{}", json!({"version": "0.1.0-fake", "source": source}));
+        }
+        "audio" if args.iter().any(|a| a == "--help" || a == "-h") => {
+            // the app checks for `audio` this way before an Audio Review (BUG-deft-lily-344X)
+            println!("Usage: cutline audio <PROJECT> --out <OUT>");
+        }
         "audio" => {
             // a WAV of 1 s of 48 kHz stereo float: a tone, or silence for a project marked SILENT
             let Some(text) = read() else {

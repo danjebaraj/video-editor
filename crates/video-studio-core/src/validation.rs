@@ -529,9 +529,54 @@ fn check_claude(c: &mut Ctx, env: &dyn EnvProbe) {
     }
 }
 
+/// How to get the cutline a stale one should be: rebuild it from the repo it came from, when
+/// there is one.
+fn stale_cutline_fix(info: &CutlineInfo, settings: &Settings) -> String {
+    let built = match &info.source {
+        None => format!("{} ({}) is from before cutline reported its build, so it predates this Video Studio.", info.path, info.version),
+        Some(s) => format!("{} was built from other cutline sources (build {s}; this Video Studio expects {}).", info.path, locate::EXPECTED_CUTLINE_SOURCE),
+    };
+    let from_path = Utf8Path::new(&info.path).ancestors().find(|d| d.join("scripts/build-and-release.sh").is_file()).map(Utf8Path::to_path_buf);
+    let configured = Some(crate::paths::expand_tilde(settings.cutline_repo.trim()))
+        .filter(|r| !settings.cutline_repo.trim().is_empty() && r.join("scripts/build-and-release.sh").is_file());
+    match from_path.or(configured) {
+        Some(repo) => format!("{built} Rebuild it: run `scripts/build-and-release.sh` in {repo}. If you just did, rebuild Video Studio from the same checkout too, so both come from the same sources."),
+        None => format!("{built} Install the cutline that comes with this version of Video Studio, or point Settings › cutline at it."),
+    }
+}
+
 fn check_cutline_env(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, needs_audio: bool) {
     let env = input.env;
-    match env.cutline() {
+    let cutline = env.cutline();
+    let stale = cutline.as_ref().filter(|i| !i.current());
+    if let Some(info) = stale {
+        // cutline's version rarely changes, so a stale build looked current until a run needed
+        // a command it didn't have (BUG-deft-lily-344X).
+        c.add(
+            "cutline_stale",
+            None,
+            Severity::Blocker,
+            "environment",
+            "cutline isn't the build this Video Studio expects".into(),
+            Some(stale_cutline_fix(info, input.settings)),
+            FixLink::target("settings", "cutline"),
+        );
+    }
+    if let Some(info) =
+        cutline.as_ref().filter(|i| i.current() && input.kind == RunKind::AudioReview && !i.audio)
+    {
+        // Found by a real run: the assistant generated the voice-over, then had no way to mix it.
+        c.add(
+            "cutline_no_audio",
+            None,
+            Severity::Blocker,
+            "environment",
+            "cutline can't mix an Audio Review".into(),
+            Some(format!("{} has no `cutline audio`, which mixes the soundtrack into outputs/audio-review.wav. Update it (rebuild or reinstall), or point Settings › cutline at a newer build.", info.path)),
+            FixLink::target("settings", "cutline"),
+        );
+    }
+    match cutline {
         None => c.add(
             "cutline_missing",
             None,
@@ -541,7 +586,7 @@ fn check_cutline_env(c: &mut Ctx, input: &ValidateInput, est: &mut Estimates, ne
             Some("Set the cutline path in Settings › cutline, or put `cutline` on your PATH.".into()),
             FixLink::target("settings", "cutline"),
         ),
-        Some(info) if !info.still => {
+        Some(info) if !info.still && info.current() => {
             c.add(
                 "cutline_outdated",
                 None,
@@ -1518,7 +1563,13 @@ impl Default for FakeEnv {
                 git_bash: Some("bash".into()),
             }),
             signed_in: Some(true),
-            cutline: Some(CutlineInfo { path: "/bin/cutline".into(), version: "0.1.0".into(), still: true }),
+            cutline: Some(CutlineInfo {
+                path: "/bin/cutline".into(),
+                version: "0.1.0".into(),
+                still: true,
+                audio: true,
+                source: Some(locate::EXPECTED_CUTLINE_SOURCE.into()),
+            }),
             doctor: Some(DoctorSummary { ok: true, ..Default::default() }),
             free: Some(500_000_000_000),
             writable: true,
@@ -1864,6 +1915,26 @@ mod tests {
         assert!(has(&f.run(), "cutline_doctor", Severity::Blocker));
         f.env = FakeEnv::default();
         assert!(!has(&f.run(), "cutline_outdated", Severity::Warning));
+        // BUG-deft-lily-344X: a cutline without `cutline audio` blocks an Audio Review only
+        f.env.cutline.as_mut().unwrap().audio = false;
+        assert!(has(&f.run_kind(RunKind::AudioReview), "cutline_no_audio", Severity::Blocker));
+        assert!(!f.run().issues.iter().any(|i| i.rule == "cutline_no_audio"), "production renders, it doesn't need it");
+        f.env = FakeEnv::default();
+        assert!(!f.run_kind(RunKind::AudioReview).issues.iter().any(|i| i.rule == "cutline_no_audio"));
+        assert!(!f.run().issues.iter().any(|i| i.rule == "cutline_stale"), "the expected build passes");
+        // a cutline built from other sources, or from before `build-info`, blocks every run
+        for source in [Some("0123456789abcdef".to_string()), None] {
+            f.env.cutline.as_mut().unwrap().source = source;
+            let r = f.run();
+            assert!(has(&r, "cutline_stale", Severity::Blocker));
+            let fix = r.issues.iter().find(|i| i.rule == "cutline_stale").unwrap().detail.clone().unwrap();
+            assert!(fix.contains("/bin/cutline"), "{fix}");
+        }
+        f.env.cutline.as_mut().unwrap().audio = false;
+        let r = f.run_kind(RunKind::AudioReview);
+        assert!(has(&r, "cutline_stale", Severity::Blocker));
+        assert!(!r.issues.iter().any(|i| i.rule == "cutline_no_audio"), "one blocker says it, not two");
+        f.env = FakeEnv::default();
         f.env = FakeEnv::default();
         f.env.doctor =
             Some(DoctorSummary { ok: false, missing_required: vec!["filter xfade".into()], ..Default::default() });

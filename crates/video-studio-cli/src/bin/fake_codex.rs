@@ -17,7 +17,9 @@
 //! Steps:
 //! - `{"say": "text"}`: an agent message, streamed in two deltas.
 //! - `{"command": "cutline render x"}`: a command execution that asks for approval (as
-//!   `bash -lc '…'`); accepted commands really run (`sh -c` in the thread's folder).
+//!   `bash -lc '…'`); accepted commands really run (`sh -c` in the thread's folder). With
+//!   `"sandboxed": true` it runs as in Codex's macOS sandbox: `CODEX_SANDBOX=seatbelt` and
+//!   `CODEX_SANDBOX_NETWORK_DISABLED=1` set, and the test key store out of reach (an empty one).
 //! - `{"write": {"path": "p", "content": "c"}}`, `{"edit": {"path": "p", "edits": [["old",
 //!   "new"], …]}}`: a file change that asks for approval and is applied when accepted.
 //! - `{"patch": {"id": 2, "files": [{"path": "p", "content": "c"}, …], "complete": "ok"}}`: one
@@ -25,6 +27,9 @@
 //!   reason). When accepted, `complete` decides what follows: `ok` writes the files and reports
 //!   the item completed, `fail` writes nothing and reports it failed, `withhold` writes nothing
 //!   and never reports it.
+//! - `{"finish_patch": 2}`: a patch withheld earlier (by its request ID) is applied and reported
+//!   completed now.
+//! - `{"sleep": 500}`: wait that many milliseconds.
 //! - `{"ask": {"id": "q-1", "questions": [{"id", "header", "question", "options"}]}}`:
 //!   `item/tool/requestUserInput` with that request ID; the answer is echoed as a message.
 //! - `{"request": {"id": "x", "method": "…", "params": {…}}}`: any server request.
@@ -53,6 +58,8 @@ struct Fake {
     interrupted: bool,
     /// The current turn's input text.
     input: String,
+    /// Withheld patches by request ID: item ID, changes and files.
+    withheld: Vec<(Value, String, Vec<Value>, Vec<(PathBuf, String)>)>,
 }
 
 fn send(v: Value) {
@@ -198,7 +205,14 @@ impl Fake {
             );
             let answer = self.wait(&rid)?;
             if answer["result"]["decision"] == "accept" {
-                let out = shell().arg("-c").arg(cmd).current_dir(&self.cwd).output();
+                let mut sh = shell();
+                sh.arg("-c").arg(cmd).current_dir(&self.cwd);
+                if s["sandboxed"].as_bool() == Some(true) {
+                    sh.env("CODEX_SANDBOX", "seatbelt")
+                        .env("CODEX_SANDBOX_NETWORK_DISABLED", "1")
+                        .env("VIDEO_STUDIO_TEST_SECRETS", self.cwd.join(".unreachable-key-store.json"));
+                }
+                let out = sh.output();
                 let (code, text) = match out {
                     Ok(o) => (
                         o.status.code().unwrap_or(-1),
@@ -263,7 +277,10 @@ impl Fake {
                 "declined"
             } else {
                 match p["complete"].as_str().unwrap_or("ok") {
-                    "withhold" => return Some(()),
+                    "withhold" => {
+                        self.withheld.push((rid.clone(), item_id, changes, files));
+                        return Some(());
+                    }
                     "fail" => "failed",
                     _ => {
                         for (path, content) in &files {
@@ -280,6 +297,21 @@ impl Fake {
                 "item/completed",
                 json!({"type": "fileChange", "id": item_id, "changes": changes, "status": status}),
             );
+        } else if let Some(rid) = s.get("finish_patch") {
+            let at = self.withheld.iter().position(|w| &w.0 == rid)?;
+            let (_, item_id, changes, files) = self.withheld.remove(at);
+            for (path, content) in &files {
+                if let Some(d) = path.parent() {
+                    let _ = std::fs::create_dir_all(d);
+                }
+                let _ = std::fs::write(path, content);
+            }
+            self.item(
+                "item/completed",
+                json!({"type": "fileChange", "id": item_id, "changes": changes, "status": "completed"}),
+            );
+        } else if let Some(ms) = s["sleep"].as_u64() {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
         } else if let Some(a) = s.get("ask") {
             let rid = a["id"].clone();
             let item_id = self.next_id("item");
@@ -368,6 +400,7 @@ fn main() {
         seq: 0,
         interrupted: false,
         input: String::new(),
+        withheld: Vec::new(),
     };
     while let Some(msg) = f.read() {
         let (Some(id), Some(method)) = (msg.get("id").cloned(), msg["method"].as_str().map(str::to_string)) else {

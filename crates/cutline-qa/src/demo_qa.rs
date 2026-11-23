@@ -141,7 +141,7 @@ fn read_frame(l: &Loaded, engine: Engine, c: &TClip, t: f64, work: &std::path::P
     anyhow::ensure!(o.status.success() && png.is_file(), "frame grab failed: {}", String::from_utf8_lossy(&o.stderr));
     let lines = ocr::recognize(engine, &png)?;
     let _ = std::fs::remove_file(&png);
-    cache.put_json(&key, &lines)?;
+    cache.store_json(&key, &lines);
     Ok(lines)
 }
 

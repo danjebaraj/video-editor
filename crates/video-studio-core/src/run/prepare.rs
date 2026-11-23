@@ -222,6 +222,8 @@ pub struct Prepared {
     pub request: RunRequest,
     /// Set when Codex drives the run instead of Claude Code (`options` is then unused).
     pub codex: Option<crate::codex::agent::CodexOptions>,
+    /// The `video-studio` binary, which the host runs for relayed ElevenLabs calls.
+    pub helper: Utf8PathBuf,
 }
 
 fn unique_folder(parent: &Utf8Path, name: &str) -> Utf8PathBuf {
@@ -468,6 +470,8 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
             .app_capture
             .enabled
             .then(|| crate::capture::CaptureSettings { apps: project.app_capture.apps.clone() }),
+        // Codex's sandbox blocks the key store and the network: ElevenLabs calls go to the host
+        relay_dir: codex_exe.is_some().then(|| logs.join(super::relay::DIR)),
     };
     let context_file = context_dir.join("context.json");
     paths::write_json_atomic(&context_file, &helper_context)?;
@@ -725,6 +729,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         helper_context,
         request: request.clone(),
         codex,
+        helper: env.helper.clone(),
     })
 }
 

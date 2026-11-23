@@ -75,6 +75,7 @@ fn drives_and_records_the_test_app() {
         base_url: None,
         test_api_key: None,
         capture: Some(Default::default()),
+        relay_dir: None,
     };
     let ctx_dir = w.lib.join("run-contexts/run_capture");
     std::fs::create_dir_all(&ctx_dir).unwrap();

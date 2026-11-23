@@ -507,8 +507,16 @@ struct Driver {
     /// Why the host stopped the turn itself (a tool the run doesn't provide), and by when the
     /// turn must have ended.
     aborted: Option<(String, Instant)>,
-    /// Accepted file changes Codex hasn't reported applied yet: item → (paths, deadline).
-    applying: HashMap<String, (Vec<String>, Instant)>,
+    /// Accepted file changes Codex hasn't reported applied yet, by item; each has its own
+    /// deadline (BUG-deft-lily-344X).
+    applying: HashMap<String, Applying>,
+}
+
+/// An accepted file change waiting for Codex to report it applied.
+#[derive(Debug, Clone)]
+struct Applying {
+    paths: Vec<String>,
+    accepted: Instant,
 }
 
 /// The key a server request ID is known by on the host side.
@@ -882,8 +890,7 @@ impl Driver {
         } else if let Some(i) = &item {
             // accepted: written only once Codex reports it applied, within the deadline
             let paths = self.file_items.get(i).cloned().unwrap_or_default();
-            let by = Instant::now() + self.options.patch_timeout.unwrap_or(PATCH_TIMEOUT);
-            self.applying.insert(i.clone(), (paths, by));
+            self.applying.insert(i.clone(), Applying { paths, accepted: Instant::now() });
         }
         let decision = match (v1, &denied) {
             (false, None) => json!("accept"),
@@ -1130,11 +1137,9 @@ impl Driver {
         path.strip_prefix(&self.options.working_dir).map(|r| r.to_string()).unwrap_or_else(|_| p.to_string())
     }
 
-    /// The paths of accepted changes not yet reported applied, `a`, `b` and `c`; `None` when
-    /// there are none.
-    fn unapplied_paths(&self) -> Option<String> {
-        let mut paths: Vec<String> =
-            self.applying.values().flat_map(|(p, _)| p.iter().map(|p| self.shown_path(p))).collect();
+    /// `a`, `b` and `c` for some changes' paths, relative to the working folder.
+    fn paths_of<'a>(&self, items: impl Iterator<Item = &'a Applying>) -> Option<String> {
+        let mut paths: Vec<String> = items.flat_map(|a| a.paths.iter().map(|p| self.shown_path(p))).collect();
         if paths.is_empty() {
             return None;
         }
@@ -1144,16 +1149,40 @@ impl Driver {
         Some(shown.join(", "))
     }
 
-    /// The failure for an accepted change past its deadline, once.
+    /// The paths of accepted changes not yet reported applied; `None` when there are none.
+    fn unapplied_paths(&self) -> Option<String> {
+        self.paths_of(self.applying.values())
+    }
+
+    /// The failure for an accepted change past its own deadline, once. Only the expired change
+    /// is said to have timed out; younger ones still waiting are named apart, with their own
+    /// age (BUG-deft-lily-344X).
     fn overdue_change(&mut self) -> Option<String> {
-        if self.aborted.is_some() || !self.applying.values().any(|(_, by)| Instant::now() >= *by) {
+        let limit = self.options.patch_timeout.unwrap_or(PATCH_TIMEOUT);
+        let now = Instant::now();
+        if self.aborted.is_some() || !self.applying.values().any(|a| now.duration_since(a.accepted) >= limit) {
             return None;
         }
-        let paths = self.unapplied_paths()?;
-        let secs = self.options.patch_timeout.unwrap_or(PATCH_TIMEOUT).as_secs_f64();
-        Some(format!(
-            "Codex's change to {paths} was accepted but Codex didn't report it applied within {secs:.0} s, so the run was stopped. Whether those files are on disk is unknown; nothing after them ran. Try the run again, and update the Codex CLI if this keeps happening."
-        ))
+        let mut waiting: Vec<&Applying> = self.applying.values().collect();
+        waiting.sort_by_key(|a| a.accepted);
+        let (expired, younger): (Vec<&Applying>, Vec<&Applying>) =
+            waiting.into_iter().partition(|a| now.duration_since(a.accepted) >= limit);
+        let paths = self.paths_of(expired.iter().copied())?;
+        let mut why = format!(
+            "Codex's change to {paths} was accepted but Codex didn't report it applied within {:.0} s, so the run was stopped. Whether {} on disk is unknown.",
+            limit.as_secs_f64(),
+            if expired.iter().map(|a| a.paths.len()).sum::<usize>() == 1 { "that file is" } else { "those files are" },
+        );
+        for a in &younger {
+            if let Some(p) = self.paths_of(std::iter::once(*a)) {
+                why.push_str(&format!(
+                    " A later change, to {p}, accepted {:.0} s before the stop, hadn't been reported applied either; it is abandoned and unconfirmed.",
+                    now.duration_since(a.accepted).as_secs_f64()
+                ));
+            }
+        }
+        why.push_str(" Try the run again, and update the Codex CLI if this keeps happening.");
+        Some(why)
     }
 
     fn item_completed(&mut self, item: &Value) {
