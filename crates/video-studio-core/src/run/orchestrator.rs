@@ -433,6 +433,10 @@ impl Driver {
         let mut turns_over = false;
 
         // Codex or Claude Code, as chosen when the run started (FEAT-spry-alpaca-5RQZ)
+        if self.p.codex.is_some() {
+            // traced, not counted: it's true of every Codex run, so it doesn't change the outcome
+            self.emit(EventKind::Warning { message: crate::codex::agent::READS_UNCHECKED_WARNING.into() });
+        }
         let launched = match &self.p.codex {
             Some(c) => CodexProcess::start(c, &self.p.prompt).map(|(p, rx)| (AgentProcess::Codex(p), rx)),
             None => ClaudeProcess::start(&self.p.options, &self.p.prompt).map(|(p, rx)| (AgentProcess::Claude(p), rx)),

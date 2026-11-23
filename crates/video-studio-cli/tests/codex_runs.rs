@@ -102,6 +102,14 @@ fn a_codex_run_produces_the_outputs_with_tool_progress() {
     let run_json: Value = serde_json::from_str(&std::fs::read_to_string(run.join("logs/run.json")).unwrap()).unwrap();
     assert_eq!(run_json["provider"], "codex");
     assert!(run_json["claude_session"].as_str().unwrap().starts_with("codex:thr-"));
+    // the known read gap is traced on start, without counting as a run warning
+    let trace = std::fs::read_to_string(run.join("logs/codex.jsonl")).unwrap();
+    assert!(
+        trace.lines().take(3).any(|l| l.contains("\"host_warning\"") && l.contains("codex_reads_unchecked")),
+        "{trace}"
+    );
+    let events = std::fs::read_to_string(run.join("logs/events.ndjson")).unwrap();
+    assert!(events.contains("considers safe and read-only without asking"), "{events}");
     let record = w.load_project().runs.pop().unwrap();
     assert!(record.claude_session.unwrap().starts_with("codex:"));
 }

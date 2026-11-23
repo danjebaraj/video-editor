@@ -31,10 +31,10 @@ Video Studio users can select their locally authenticated Croduction run. Claude
 - [x] In `assistant.rs`, pass the current editor text, selection, project summary and authorized attachments through the existing prompt and session preparation. Stream replies, display questions and return answers with the original request ID. Apply proposed edits to the session copy and send its diff through the existing per-hunk review.
 - [x] Start a Codex thread for a new conversation and resume its ID only for the same project, conversation and provider. If resume fails, identify the lost context in the chat before starting a fresh thread with the current editor state.
 - [x] In `run/orchestrator.rs`, give Codex the prepared run workspace, manifest and production instructions. Route tool progress, diagnostics and collected outputs to the existing run inspector. Determine success through the existing output checks.
-- [ ] Enforce the existing assistant and run permissions for Codex, including read-only reference media, workspace write limits, command allowlists, web access settings and ElevenLabs helper credit limits. Disable inherited tools that bypass these controls. Deny unsupported permission requests and return a protocol error for unknown server requests.
+- [x] Enforce the existing assistant and run permissions for Codex, including read-only reference media, workspace write limits, command allowlists, web access settings and ElevenLabs helper credit limits. Disable inherited tools that bypass these controls. Deny unsupported permission requests and return a protocol error for unknown server requests.
   - [x] Unknown server requests get a JSON-RPC error (−32601) carrying the request's own ID (`AppServer::request`).
   - [x] Mapping the broker's permissions (read-only media, workspace writes, command allowlist, web access, credit limits) onto Codex approvals and sandbox settings, and disabling tools that bypass them.
-  - [ ] Commands Codex itself classes as safe and read-only run without an approval request under `untrusted`, so the broker's command allowlist and read limits don't apply to them (the sandbox still blocks writes outside the workspace). Close this gap, for example with an approval policy that asks for every command, checked against the real codex-cli.
+  - [ ] Commands Codex itself classes as safe and read-only run without an approval request under `untrusted`, so the broker's command allowlist and read limits don't apply to them (the sandbox still blocks writes outside the workspace). — dropped: the owner chose to keep this behaviour (2026-11-22). Every Codex start writes the warning `codex_reads_unchecked` to its trace (`codex.jsonl` for runs, `<session>.codex-last-run.jsonl` for the assistant), and runs also show it as a warning event in `events.ndjson` and the inspector.
 - [x] On Stop, send `turn/interrupt` for the active thread and turn and use existing process-tree cleanup if it fails to stop. On disconnect or protocol failure, release pending questions and approvals, record a terminal error and allow a new operation to start.
 
 ## Acceptance criteria
@@ -144,3 +144,14 @@ The reference project at `/Users/danieljebaraj/Documents/git/Just Notes` documen
 
 - The permissions requirement was unchecked again and an open sub-box added: commands Codex classes as safe and read-only skip the broker's command allowlist and read limits.
 - Commit/PR: core work in `32b97ad`, merged into branch `implement-approved-plans-2026-11-22-pass2`.
+
+### 2026-11-22 (read gap traced)
+
+- Implemented: as the owner asked, the read gap stays, and it's traced when Codex starts.
+  - `codex::agent::READS_UNCHECKED_WARNING` is written as a `host_warning` (`codex_reads_unchecked`) line at the top of every Codex trace.
+  - A Codex run also emits it as a warning event. It isn't counted in the run's warnings, so it doesn't turn every Codex run into "succeeded with warnings".
+  - The permissions requirement is checked; the gap sub-box is marked dropped by the owner.
+- Checked before the owner's decision: codex-cli 0.171.0 accepted `features` overrides (`shell_tool`, `unified_exec`, `view_image`, `apps`, `plugins`, `browser_use`, `computer_use`, `hooks` and others set to false) and a `run_command` dynamic tool on an ephemeral `thread/start`, with `experimentalApi`. No turn was run. That remains a way to close the gap later.
+- Verified: `video-studio-cli --test codex_runs` asserts the trace line and the run event; `codex_assistant` and the core Codex tests pass.
+- Files: `crates/video-studio-core/src/{codex/agent.rs,run/orchestrator.rs}`, `crates/video-studio-cli/tests/codex_runs.rs`.
+- Commit/PR: "FEAT-spry-alpaca-5RQZ: trace the Codex read gap on start" on branch `implement-approved-plans-2026-11-22-pass2`.

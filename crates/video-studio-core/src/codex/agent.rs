@@ -56,6 +56,12 @@ pub fn token_for(thread: &str) -> String {
     format!("{TOKEN_PREFIX}{thread}")
 }
 
+/// Known gap (FEAT-spry-alpaca-5RQZ): under the `untrusted` approval policy, Codex runs the
+/// commands it classes as safe and read-only without asking, so the broker's command allowlist
+/// and read limits don't apply to them. The sandbox still blocks writes outside the working
+/// folder. Every Codex start records this in its trace (`codex.jsonl`).
+pub const READS_UNCHECKED_WARNING: &str = "Codex runs commands it considers safe and read-only without asking, so Video Studio's command allowlist and read limits don't apply to them. It still can't write outside its working folder.";
+
 /// What a Codex turn needs.
 #[derive(Debug, Clone, Default)]
 pub struct CodexOptions {
@@ -258,6 +264,10 @@ impl CodexProcess {
             cmds: Mutex::new(cmd_tx),
         });
         shared.log_line(&json!({"type": "host_start", "ts": crate::timeutil::now_rfc3339(), "argv": [options.executable.as_str(), "app-server"], "cwd": options.working_dir}).to_string());
+        shared.log_line(
+            &json!({"type": "host_warning", "code": "codex_reads_unchecked", "text": READS_UNCHECKED_WARNING})
+                .to_string(),
+        );
 
         let err_text = Arc::new(Mutex::new(String::new()));
         let err_sink = err_text.clone();
