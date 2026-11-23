@@ -124,6 +124,19 @@ impl ffi::EventListener for Listener {
     }
 }
 
+/// Settings are app-wide: after one window saves them, every other open window gets the saved
+/// settings on the `settings_changed` topic and re-checks the selected provider
+/// (FEAT-spry-alpaca-5RQZ). Runs and turns already started keep their provider.
+fn broadcast_settings(from: u64, settings: Value) {
+    app::post(move || {
+        for w in app::windows() {
+            if w.id() != from {
+                w.event(Topic::SettingsChanged, settings.clone());
+            }
+        }
+    });
+}
+
 /// Handles one message from a window's page (on the UI thread).
 pub fn handle(window: u64, text: &str) {
     init();
@@ -149,8 +162,13 @@ pub fn handle(window: u64, text: &str) {
     match req.method {
         Method::Core => on_worker(window, id, move || {
             let a: CoreArgs = parse(&args)?;
+            let saves_settings = a.method == "settings.save";
             let out = ffi::call(a.method, a.args.to_string()).map_err(from_core)?;
-            serde_json::from_str(&out).map_err(|e| err("decode", e.to_string()))
+            let v: Value = serde_json::from_str(&out).map_err(|e| err("decode", e.to_string()))?;
+            if saves_settings {
+                broadcast_settings(window, v.clone());
+            }
+            Ok(v)
         }),
         Method::StorePastedImage => on_worker(window, id, move || {
             let a: PastedImageArgs = parse(&args)?;

@@ -245,7 +245,7 @@ enum MediaActions {
     }
 }
 
-/// The selected media item: role, notes and tags for Claude, and where the file is.
+/// The selected media item: role, notes and tags for the Assistant, and where the file is.
 struct MediaDetail: View {
     @ObservedObject var document: ProjectDocument
     var item: MediaItem
@@ -268,8 +268,8 @@ struct MediaDetail: View {
                 Text("Not set").tag("")
                 ForEach(MediaItem.roles, id: \.key) { Text($0.label).tag($0.key) }
             }
-            .help("A hint for Claude about how this file is meant to be used")
-            TextField("Notes for Claude", text: Binding(get: { item.notes ?? "" }, set: { v in set { $0.notes = v.isEmpty ? nil : v } }), axis: .vertical)
+            .help("A hint for the Assistant about how this file is meant to be used")
+            TextField("Notes for Assistant", text: Binding(get: { item.notes ?? "" }, set: { v in set { $0.notes = v.isEmpty ? nil : v } }), axis: .vertical)
                 .lineLimit(1...3)
             TextField("Tags, separated by commas", text: Binding(get: { (item.tags ?? []).joined(separator: ", ") }, set: { v in
                 let tags = v.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }

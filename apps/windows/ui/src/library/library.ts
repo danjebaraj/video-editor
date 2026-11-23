@@ -65,7 +65,7 @@ export async function mount(root: HTMLElement) {
         if (f) importBrand(f);
       }, { appearance: 'subtle' }));
     const b = brands.value.find((x) => x.id === selBrand.value);
-    clear(body, h('div', { class: 'master-detail' }, h('div', { class: 'master-col' }, brands.value.length ? list : emptyState('No brand presets', 'A preset holds logos, colors, fonts, voice and rules for Claude.'), footer), h('div', { class: 'detail' }, b ? brandEditor(structuredClone(b)) : emptyState('Select a brand preset'))));
+    clear(body, h('div', { class: 'master-detail' }, h('div', { class: 'master-col' }, brands.value.length ? list : emptyState('No brand presets', 'A preset holds logos, colors, fonts, voice and rules for the Assistant.'), footer), h('div', { class: 'detail' }, b ? brandEditor(structuredClone(b)) : emptyState('Select a brand preset'))));
   }
 
   function brandEditor(b: BrandPreset): HTMLElement {
@@ -145,8 +145,8 @@ export async function mount(root: HTMLElement) {
             toast('The voice settings must be a JSON object.', 'error');
           }
         }))),
-      h('section', null, h('h3', null, 'Rules for Claude'), (() => {
-        const t = h('textarea', { rows: 6, 'aria-label': 'Rules for Claude' }, b.rules) as HTMLTextAreaElement;
+      h('section', null, h('h3', null, 'Rules for the Assistant'), (() => {
+        const t = h('textarea', { rows: 6, 'aria-label': 'Rules for the Assistant' }, b.rules) as HTMLTextAreaElement;
         t.addEventListener('input', () => set(() => (b.rules = t.value)));
         return t;
       })()),

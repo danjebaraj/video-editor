@@ -112,6 +112,7 @@ fn a_codex_run_produces_the_outputs_with_tool_progress() {
     assert!(events.contains("considers safe and read-only without asking"), "{events}");
     let record = w.load_project().runs.pop().unwrap();
     assert!(record.claude_session.unwrap().starts_with("codex:"));
+    assert_eq!(record.provider, Some(video_studio_core::codex::Provider::Codex), "history shows the provider used");
 }
 
 #[test]

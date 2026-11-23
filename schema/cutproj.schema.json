@@ -844,6 +844,21 @@
       },
       "type": "object"
     },
+    "Provider": {
+      "description": "The assistant and production provider (Settings › Assistant).",
+      "oneOf": [
+        {
+          "const": "claude",
+          "description": "Claude Code (the default, also for settings written before the choice existed).",
+          "type": "string"
+        },
+        {
+          "const": "codex",
+          "description": "Codex App Server.",
+          "type": "string"
+        }
+      ]
+    },
     "Quality": {
       "enum": [
         "draft",
@@ -1005,6 +1020,17 @@
             "string",
             "null"
           ]
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Provider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The provider that ran it, captured at start (FEAT-spry-alpaca-5RQZ). Absent in runs\nrecorded before the choice existed, which Claude Code ran."
         },
         "run_config": {
           "type": "string"

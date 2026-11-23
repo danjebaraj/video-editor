@@ -144,8 +144,8 @@ final class AssistantModel: ObservableObject {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true
-        panel.prompt = "Share with Claude"
-        panel.message = "Claude can read (never change) the folders you choose while helping with the spec."
+        panel.prompt = "Share with Assistant"
+        panel.message = "The Assistant can read (never change) the folders you choose while helping with the spec."
         guard panel.runModal() == .OK else { return }
         let picked = panel.urls.map { $0.standardizedFileURL.path }
         document.update { p in
@@ -215,7 +215,7 @@ final class AssistantModel: ObservableObject {
         return (prompt, labels)
     }
 
-    /// Validation › Ask Claude to Fix: opens the Claude tab with the request written, for every
+    /// Validation › Ask Assistant to Fix: opens the Assistant tab with the request written, for every
     /// finding or for one. The findings themselves go along as context when it is sent.
     func askToFix(issue: ValidationIssue? = nil) {
         guard !isRunning, let r = document.report else { return }
@@ -233,12 +233,14 @@ final class AssistantModel: ObservableObject {
     func send(_ rawText: String, displayText: String? = nil) -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isRunning else { return false }
-        guard AppState.shared.claudeAvailable || !extraEnv.isEmpty else {
-            Prompt.error("Claude Code isn't available.", detail: "Install the Claude Code CLI, then choose Re-check in Settings › Claude.")
+        // The provider selected now (Settings › Assistant); the core reads it again as the turn starts.
+        guard AppState.shared.assistantAvailable || !extraEnv.isEmpty else {
+            let problem = AppState.shared.assistantSetupProblem
+            Prompt.error(problem.title, detail: problem.detail)
             return false
         }
         if document.review.pending != nil {
-            Prompt.error("Review Claude's last change first.", detail: "Accept or reject the pending changes to the spec before sending another message.")
+            Prompt.error("Review the Assistant's last change first.", detail: "Accept or reject the pending changes to the spec before sending another message.")
             return false
         }
         guard document.save() else { return false }
@@ -280,7 +282,7 @@ final class AssistantModel: ObservableObject {
         do {
             turn = try startAssistant(requestJson: json, listener: forwarder)
         } catch {
-            append(ChatMessage(role: .error, text: "Couldn't start Claude: \(error.localizedDescription)"))
+            append(ChatMessage(role: .error, text: "Couldn't start the Assistant: \(error.localizedDescription)"))
             runSessionID = nil
             return false
         }
@@ -378,7 +380,7 @@ final class AssistantModel: ObservableObject {
             if let d = e.duration_ms { s += String(format: " · %.1fs", Double(d) / 1000) }
             append(ChatMessage(role: .usage, text: s))
         case "error":
-            if !stopRequested { append(ChatMessage(role: .error, text: e.message ?? "Claude reported an error.")) }
+            if !stopRequested { append(ChatMessage(role: .error, text: e.message ?? "The Assistant reported an error.")) }
         case "finished":
             if let s = e.session_id { mutate(runSessionID) { $0.claudeSession = s } }
             cancelPendingQuestions()

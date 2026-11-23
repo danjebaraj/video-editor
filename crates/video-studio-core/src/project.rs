@@ -372,6 +372,10 @@ pub struct RunRecord {
     pub cost_usd: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eleven_credits: Option<u64>,
+    /// The provider that ran it, captured at start (FEAT-spry-alpaca-5RQZ). Absent in runs
+    /// recorded before the choice existed, which Claude Code ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<crate::codex::Provider>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -965,6 +969,7 @@ mod tests {
             previous_run: None,
             cost_usd: None,
             eleven_credits: None,
+            provider: None,
         });
         p.save(&path).unwrap();
         assert_eq!(unused_sidecar_images(&p, &path), vec![stored.clone()], "pasted image isn't referenced by the spec");
@@ -1003,6 +1008,7 @@ mod tests {
             previous_run: None,
             cost_usd: None,
             eleven_credits: None,
+            provider: Some(crate::codex::Provider::Codex),
         };
         record_run(&path, &rec).unwrap();
         let disk = Project::load(&path).unwrap();
@@ -1017,11 +1023,26 @@ mod tests {
         record_run(&path, &done).unwrap();
         let disk = Project::load(&path).unwrap();
         assert_eq!(disk.runs.len(), 1);
+        assert_eq!(disk.runs[0].provider, Some(crate::codex::Provider::Codex), "history keeps the provider");
         assert!(mine.merge_runs_from(&disk));
         assert_eq!(mine.runs[0].status, RunStatus::Succeeded);
         let mut other = disk.clone();
         other.name = "Renamed elsewhere".into();
         assert_eq!(external_change(&base, &other), ExternalChange::Other);
+    }
+
+    /// Runs recorded before the provider choice existed have no `provider` (Claude Code ran them).
+    #[test]
+    fn run_record_provider_is_optional() {
+        let legacy: RunRecord = serde_json::from_value(serde_json::json!({
+            "id": "run_old", "run_config": "rc", "kind": "production", "folder": "/x",
+            "status": "succeeded", "started": "2026-01-01T00:00:00Z", "claude_session": "abc"
+        }))
+        .unwrap();
+        assert_eq!(legacy.provider, None);
+        assert!(serde_json::to_value(&legacy).unwrap().get("provider").is_none(), "legacy records stay unchanged");
+        let codex = RunRecord { provider: Some(crate::codex::Provider::Codex), ..legacy };
+        assert_eq!(serde_json::to_value(&codex).unwrap()["provider"], "codex");
     }
 
     #[test]

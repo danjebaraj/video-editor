@@ -2,7 +2,7 @@
 
 import { h, clear, button, icon, Icons, field, select, textInput, fileName, parentDir, spinner } from '../dom';
 import { core, request, errorText } from '../bridge';
-import { environment, keyStatus, settings, platforms, brands, detect, saveSettings, reloadLibrary, libraryDir } from '../app-state';
+import { environment, keyStatus, settings, platforms, brands, detect, saveSettings, reloadLibrary, libraryDir, provider, providerExecutable, codexStatus, readiness } from '../app-state';
 import { effect } from '../store';
 import { sheet, saveFile, openFiles, openFolders, Filters, toast } from '../dialogs';
 import { INTENTS } from '../types';
@@ -18,7 +18,7 @@ export function mount(root: HTMLElement) {
       h(
         'section',
         { class: 'start-left' },
-        h('div', { class: 'app-title' }, h('img', { src: './icon.png', alt: '', width: 48, height: 48 }), h('div', null, h('h1', null, 'Syncfusion Video Studio'), h('p', { class: 'muted' }, 'Describe a video in Markdown, refine it with Claude, and let Claude Code render it with cutline.'))),
+        h('div', { class: 'app-title' }, h('img', { src: './icon.png', alt: '', width: 48, height: 48 }), h('div', null, h('h1', null, 'Syncfusion Video Studio'), h('p', { class: 'muted' }, 'Describe a video in Markdown, refine it with the Assistant, and let the Assistant render it with cutline.'))),
         h('h2', null, 'Get set up'),
         checklist,
         h('div', { class: 'row' }, button('New Project…', () => newProject(), { appearance: 'primary', glyph: Icons.add }), button('Open…', () => openProject(), { glyph: Icons.openFolder }), button('App Library', () => request('shell.open_window', { kind: 'library' }), { glyph: Icons.library })),
@@ -27,7 +27,7 @@ export function mount(root: HTMLElement) {
     ),
   );
 
-  effect([environment, keyStatus, settings, brands], () => renderChecklist(checklist));
+  effect([environment, keyStatus, settings, brands, codexStatus, readiness], () => renderChecklist(checklist));
   request<string[]>('shell.recent').then((list) => {
     if (!list.length) {
       clear(recentList, h('li', { class: 'muted' }, 'No recent projects'));
@@ -68,8 +68,13 @@ function renderChecklist(list: HTMLElement) {
   const s = settings.value;
   const rows: HTMLElement[] = [];
   const openSettings = (pane: string) => button('Settings…', () => request('shell.open_window', { kind: 'settings', options: { pane } }));
+  if (provider() === 'codex') {
+    // The provider chosen in Settings › Assistant (FEAT-spry-alpaca-5RQZ).
+    const cs = codexStatus.value;
+    rows.push(row(cs ? cs.state === 'ready' : null, 'Codex', !cs ? `Checking ${providerExecutable()}…` : cs.state === 'ready' ? `Ready${cs.plan ? ` (${cs.plan} plan)` : ''}` : `${cs.finding?.title ?? cs.state}: ${providerExecutable()}`, openSettings('assistant')));
+  }
   if (!env) {
-    rows.push(row(null, 'Claude Code', 'Checking…'), row(null, 'cutline', 'Checking…'));
+    rows.push(...(provider() === 'codex' ? [] : [row(null, 'Claude Code', 'Checking…')]), row(null, 'cutline', 'Checking…'));
   } else {
     const c = env.claude;
     let detail = 'Required. Not found. Install it with `irm https://claude.ai/install.ps1 | iex` in PowerShell.';
@@ -81,7 +86,7 @@ function renderChecklist(list: HTMLElement) {
       detail = c.version_text;
       ok = true;
     }
-    rows.push(row(ok, 'Claude Code', detail, openSettings('claude')));
+    if (provider() !== 'codex') rows.push(row(ok, 'Claude Code', detail, openSettings('claude')));
     const cl = env.cutline;
     const cok = !!cl && !!env.doctor?.ok;
     const cdetail = !cl ? 'Required. Not found.' : cok ? `cutline ${cl.version}` : `Missing: ${(env.doctor?.missing_required ?? []).join(', ') || 'run cutline doctor'}`;

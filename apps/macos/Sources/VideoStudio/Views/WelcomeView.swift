@@ -16,7 +16,7 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 72, height: 72).accessibilityHidden(true)
                 Text("Syncfusion Video Studio").font(.title.weight(.semibold))
-                Text("Describe a video in Markdown, refine it with Claude, attach media by reference, then let Claude Code and cutline produce it.")
+                Text("Describe a video in Markdown, refine it with the Assistant, attach media by reference, then let the Assistant and cutline produce it.")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 OnboardingChecklist()
@@ -60,7 +60,7 @@ struct WelcomeView: View {
     }
 }
 
-/// First-run checklist: Claude Code, cutline, the ElevenLabs key, a default brand preset, and
+/// First-run checklist: the selected provider (Claude Code or Codex), cutline, the ElevenLabs key, a default brand preset, and
 /// the default output folder.
 struct OnboardingChecklist: View {
     @ObservedObject private var app = AppState.shared
@@ -70,10 +70,18 @@ struct OnboardingChecklist: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text("SETUP").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            row(ok: app.environment == nil ? nil : (app.claudeAvailable && app.environment?.signed_in != false),
-                title: "Claude Code",
-                detail: app.environment?.claude.map { c in !c.supported ? "Version \(c.version) is too old; \(app.environment?.min_claude_version ?? "") or later is needed" : (app.environment?.signed_in == false ? "Installed, but not signed in: run `claude` in Terminal" : c.version_text) } ?? "Required. Not found.",
-                action: ("Settings…", { AppDelegate.shared.showSettings(pane: "claude") }))
+            // The provider chosen in Settings › Assistant (FEAT-spry-alpaca-5RQZ).
+            if app.usesCodex {
+                row(ok: app.codexStatus.map(\.ready),
+                    title: "Codex",
+                    detail: app.codexStatus.map { s in s.ready ? "Ready" + (s.plan.map { " (\($0) plan)" } ?? "") : "\(s.finding?.title ?? s.state): \(app.providerExecutable)" } ?? "Checking \(app.providerExecutable)…",
+                    action: ("Settings…", { AppDelegate.shared.showSettings(pane: "assistant") }))
+            } else {
+                row(ok: app.environment == nil ? nil : (app.claudeAvailable && app.environment?.signed_in != false),
+                    title: "Claude Code",
+                    detail: app.environment?.claude.map { c in !c.supported ? "Version \(c.version) is too old; \(app.environment?.min_claude_version ?? "") or later is needed" : (app.environment?.signed_in == false ? "Installed, but not signed in: run `claude` in Terminal" : c.version_text) } ?? "Required. Not found (looked for \(app.providerExecutable)).",
+                    action: ("Settings…", { AppDelegate.shared.showSettings(pane: "claude") }))
+            }
             row(ok: app.environment == nil ? nil : (app.environment?.cutline != nil && app.environment?.doctor?.ok == true),
                 title: "cutline",
                 detail: app.environment?.cutline.map { c in app.environment?.doctor?.ok == true ? "Version \(c.version)" : "Tools are missing: \((app.environment?.doctor?.missing_required ?? []).joined(separator: ", "))" } ?? "Required. Not found.",

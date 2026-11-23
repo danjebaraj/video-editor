@@ -150,9 +150,19 @@ struct ShellEnv {
     eleven_key_present: bool,
     eleven_remaining: Option<u64>,
     cartesia_key_present: bool,
+    /// The provider in Settings › Assistant when validation runs (FEAT-spry-alpaca-5RQZ).
+    provider: core::codex::Provider,
+    /// Codex's readiness, when Codex is the provider.
+    codex: Option<core::codex::CodexStatus>,
 }
 
 impl EnvProbe for ShellEnv {
+    fn provider(&self) -> core::codex::Provider {
+        self.provider
+    }
+    fn codex_status(&self) -> Option<core::codex::CodexStatus> {
+        self.codex.clone()
+    }
     fn claude(&self) -> Option<ClaudeInfo> {
         self.env.claude.clone()
     }
@@ -555,6 +565,16 @@ pub fn call(method: String, args: String) -> R<String> {
                 eleven_key_present: opt(&args, "eleven_key_present")?.unwrap_or(false),
                 eleven_remaining: opt(&args, "eleven_remaining")?,
                 cartesia_key_present: opt(&args, "cartesia_key_present")?.unwrap_or(false),
+                provider: settings.provider,
+                // The shell's latest `codex.check` when it sends one, else Codex is asked now.
+                codex: match settings.provider {
+                    core::codex::Provider::Codex => Some(
+                        args.get("codex")
+                            .and_then(|v| serde_json::from_value::<core::codex::CodexStatus>(v.clone()).ok())
+                            .unwrap_or_else(|| core::codex::check(&settings.codex_path)),
+                    ),
+                    core::codex::Provider::Claude => None,
+                },
             };
             let mut report = validation::validate(&ValidateInput {
                 project: &p,
@@ -752,12 +772,10 @@ pub fn start_assistant(request_json: String, listener: Box<dyn EventListener>) -
     // token is `codex:<thread>`; a Claude session token starts a separate Codex conversation and
     // the other way round.
     if settings.provider == video_studio_core::codex::Provider::Codex {
-        let executable =
-            video_studio_core::codex::find_codex(&settings.codex_path).ok_or_else(|| CoreError::Failed {
-                code: "environment".into(),
-                message: "Codex isn't installed. Install the Codex CLI, or set its path in Settings › Assistant."
-                    .into(),
-            })?;
+        let executable = match video_studio_core::codex::resolve_codex(&settings.codex_path) {
+            video_studio_core::codex::CodexLookup::Found(p) => p,
+            other => return Err(CoreError::Failed { code: "environment".into(), message: other.problem() }),
+        };
         let setup =
             assistant::CodexSetup { executable, model: video_studio_core::codex::model_for(&settings.codex_model) };
         let handle = assistant::start_codex(&request, &setup, Arc::new(ChatSink(listener)))?;
@@ -832,12 +850,16 @@ mod tests {
         s["words_per_minute"] = json!(170);
         assert_eq!(c("settings.save", json!({"settings": s}))["words_per_minute"], 170);
         // Settings › Assistant: a Codex that isn't there comes back with its finding and remedy
+        // (a configured path that isn't there is named, with how to fix it)
         let codex = c("codex.check", json!({"path": root.join("no-codex-here")}));
         assert_eq!(
             (codex["state"].as_str(), codex["finding"]["code"].as_str()),
-            (Some("missing"), Some("codex_missing"))
+            (Some("bad_path"), Some("codex_path_invalid"))
         );
-        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Install the Codex CLI"));
+        assert!(codex["finding"]["title"].as_str().unwrap().contains("no-codex-here"));
+        assert!(codex["finding"]["remedy"].as_str().unwrap().contains("Settings › Assistant"));
+        let missing = core::codex::CodexStatus::Missing.finding().unwrap();
+        assert!(missing.0 == "codex_missing" && missing.2.contains("Install the Codex CLI"));
         // validation with a supplied environment (no tools are run)
         let env =
             json!({"claude": null, "signed_in": null, "cutline": null, "doctor": null, "min_claude_version": "2.1.0"});
@@ -853,6 +875,26 @@ mod tests {
                 && rules.contains(&"spec_placeholder"),
             "{rules:?}"
         );
+        // With Codex selected, validation checks the Codex status the shell sends, not Claude
+        let mut s = c("settings.load", json!({}));
+        s["provider"] = json!("codex");
+        c("settings.save", json!({"settings": s.clone()}));
+        let rules_with = |codex: Value| -> Vec<String> {
+            let v = c(
+                "validate",
+                json!({"project": added["project"], "path": path, "run_config": "Default", "environment": env, "codex": codex}),
+            );
+            v["report"]["issues"].as_array().unwrap().iter().map(|i| i["rule"].as_str().unwrap().to_string()).collect()
+        };
+        let ready = rules_with(json!({"state": "ready", "plan": "pro", "models": []}));
+        assert!(!ready.iter().any(|r| r == "claude_missing" || r.starts_with("codex_")), "{ready:?}");
+        let missing = rules_with(json!({"state": "missing", "finding": {"code": "codex_missing"}}));
+        assert!(
+            missing.iter().any(|r| r == "codex_missing") && !missing.iter().any(|r| r == "claude_missing"),
+            "{missing:?}"
+        );
+        s["provider"] = json!("claude");
+        c("settings.save", json!({"settings": s}));
         // errors carry a code
         match call("project.load".into(), json!({"path": root.join("nope.cutproj")}).to_string()) {
             Err(CoreError::Failed { code, .. }) => assert_eq!(code, "io"),

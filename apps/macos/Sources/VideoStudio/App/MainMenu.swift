@@ -79,7 +79,7 @@ enum MainMenu {
         let fmt = add("Format", [])
         // Format commands carry their own shortcuts (FormatCommand.shortcut), so the menu and the
         // editor agree. Toggle Task (⌘Return) stays out of the menu: as a menu shortcut it would
-        // take ⌘Return from the Claude message box, where it sends.
+        // take ⌘Return from the Assistant message box, where it sends.
         let groups: [[FormatCommand]] = [
             [.bold, .italic, .strikethrough, .inlineCode, .link],
             [.heading1, .heading2, .heading3, .heading4, .heading5, .heading6, .paragraph],
@@ -111,7 +111,7 @@ enum MainMenu {
             item("Media", #selector(W.showSidebarTab(_:)), "2", [.command, .control]).with("media"),
             item("Runs", #selector(W.showSidebarTab(_:)), "3", [.command, .control]).with("runs"),
             sep(),
-            item("Claude", #selector(W.showInspectorTab(_:)), "1", [.command, .option]).with("claude"),
+            item("Assistant", #selector(W.showInspectorTab(_:)), "1", [.command, .option]).with("claude"),
             item("Project", #selector(W.showInspectorTab(_:)), "2", [.command, .option]).with("project"),
             item("Outputs", #selector(W.showInspectorTab(_:)), "3", [.command, .option]).with("outputs"),
             item("Validation", #selector(W.showInspectorTab(_:)), "4", [.command, .option]).with("validation"),
@@ -129,7 +129,7 @@ enum MainMenu {
             item("Stop", #selector(W.stopRun(_:)), "."),
             sep(),
             item("Gather Missing Info", #selector(W.gatherInfo(_:)), "g", [.command, .control]),
-            item("New Claude Session", #selector(W.newChatSession(_:)), "n", [.command, .shift]),
+            item("New Assistant Session", #selector(W.newChatSession(_:)), "n", [.command, .shift]),
             sep(),
             item("Reveal Run Folder", #selector(W.revealRunFolder(_:))),
             item("Export Logs…", #selector(W.exportLogs(_:))),

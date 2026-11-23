@@ -174,7 +174,7 @@ export function sidebar(w: ProjectWindow): { el: HTMLElement; tab: Signal<Sideba
       { class: 'media-detail', 'aria-label': `Details of ${m.id}` },
       h('h3', null, m.id),
       field('Role', select(MEDIA_ROLES, m.role ?? '', (v) => d.update((p) => (p.media.find((x) => x.id === m.id)!.role = (v || null) as any)))),
-      field('Notes for Claude', textInput(m.notes ?? '', (v) => d.update((p) => (p.media.find((x) => x.id === m.id)!.notes = v || null)))),
+      field('Notes for Assistant', textInput(m.notes ?? '', (v) => d.update((p) => (p.media.find((x) => x.id === m.id)!.notes = v || null)))),
       field('Tags', textInput((m.tags ?? []).join(', '), (v) => d.update((p) => (p.media.find((x) => x.id === m.id)!.tags = v.split(',').map((t) => t.trim()).filter(Boolean))))),
       h('div', { class: `path small${r?.status === 'missing' ? ' danger' : ''}`, title: path }, path),
       m.probe?.error ? h('div', { class: 'danger small' }, m.probe.error) : null,

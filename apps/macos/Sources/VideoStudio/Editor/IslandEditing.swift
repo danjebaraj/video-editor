@@ -88,7 +88,7 @@ extension EditorController {
     }
 
     func askAboutIsland(_ island: Island) {
-        // Mention the island in the Claude panel's message, ready for the question.
+        // Mention the island in the Assistant panel's message, ready for the question.
         let chat = document.assistant
         if !Islands.mentions(in: chat.draft).contains(island.name) { chat.draft = "@\(island.name) " + chat.draft }
         document.inspectorTab = .claude
@@ -226,7 +226,7 @@ extension EditorController {
 
 // MARK: Hover
 
-/// The small panel shown when hovering an island marker: the name, any problem, and "Ask Claude about this island".
+/// The small panel shown when hovering an island marker: the name, any problem, and "Ask Assistant about this island".
 @MainActor
 enum IslandHover {
     static func view(island: Island?, marker: IslandMarker, problem: IslandProblem?, onAsk: @escaping () -> Void) -> NSView {
@@ -251,8 +251,8 @@ enum IslandHover {
             p.preferredMaxLayoutWidth = 280
             stack.addArrangedSubview(p)
         }
-        if island?.isUsable == true, AppState.shared.claudeAvailable {
-            let b = ClosureButton(title: "Ask Claude about this island", action: onAsk)
+        if island?.isUsable == true, AppState.shared.assistantAvailable {
+            let b = ClosureButton(title: "Ask Assistant about this island", action: onAsk)
             b.bezelStyle = .accessoryBarAction
             b.controlSize = .small
             stack.addArrangedSubview(b)

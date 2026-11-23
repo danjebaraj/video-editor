@@ -7,7 +7,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .claude: return "Claude"
+        case .claude: return "Assistant"
         case .project: return "Project"
         case .outputs: return "Outputs"
         case .validation: return "Validation"
@@ -510,6 +510,8 @@ final class ProjectDocument: ObservableObject, Identifiable {
         var args: Core.Args = ["project": Core.arg(project), "path": fileURL.path, "kind": kind, "run_config": selectedRunConfig?.id,
                                "eleven_key_present": app.keyStatus.present, "cartesia_key_present": app.cartesiaKeyStatus.present, "eleven_remaining": app.keyStatus.remaining.map { NSNumber(value: $0) }]
         if let env = app.environment { args["environment"] = Core.arg(env) }
+        // With Codex selected, validation checks the shared Codex status (FEAT-spry-alpaca-5RQZ).
+        if app.usesCodex, let codex = app.codexStatus { args["codex"] = Core.arg(codex) }
         if let readiness { args["readiness"] = Core.arg(readiness) }
         guard let r: ValidateResult = try? await Core.async("validate", args) else {
             banner = .error("Validation couldn't run.")

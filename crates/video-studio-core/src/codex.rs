@@ -37,18 +37,98 @@ pub enum Provider {
 /// JSON-RPC "method not found": the answer to a server request this client doesn't handle.
 pub const METHOD_NOT_FOUND: i64 = -32601;
 
-/// Finds Codex: the configured executable when set (it must exist), else `codex` on PATH.
-pub fn find_codex(configured: &str) -> Option<Utf8PathBuf> {
+/// Where the macOS app looks for Codex after PATH. An app opened from Finder gets a short PATH
+/// without Homebrew, so these are searched even when PATH is unset.
+pub const MACOS_FALLBACKS: [&str; 2] = ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"];
+
+/// The result of looking for Codex.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodexLookup {
+    Found(Utf8PathBuf),
+    /// The path set in Settings isn't a usable executable.
+    BadPath {
+        path: String,
+        reason: String,
+    },
+    NotFound,
+}
+
+impl CodexLookup {
+    pub fn found(self) -> Option<Utf8PathBuf> {
+        match self {
+            CodexLookup::Found(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// What to tell the user when Codex can't be used.
+    pub fn problem(&self) -> String {
+        match self {
+            CodexLookup::Found(_) => String::new(),
+            CodexLookup::BadPath { path, reason } => format!(
+                "The Codex path in Settings › Assistant, {path}, {reason}. Correct it, or clear it so the app searches for Codex itself."
+            ),
+            CodexLookup::NotFound => {
+                "Codex isn't installed. Install the Codex CLI, or set its path in Settings › Assistant.".into()
+            }
+        }
+    }
+}
+
+/// Why `p` can't be run, or `None` when it's an executable file. Symlinks are followed, so a
+/// link to an executable counts and a broken link doesn't.
+fn not_executable(p: &std::path::Path) -> Option<String> {
+    match std::fs::metadata(p) {
+        Err(_) if std::fs::symlink_metadata(p).is_ok() => Some("is a broken symbolic link".into()),
+        Err(_) => Some("doesn't exist".into()),
+        Ok(m) if !m.is_file() => Some("isn't a file".into()),
+        Ok(_m) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if _m.permissions().mode() & 0o111 == 0 {
+                    return Some("isn't executable".into());
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Looks for Codex: the configured executable when set (it must be runnable; nothing else is
+/// tried), else `codex` in each PATH folder, else the platform's usual install locations
+/// ([`MACOS_FALLBACKS`] on macOS). Settings, readiness, assistant turns and runs all use this.
+pub fn resolve_codex(configured: &str) -> CodexLookup {
+    let fallbacks: Vec<Utf8PathBuf> =
+        if cfg!(target_os = "macos") { MACOS_FALLBACKS.iter().map(Utf8PathBuf::from).collect() } else { Vec::new() };
+    resolve_with(configured, std::env::var_os("PATH").as_deref(), &fallbacks)
+}
+
+/// [`resolve_codex`] with the PATH value and fallbacks given (for tests).
+pub fn resolve_with(configured: &str, path: Option<&std::ffi::OsStr>, fallbacks: &[Utf8PathBuf]) -> CodexLookup {
     let c = configured.trim();
     if !c.is_empty() {
         let p = Utf8PathBuf::from(c);
-        return p.is_file().then_some(p);
+        return match not_executable(p.as_std_path()) {
+            None => CodexLookup::Found(p),
+            Some(reason) => CodexLookup::BadPath { path: c.to_string(), reason },
+        };
     }
-    let path = std::env::var_os("PATH")?;
     let names: &[&str] = if cfg!(windows) { &["codex.exe", "codex.cmd", "codex"] } else { &["codex"] };
-    std::env::split_paths(&path).find_map(|dir| {
-        names.iter().map(|n| dir.join(n)).find(|p| p.is_file()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-    })
+    let on_path =
+        path.into_iter().flat_map(std::env::split_paths).flat_map(|dir| names.iter().map(move |n| dir.join(n)));
+    on_path
+        .chain(fallbacks.iter().map(|f| f.as_std_path().to_path_buf()))
+        .filter(|p| p.is_absolute())
+        .find(|p| not_executable(p).is_none())
+        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .map(CodexLookup::Found)
+        .unwrap_or(CodexLookup::NotFound)
+}
+
+/// The Codex executable to run, if there is one ([`resolve_codex`]).
+pub fn find_codex(configured: &str) -> Option<Utf8PathBuf> {
+    resolve_codex(configured).found()
 }
 
 /// A running `codex app-server`.
@@ -177,6 +257,11 @@ pub struct CodexModel {
 pub enum CodexStatus {
     /// No executable at the configured path, or none on PATH.
     Missing,
+    /// The path set in Settings isn't a usable executable.
+    BadPath {
+        path: String,
+        reason: String,
+    },
     /// It started but doesn't speak the app-server protocol this app uses.
     Incompatible {
         detail: String,
@@ -198,6 +283,11 @@ impl CodexStatus {
                 "codex_missing",
                 "Codex isn't installed".into(),
                 "Install the Codex CLI (it provides `codex app-server`), or set its path in Settings › Assistant, then re-check.".into(),
+            )),
+            CodexStatus::BadPath { path, reason } => Some((
+                "codex_path_invalid",
+                format!("The Codex path {path} {reason}"),
+                "Correct the path in Settings › Assistant, or clear it so the app searches PATH, /opt/homebrew/bin and /usr/local/bin, then re-check.".into(),
             )),
             CodexStatus::Incompatible { detail } => Some((
                 "codex_incompatible",
@@ -234,7 +324,11 @@ pub fn parse_models(v: &Value) -> Vec<CodexModel> {
 
 /// Starts Codex, completes the handshake and reads the account and the models.
 pub fn check(configured_path: &str) -> CodexStatus {
-    let Some(path) = find_codex(configured_path) else { return CodexStatus::Missing };
+    let path = match resolve_codex(configured_path) {
+        CodexLookup::Found(p) => p,
+        CodexLookup::BadPath { path, reason } => return CodexStatus::BadPath { path, reason },
+        CodexLookup::NotFound => return CodexStatus::Missing,
+    };
     let mut s = match AppServer::start(&path) {
         Ok(s) => s,
         Err(_) => return CodexStatus::Missing,
@@ -282,8 +376,76 @@ mod tests {
 
     #[test]
     fn a_missing_executable_is_missing() {
-        assert_eq!(check("/definitely/not/here/codex"), CodexStatus::Missing);
+        assert!(matches!(check("/definitely/not/here/codex"), CodexStatus::BadPath { .. }));
         assert_eq!(CodexStatus::Missing.finding().unwrap().0, "codex_missing");
         assert!(CodexStatus::SignInRequired.finding().unwrap().2.contains("codex login"));
+    }
+
+    /// FEAT-spry-alpaca-5RQZ: the resolver, without the real PATH or the real install folders.
+    #[cfg(unix)]
+    #[test]
+    fn the_resolver_searches_path_then_the_install_folders() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = tempfile::tempdir().unwrap();
+        let dir = |n: &str| {
+            let d = Utf8PathBuf::from_path_buf(root.path().join(n)).unwrap();
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        };
+        let exe = |p: &Utf8Path, mode: u32| {
+            std::fs::write(p, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+        };
+        let (on_path, brew, other, links) = (dir("path"), dir("brew"), dir("other"), dir("links"));
+        let brew_codex = brew.join("codex");
+        exe(&brew_codex, 0o755);
+        let fallbacks = vec![other.join("codex"), brew_codex.clone()];
+        let path_var = std::ffi::OsString::from(on_path.as_str());
+
+        // PATH unset (an app opened from Finder may have none): the install folders, in order
+        assert_eq!(resolve_with("", None, &fallbacks), CodexLookup::Found(brew_codex.clone()));
+        // nothing on PATH: still the install folders
+        assert_eq!(resolve_with("", Some(&path_var), &fallbacks), CodexLookup::Found(brew_codex.clone()));
+        // a non-executable candidate is skipped
+        exe(&on_path.join("codex"), 0o644);
+        assert_eq!(resolve_with("", Some(&path_var), &fallbacks), CodexLookup::Found(brew_codex.clone()));
+        // an executable on PATH comes before the install folders
+        exe(&on_path.join("codex"), 0o755);
+        assert_eq!(resolve_with("", Some(&path_var), &fallbacks), CodexLookup::Found(on_path.join("codex")));
+        // a configured path comes before PATH
+        let configured = other.join("my-codex");
+        exe(&configured, 0o755);
+        assert_eq!(
+            resolve_with(configured.as_str(), Some(&path_var), &fallbacks),
+            CodexLookup::Found(configured.clone())
+        );
+
+        // symlinks are followed: a link to an executable counts, a broken one doesn't
+        let link_path = std::ffi::OsString::from(links.as_str());
+        symlink(&configured, links.join("codex")).unwrap();
+        assert_eq!(resolve_with("", Some(&link_path), &[]), CodexLookup::Found(links.join("codex")));
+        std::fs::remove_file(&configured).unwrap();
+        assert_eq!(resolve_with("", Some(&link_path), &fallbacks), CodexLookup::Found(brew_codex.clone()));
+        assert_eq!(resolve_with("", Some(&link_path), &[]), CodexLookup::NotFound);
+
+        // a configured path that can't run is reported with its path, and nothing else is tried
+        let broken = links.join("codex");
+        match resolve_with(broken.as_str(), Some(&path_var), &fallbacks) {
+            CodexLookup::BadPath { path, reason } => {
+                assert_eq!(path, broken.as_str());
+                assert_eq!(reason, "is a broken symbolic link");
+            }
+            other => panic!("{other:?}"),
+        }
+        let plain = other.join("plain");
+        exe(&plain, 0o600);
+        let bad = resolve_with(plain.as_str(), Some(&path_var), &fallbacks);
+        assert_eq!(bad, CodexLookup::BadPath { path: plain.to_string(), reason: "isn't executable".into() });
+        assert!(bad.problem().contains(plain.as_str()) && bad.problem().contains("Settings › Assistant"));
+        assert_eq!(
+            resolve_with(other.as_str(), None, &[]),
+            CodexLookup::BadPath { path: other.to_string(), reason: "isn't a file".into() }
+        );
+        assert!(MACOS_FALLBACKS == ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]);
     }
 }

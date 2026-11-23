@@ -5,12 +5,12 @@
 import { h, clear, button, iconButton, Icons, field, textInput, numberInput, select, checkbox, bytes, spinner, when } from '../dom';
 import { core, request, errorText, shellInfo } from '../bridge';
 import { Signal, effect } from '../store';
-import { settings, saveSettings, environment, keyStatus, detect, models, libraryDir } from '../app-state';
+import { settings, saveSettings, environment, keyStatus, detect, models, libraryDir, codexStatus, codexChecking, checkCodex } from '../app-state';
 import { openFolders, openFiles, confirm, toast, Filters } from '../dialogs';
 import { modelPicker, effortPicker } from '../widgets';
 import { copyable } from '../text-tools';
 import { finishEditor, filledFinish, sameFinish, DEFAULT_FINISH } from '../finish';
-import type { Settings, CodexStatus } from '../types';
+import type { Settings } from '../types';
 
 type Pane = 'general' | 'finish' | 'assistant' | 'claude' | 'cutline' | 'elevenlabs' | 'storage' | 'editor';
 const PANES: [Pane, string, string][] = [
@@ -40,11 +40,8 @@ export async function mount(root: HTMLElement) {
   let cutlineOutput = '';
   let keyTest = '';
   let storage: any = null;
-  // Settings › Assistant: the last `codex.check` answer, and whether one is under way.
-  let codex: CodexStatus | null = null;
-  let codexChecking = false;
 
-  effect([pane, settings, environment, keyStatus, models], () => {
+  effect([pane, settings, environment, keyStatus, models, codexStatus, codexChecking], () => {
     clear(nav, PANES.map(([p, label]) => h('button', { role: 'tab', id: `pane-${p}`, 'aria-selected': String(pane.value === p), class: pane.value === p ? 'selected' : '', onclick: () => (pane.value = p) }, label)));
     body.setAttribute('aria-labelledby', `pane-${pane.value}`);
     const s = settings.value;
@@ -61,7 +58,7 @@ export async function mount(root: HTMLElement) {
             }),
             button('Reset', () => save((x) => (x.default_output_folder = '')), { appearance: 'subtle' }))),
           field('Runs at once', numberInput(s.parallel_run_limit, (v) => save((x) => (x.parallel_run_limit = Math.max(1, Math.min(4, v ?? 1)))), { min: 1, max: 4 }), 'Runs of different projects; renders are CPU-heavy.'),
-          checkbox('Notify when a run finishes or Claude has a question', s.notifications, (v) => save((x) => (x.notifications = v))),
+          checkbox('Notify when a run finishes or the Assistant has a question', s.notifications, (v) => save((x) => (x.notifications = v))),
           field('Reading speed (words per minute)', numberInput(s.words_per_minute, (v) => save((x) => (x.words_per_minute = v ?? 150)), { min: 60, max: 300 })),
           h('h3', null, 'Media search folders (all projects)'),
           h('ul', { class: 'plain-list' }, s.media_roots.map((r, i) => h('li', { class: 'row' }, h('span', { class: 'path grow' }, r), iconButton(Icons.remove, `Remove ${r}`, () => save((x) => x.media_roots.splice(i, 1)))))),
@@ -77,17 +74,19 @@ export async function mount(root: HTMLElement) {
           h('div', { class: 'row' }, button('Restore Defaults', () => save((x) => (x.finish = { ...DEFAULT_FINISH })), { disabled: sameFinish(s.finish, DEFAULT_FINISH), title: 'Smooth transitions of 0.4 s, cuts on the beat, a short lead-in, and gentle music fades' })));
         break;
       case 'assistant': {
-        // FEAT-spry-alpaca-5RQZ: Claude Code or Codex drives the assistant and runs. Claude's models
-        // stay in the Claude pane; Codex has its own executable and model.
+        // FEAT-spry-alpaca-5RQZ: Claude Code or Codex drives the Assistant and runs. Claude's models
+        // stay in the Claude pane; Codex has its own executable and model. The Codex check is the
+        // app-wide one every project window follows.
+        const codex = codexStatus.value;
+        const checking = codexChecking.value;
         const radio = (value: string, label: string) => {
           const input = h('input', { type: 'radio', name: 'provider', value, checked: (s.provider || 'claude') === value }) as HTMLInputElement;
-          input.addEventListener('change', () => input.checked && save((x) => (x.provider = value)).then(() => {
-            if (value === 'codex' && !codex) checkCodex();
-          }));
+          // Saving broadcasts the change; every window then re-checks the selected provider.
+          input.addEventListener('change', () => input.checked && save((x) => (x.provider = value)));
           return h('label', { class: 'check' }, input, h('span', null, label));
         };
         const isCodex = s.provider === 'codex';
-        const status = codexChecking
+        const status = checking
           ? h('p', { class: 'grow', role: 'status' }, spinner('Checking'), ' Checking…')
           : !codex
             ? h('p', { class: 'grow muted', role: 'status' }, 'Not checked yet.')
@@ -99,16 +98,16 @@ export async function mount(root: HTMLElement) {
         if (s.codex_model && !models.some((m) => m.id === s.codex_model)) modelOptions.push([s.codex_model, s.codex_model]);
         clear(body, h('h2', null, 'Assistant'),
           h('fieldset', { class: 'plain', 'aria-label': 'Provider' }, h('legend', null, 'Assistant and runs'), radio('claude', 'Claude Code'), radio('codex', 'Codex')),
-          h('p', { class: 'muted small' }, 'Used by the spec assistant and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.'),
+          h('p', { class: 'muted small' }, 'Used by the Assistant in every open project and by runs that start after you change it; work already under way keeps its provider. Claude Code is the default.'),
           isCodex ? h('h3', null, 'Codex') : null,
-          isCodex ? h('div', { class: 'row' }, status, button('Re-check', () => checkCodex(), { glyph: Icons.refresh, disabled: codexChecking })) : null,
+          isCodex ? h('div', { class: 'row' }, status, button('Re-check', () => checkCodex(), { glyph: Icons.refresh, disabled: checking })) : null,
           isCodex ? field('Codex path', h('div', { class: 'row' }, textInput(s.codex_path, (v) => save((x) => (x.codex_path = v)).then(() => checkCodex()), { placeholder: 'codex on PATH', class: 'grow' }), button('Browse…', async () => {
             const [f] = await openFiles('codex.exe', [{ name: 'Codex', spec: 'codex.exe;codex.cmd' }, ...Filters.any]);
             if (f) save((x) => (x.codex_path = f)).then(() => checkCodex());
           }))) : null,
           isCodex ? field('Model', select(modelOptions, s.codex_model, (v) => save((x) => (x.codex_model = v)), { 'aria-label': 'Codex model', title: 'The models come from Codex once it is ready. Claude’s model choices are kept separately in the Claude pane.' })) : null,
           isCodex ? h('p', { class: 'muted small' }, 'Sign-in is handled by the Codex CLI (codex login). The app never asks for or stores OpenAI credentials.') : null);
-        if (isCodex && !codex && !codexChecking) checkCodex();
+        if (isCodex && !codex && !checking) checkCodex();
         break;
       }
       case 'claude': {
@@ -191,11 +190,11 @@ export async function mount(root: HTMLElement) {
               toast(errorText(e), 'error');
             }
           }, { appearance: 'primary' })),
-          h('p', { class: 'muted small' }, 'The key is read only by the bundled helper during runs; Claude never sees it.'),
+          h('p', { class: 'muted small' }, 'The key is read only by the bundled helper during runs; the Assistant never sees it.'),
           field('Default voice ID', textInput(s.eleven_default_voice, (v) => save((x) => (x.eleven_default_voice = v)), { placeholder: 'Used when a brand preset has no voice' })),
           field('With no voice set', select([['tried', 'Prefer tried voices'], ['latest', 'Prefer latest voices']], s.eleven_voice_preference || 'tried', (v) => save((x) => (x.eleven_voice_preference = v)), {
             'aria-label': 'With no voice set',
-            title: 'Used when neither the brand preset nor the default voice ID above names a voice, so Claude has to choose one. Tried voices: the ones earlier videos used come first, then the longest-standing voices in your ElevenLabs account. Latest voices: the most recently added ones come first.',
+            title: 'Used when neither the brand preset nor the default voice ID above names a voice, so the Assistant has to choose one. Tried voices: the ones earlier videos used come first, then the longest-standing voices in your ElevenLabs account. Latest voices: the most recently added ones come first.',
           })),
           field('Voice gender', select([['any', 'Any'], ['female', 'Female'], ['male', 'Male']], s.eleven_voice_gender || 'any', (v) => save((x) => (x.eleven_voice_gender = v)), {
             'aria-label': 'Voice gender',
@@ -240,19 +239,6 @@ export async function mount(root: HTMLElement) {
         break;
     }
   });
-
-  async function checkCodex() {
-    if (codexChecking) return;
-    codexChecking = true;
-    pane.emit();
-    try {
-      codex = await core<CodexStatus>('codex.check', { path: settings.value?.codex_path ?? '' });
-    } catch (e) {
-      codex = { state: 'missing', finding: { code: 'codex_check_failed', title: 'Codex couldn’t be checked', remedy: errorText(e) } };
-    }
-    codexChecking = false;
-    pane.emit();
-  }
 
   async function runCutline(action: 'doctor' | 'install_deps') {
     cutlineOutput = action === 'doctor' ? 'Running cutline doctor…' : 'Installing dependencies… this can take a few minutes.';

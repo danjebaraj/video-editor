@@ -187,6 +187,9 @@ pub enum Topic {
     CloseRequested,
     /// The self test asks the UI to perform a step: `{step, args}`.
     SelfTest,
+    /// Another window saved the app settings (Settings › Assistant among them): the saved
+    /// `Settings`, so every open window follows the provider choice (FEAT-spry-alpaca-5RQZ).
+    SettingsChanged,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
