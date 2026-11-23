@@ -23,7 +23,12 @@
 //! - `{"ask": {"id": "q-1", "questions": [{"id", "header", "question", "options"}]}}`:
 //!   `item/tool/requestUserInput` with that request ID; the answer is echoed as a message.
 //! - `{"request": {"id": "x", "method": "…", "params": {…}}}`: any server request.
-//! - `{"usage": [input, output]}`: `thread/tokenUsage/updated`.
+//! - `{"usage": [input, output]}` or `[input, output, cached]`: `thread/tokenUsage/updated` with
+//!   those cumulative totals (`input` includes `cached`, as Codex counts).
+//! - `{"require": "text"}`: the turn fails unless its input contains the text (what Codex was
+//!   given, not what it could open).
+//! - `{"mcp": {"server": "s", "tool": "t"}}`: an MCP tool call that never answers, like a server
+//!   that isn't running; it waits for `turn/interrupt`.
 //! - `{"hang": true}`: wait for `turn/interrupt`. `{"exit": 3}`: exit at once.
 //! - `{"fail": "message"}`: the turn fails.
 
@@ -41,6 +46,8 @@ struct Fake {
     turn: String,
     seq: u64,
     interrupted: bool,
+    /// The current turn's input text.
+    input: String,
 }
 
 fn send(v: Value) {
@@ -234,9 +241,19 @@ impl Fake {
             let rid = r["id"].clone();
             send(json!({"id": rid, "method": r["method"], "params": r["params"]}));
             self.wait(&rid)?;
+        } else if let Some(want) = s["require"].as_str() {
+            if !self.input.contains(want) {
+                return self.step(&json!({"fail": format!("the turn's input doesn't contain {want}")}));
+            }
+        } else if let Some(m) = s.get("mcp") {
+            let item_id = self.next_id("item");
+            self.item("item/started", json!({"type": "mcpToolCall", "id": item_id, "server": m["server"], "tool": m["tool"], "status": "inProgress", "arguments": {"code": "fs.readFileSync('spec.md')"}, "result": null, "error": null}));
+            let never = json!("never-answered");
+            self.wait(&never)?;
         } else if let Some(u) = s["usage"].as_array() {
             let (i, o) = (u[0].as_u64().unwrap_or(0), u[1].as_u64().unwrap_or(0));
-            let b = json!({"totalTokens": i + o, "inputTokens": i, "cachedInputTokens": 0, "cacheWriteInputTokens": 0, "outputTokens": o, "reasoningOutputTokens": 0});
+            let cached = u.get(2).and_then(Value::as_u64).unwrap_or(0);
+            let b = json!({"totalTokens": i + o, "inputTokens": i, "cachedInputTokens": cached, "cacheWriteInputTokens": 0, "outputTokens": o, "reasoningOutputTokens": 0});
             send(
                 json!({"method": "thread/tokenUsage/updated", "params": {"threadId": self.thread, "turnId": self.turn, "tokenUsage": {"total": b, "last": b, "modelContextWindow": null}}}),
             );
@@ -298,6 +315,7 @@ fn main() {
         turn: String::new(),
         seq: 0,
         interrupted: false,
+        input: String::new(),
     };
     while let Some(msg) = f.read() {
         let (Some(id), Some(method)) = (msg.get("id").cloned(), msg["method"].as_str().map(str::to_string)) else {
@@ -367,6 +385,10 @@ fn main() {
                     let _ = std::fs::write(p, (n + 1).to_string());
                 }
                 f.turn = format!("turn-{}", n + 1);
+                f.input = params["input"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|i| i["text"].as_str()).collect::<Vec<_>>().join("\n"))
+                    .unwrap_or_default();
                 send(
                     json!({"id": id, "result": {"turn": {"id": f.turn, "items": [], "status": "inProgress", "error": null}}}),
                 );

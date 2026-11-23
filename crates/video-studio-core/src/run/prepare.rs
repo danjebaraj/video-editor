@@ -547,6 +547,7 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         voice_choosing: Some(&voice_choosing),
         platforms: &env.platforms,
         finish: &finish,
+        codex: codex_exe.is_some(),
     });
     let mut prompt = super::prompt::user_prompt(request.kind, request.revise.as_ref(), previous.as_ref());
     // A revision under the other provider can't continue the earlier conversation: it starts a
@@ -651,6 +652,13 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
         "revise_feedback": request.revise.as_ref().map(|r| r.feedback.clone()),
     });
     paths::write_json_atomic(&folder.join("run.json"), &resolved)?;
+    // Codex has no Read tool: its first message carries the prepared inputs in full, and a
+    // required input it can't get stops the run here, before anything is spent
+    // (BUG-rustic-olive-U4PY).
+    if codex.is_some() {
+        prompt.push_str(&super::prompt::codex_inputs(&folder, project.brand.is_some())?);
+        paths::write_atomic(&logs.join("prompt.md"), prompt.as_bytes())?;
+    }
     let mut log_run = resolved.clone();
     if let Some(o) = log_run.as_object_mut() {
         o.insert("app".into(), json!({"name": crate::APP_NAME, "core_version": CORE_VERSION}));
@@ -659,7 +667,19 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
                 o.insert("provider".into(), json!("codex"));
                 o.insert(
                     "codex".into(),
-                    json!({"path": c.executable, "model": c.model, "sandbox": c.sandbox_policy()}),
+                    json!({
+                        "path": c.executable,
+                        "model": c.model,
+                        "sandbox": c.sandbox_policy(),
+                        // what Codex can actually use to get at the run's files
+                        "inputs": {
+                            "prepared_inputs": "in the first message",
+                            "other_files": "plain read-only commands in the sandbox",
+                            "read_tools": false,
+                            "mcp_servers": "off",
+                            "mcp_servers_disabled": c.disabled_mcp_servers(),
+                        },
+                    }),
                 );
             }
             None => {

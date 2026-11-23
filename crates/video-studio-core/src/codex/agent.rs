@@ -106,6 +106,20 @@ impl CodexOptions {
         r
     }
 
+    /// The MCP servers in the user's Codex config (`$CODEX_HOME/config.toml`, else
+    /// `~/.codex/config.toml`). An empty `mcp_servers` override doesn't remove them, so each is
+    /// turned off by name (BUG-rustic-olive-U4PY).
+    pub fn disabled_mcp_servers(&self) -> Vec<String> {
+        let home = self
+            .env
+            .get("CODEX_HOME")
+            .filter(|h| !h.is_empty())
+            .map(Utf8PathBuf::from)
+            .or_else(|| self.env.get("HOME").filter(|h| !h.is_empty()).map(|h| Utf8Path::new(h).join(".codex")));
+        let Some(home) = home else { return Vec::new() };
+        std::fs::read_to_string(home.join("config.toml")).map(|t| mcp_server_names(&t)).unwrap_or_default()
+    }
+
     /// `config` overrides for the thread: no MCP servers, web search only with web access, the
     /// sandbox's writable roots, and the shell environment.
     pub fn thread_config(&self) -> Value {
@@ -113,8 +127,12 @@ impl CodexOptions {
         if !self.shell_env.is_empty() {
             shell["set"] = json!(self.shell_env);
         }
+        let mut mcp = serde_json::Map::new();
+        for name in self.disabled_mcp_servers() {
+            mcp.insert(name, json!({"enabled": false}));
+        }
         json!({
-            "mcp_servers": {},
+            "mcp_servers": mcp,
             "web_search": if self.web_access { "live" } else { "disabled" },
             "sandbox_workspace_write": {
                 "writable_roots": self.roots(),
@@ -175,6 +193,32 @@ impl CodexOptions {
         p
     }
 }
+
+/// The server names of `[mcp_servers.<name>]` tables (and their sub-tables) in a Codex
+/// `config.toml`, in order, each once.
+pub fn mcp_server_names(toml: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for line in toml.lines() {
+        let line = line.trim();
+        let Some(inner) = line.strip_prefix('[').map(|l| l.trim_start_matches('[')) else { continue };
+        let Some(inner) = inner.split(']').next() else { continue };
+        let Some(rest) = inner.trim().strip_prefix("mcp_servers.") else { continue };
+        let name = if let Some(quoted) = rest.strip_prefix('"') {
+            quoted.split('"').next().unwrap_or("")
+        } else if let Some(quoted) = rest.strip_prefix('\'') {
+            quoted.split('\'').next().unwrap_or("")
+        } else {
+            rest.split('.').next().unwrap_or("").trim()
+        };
+        if !name.is_empty() && !names.iter().any(|n| n == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// How long a turn the host stopped itself may take to end before the driver gives up on it.
+const ABORT_GRACE: Duration = Duration::from_secs(10);
 
 /// What the host told the driver to do.
 enum Cmd {
@@ -319,6 +363,7 @@ impl CodexProcess {
             last_error: None,
             interrupted: false,
             disconnected: false,
+            aborted: None,
         };
         let prompt = prompt.to_string();
         let drv_shared = shared.clone();
@@ -446,6 +491,9 @@ struct Driver {
     last_error: Option<String>,
     interrupted: bool,
     disconnected: bool,
+    /// Why the host stopped the turn itself (a tool the run doesn't provide), and by when the
+    /// turn must have ended.
+    aborted: Option<(String, Instant)>,
 }
 
 /// The key a server request ID is known by on the host side.
@@ -637,6 +685,12 @@ impl Driver {
                 self.interrupted = true;
                 self.send_interrupt();
             }
+            // a turn the host stopped that doesn't end in time ends here, with the cause
+            if let Some((why, by)) = self.aborted.clone() {
+                if Instant::now() >= by {
+                    return self.fail(why);
+                }
+            }
             match self.lines.recv_timeout(Duration::from_millis(50)) {
                 Ok(line) => {
                     let Some(msg) = self.parse(&line) else { continue };
@@ -669,6 +723,9 @@ impl Driver {
 
     fn complete(&mut self, turn: &Value) {
         let status = turn["status"].as_str().unwrap_or("completed");
+        if let Some((why, _)) = self.aborted.clone() {
+            return self.fail(why);
+        }
         let error = turn["error"]["message"].as_str().map(str::to_string).or(self.last_error.clone());
         let (is_error, subtype) = match status {
             "completed" => (false, "success"),
@@ -938,13 +995,25 @@ impl Driver {
             "item/started" => self.item_started(&params["item"]),
             "item/completed" => self.item_completed(&params["item"]),
             "thread/tokenUsage/updated" => {
-                let u = &params["tokenUsage"];
-                self.usage_updates += 1;
-                self.total_usage = Some(usage_of(&u["total"]));
-                self.event(StreamEvent::MessageUsage {
-                    message_id: format!("codex-{}", self.usage_updates),
-                    usage: usage_of(&u["last"]),
-                });
+                // Live usage is what the cumulative total grew by, so the live sum always equals
+                // the final total and a repeated notification adds nothing (BUG-rustic-olive-U4PY).
+                let total = usage_of(&params["tokenUsage"]["total"]);
+                let before = self.total_usage.clone().unwrap_or_default();
+                let grew = Usage {
+                    input_tokens: total.input_tokens.saturating_sub(before.input_tokens),
+                    output_tokens: total.output_tokens.saturating_sub(before.output_tokens),
+                    cache_read_tokens: total.cache_read_tokens.saturating_sub(before.cache_read_tokens),
+                    cache_creation_tokens: total.cache_creation_tokens.saturating_sub(before.cache_creation_tokens),
+                    ..Usage::default()
+                };
+                self.total_usage = Some(total);
+                if grew != Usage::default() {
+                    self.usage_updates += 1;
+                    self.event(StreamEvent::MessageUsage {
+                        message_id: format!("codex-{}", self.usage_updates),
+                        usage: grew,
+                    });
+                }
             }
             "turn/started" => {
                 if self.turn.is_none() {
@@ -989,12 +1058,31 @@ impl Driver {
                 name: "WebSearch".into(),
                 input: json!({"query": item["query"]}),
             }),
-            "mcpToolCall" => self.event(StreamEvent::ToolUse {
-                id,
-                name: format!("{}/{}", item["server"].as_str().unwrap_or("mcp"), item["tool"].as_str().unwrap_or("")),
-                input: item["arguments"].clone(),
-            }),
+            "mcpToolCall" => {
+                let name =
+                    format!("{}/{}", item["server"].as_str().unwrap_or("mcp"), item["tool"].as_str().unwrap_or(""));
+                self.event(StreamEvent::ToolUse { id, name: name.clone(), input: item["arguments"].clone() });
+                // No MCP server runs here, so this call can only hang until Codex's own timeout:
+                // stop the turn now and say why (BUG-rustic-olive-U4PY).
+                self.abort(format!(
+                    "Codex tried to use the tool `{name}`, which Video Studio doesn't provide (no MCP servers or Node REPL run here), so the run was stopped instead of waiting for it. The prepared inputs are in Codex's first message; update the Codex CLI if this keeps happening."
+                ));
+            }
             _ => {}
+        }
+    }
+
+    /// Stops the turn because of something the host can't allow, keeping the cause.
+    fn abort(&mut self, why: String) {
+        if self.aborted.is_some() {
+            return;
+        }
+        self.shared
+            .log_line(&json!({"type": "host_abort", "ts": crate::timeutil::now_rfc3339(), "reason": why}).to_string());
+        self.aborted = Some((why, Instant::now() + ABORT_GRACE));
+        if !self.interrupted {
+            self.interrupted = true;
+            self.send_interrupt();
         }
     }
 
@@ -1075,6 +1163,24 @@ mod tests {
         assert_eq!(codex_effort(Some("max")).as_deref(), Some("xhigh"));
         assert_eq!(codex_effort(Some("medium")).as_deref(), Some("medium"));
         assert_eq!(codex_effort(Some("turbo")), None);
+    }
+
+    #[test]
+    fn configured_mcp_servers_are_turned_off_by_name() {
+        let toml = "model = \"x\"\n[mcp_servers.node_repl]\ncommand = \"node\"\n[mcp_servers.node_repl.env]\nA = \"1\"\n[mcp_servers.\"my server\"]\ncommand = \"y\"\n[profiles.mcp_servers]\n";
+        assert_eq!(mcp_server_names(toml), vec!["node_repl".to_string(), "my server".to_string()]);
+        let dir = tempfile::tempdir().unwrap();
+        let home = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        std::fs::write(home.join("config.toml"), toml).unwrap();
+        let o = CodexOptions {
+            working_dir: "/runs/r1".into(),
+            env: HashMap::from([("CODEX_HOME".to_string(), home.to_string())]),
+            ..Default::default()
+        };
+        assert_eq!(
+            o.thread_config()["mcp_servers"],
+            json!({"node_repl": {"enabled": false}, "my server": {"enabled": false}})
+        );
     }
 
     #[test]

@@ -187,6 +187,9 @@ struct Driver {
     session: Option<String>,
     model_used: Option<String>,
     result_error: Option<String>,
+    /// The first tool call that failed (not one the broker refused): kept for the outcome so a
+    /// missing output comes with what went wrong first (BUG-rustic-olive-U4PY).
+    first_failure: Option<String>,
     saw_result: bool,
     warnings: Vec<String>,
     denials: u32,
@@ -312,6 +315,7 @@ impl Driver {
             session: None,
             model_used: None,
             result_error: None,
+            first_failure: None,
             saw_result: false,
             warnings: Vec::new(),
             denials: 0,
@@ -325,6 +329,15 @@ impl Driver {
             "Codex"
         } else {
             "Claude Code"
+        }
+    }
+
+    /// The provider as the run's messages name it: "Codex" or "Claude" (BUG-rustic-olive-U4PY).
+    fn agent_short(&self) -> &'static str {
+        if self.p.codex.is_some() {
+            "Codex"
+        } else {
+            "Claude"
         }
     }
 
@@ -357,6 +370,15 @@ impl Driver {
         if let Some((stage, _, at, ok)) = self.stage.take() {
             self.emit(EventKind::StageFinished { stage, ok, seconds: at.elapsed().as_secs_f64() });
         }
+    }
+
+    /// " First problem: …" for an outcome message, when a tool call failed during the run.
+    fn first_failure_note(&self) -> String {
+        self.first_failure
+            .as_ref()
+            .map(|f| format!(" First problem: {}", f.trim_end_matches('.')))
+            .map(|f| f + ".")
+            .unwrap_or_default()
     }
 
     fn estimated_cost(&self) -> (Option<f64>, u64, u64) {
@@ -547,9 +569,13 @@ impl Driver {
                             cur.3 = false;
                         }
                     }
+                    let text = tool_failure(&name, &input, &self.p.folder, &content);
+                    if self.first_failure.is_none() {
+                        self.first_failure = Some(truncate(&text, 300));
+                    }
                     self.emit(EventKind::Message {
                         role: "tool".into(),
-                        text: tool_failure(&name, &input, &self.p.folder, &content),
+                        text,
                         tool: Some(name),
                         detail: Some(truncate(&content, 4000)),
                         failed: true,
@@ -577,9 +603,18 @@ impl Driver {
                     || subtype.as_deref().map(|s| s != "success" && !(stopping && s == "interrupted")).unwrap_or(false);
                 if failed && self.result_error.is_none() && !self.shared.cancel.load(Ordering::SeqCst) {
                     let msg = match subtype.as_deref() {
-                        Some("error_max_budget_usd") => "The run reached its Claude spend limit before finishing. Raise the limit in the run config.".to_string(),
+                        Some("error_max_budget_usd") => format!(
+                            "The run reached its {} spend limit before finishing. Raise the limit in the run config.",
+                            self.agent_short()
+                        ),
                         Some("error_max_turns") => "The run reached its turn limit before finishing.".to_string(),
-                        _ => friendly_error(&text.unwrap_or_else(|| format!("{} reported an error ({}).", self.agent_name(), subtype.as_deref().unwrap_or("unknown")))),
+                        _ => friendly_error(&text.unwrap_or_else(|| {
+                            format!(
+                                "{} reported an error ({}).",
+                                self.agent_name(),
+                                subtype.as_deref().unwrap_or("unknown")
+                            )
+                        })),
                     };
                     self.result_error = Some(msg);
                 }
@@ -627,7 +662,10 @@ impl Driver {
                         answers: BTreeMap::new(),
                     });
                     let q = questions.iter().map(|q| q.question.as_str()).collect::<Vec<_>>().join(" / ");
-                    self.warn(format!("Claude asked \"{q}\" and proceeded on its own assumption (no one was asked)."));
+                    self.warn(format!(
+                        "{} asked \"{q}\" and proceeded on its own assumption (no one was asked).",
+                        self.agent_short()
+                    ));
                 } else {
                     self.pending.insert(
                         request_id,
@@ -657,7 +695,10 @@ impl Driver {
                 self.emit(EventKind::QuestionAnswered { id, by: "timeout".into(), answers: BTreeMap::new() });
                 let text =
                     stream::questions(&q.input).iter().map(|q| q.question.clone()).collect::<Vec<_>>().join(" / ");
-                self.warn(format!("Claude asked \"{text}\" and proceeded on its own assumption (no answer in time)."));
+                self.warn(format!(
+                    "{} asked \"{text}\" and proceeded on its own assumption (no answer in time).",
+                    self.agent_short()
+                ));
             }
         }
         self.tick_logs(activity, eleven_log);
@@ -684,9 +725,11 @@ impl Driver {
                     let n = v["n"].as_u64().unwrap_or(0);
                     let command = v["command"].as_str().unwrap_or("");
                     let log = self.p.logs.join(format!("cutline/{n:03}-{command}.log"));
+                    // a lookup (schema, help, doctor) finishing completes nothing (BUG-rustic-olive-U4PY)
+                    let lookup = super::events::is_informational(command);
                     self.emit(EventKind::Progress {
                         stage,
-                        fraction: (code == 0).then_some(1.0),
+                        fraction: (code == 0 && !lookup).then_some(1.0),
                         detail: Some(format!(
                             "cutline {command} finished (exit {code}, {:.1} s)",
                             v["seconds"].as_f64().unwrap_or(0.0)
@@ -726,7 +769,6 @@ impl Driver {
     }
 
     fn finish(mut self, launch_error: Option<String>, exit: Option<(i32, String)>, cancelled: bool) -> RunOutcome {
-        self.finish_stage();
         let kind = self.p.request.kind;
         let folder = self.p.folder.clone();
         self.eleven_credits = eleven::spent(&self.p.helper_context.log_path());
@@ -777,9 +819,11 @@ impl Driver {
                     if !missing.is_empty() {
                         failed = true;
                         message = Some(format!(
-                            "Claude finished without producing {}: {}. See summary.md and the cutline logs for why.",
+                            "{} finished without producing {}: {}.{} See summary.md and the cutline logs for why.",
+                            self.agent_short(),
                             if missing.len() == 1 { "this output" } else { "these outputs" },
-                            missing.join(", ")
+                            missing.join(", "),
+                            self.first_failure_note()
                         ));
                     }
                     for o in outputs.iter().filter(|o| o.exists) {
@@ -795,21 +839,23 @@ impl Driver {
                         }
                     }
                     if !folder.join("summary.md").is_file() {
-                        self.warnings.push("Claude didn't write summary.md.".into());
+                        self.warnings.push(format!("{} didn't write summary.md.", self.agent_short()));
                     }
                 }
                 RunKind::AudioReview => {
                     if outputs.iter().all(|o| !o.exists || o.bytes <= 44) {
                         failed = true;
                         message = Some(format!(
-                            "Claude finished without mixing the soundtrack ({}). See summary.md and the cutline logs for why.",
-                            collect::AUDIO_REVIEW_WAV
+                            "{} finished the Audio Review without mixing the soundtrack ({}).{} See summary.md and the cutline logs for why.",
+                            self.agent_short(),
+                            collect::AUDIO_REVIEW_WAV,
+                            self.first_failure_note()
                         ));
                     } else if outputs.iter().any(|o| collect::wav_is_silent(Utf8Path::new(&o.path))) {
                         self.warnings.push("The timeline has no audible tracks: the mix is silence.".into());
                     }
                     if !folder.join("summary.md").is_file() {
-                        self.warnings.push("Claude didn't write summary.md.".into());
+                        self.warnings.push(format!("{} didn't write summary.md.", self.agent_short()));
                     }
                 }
                 RunKind::DryRun => {
@@ -837,6 +883,21 @@ impl Driver {
                 }
             }
         }
+        // An Audio Review that failed for another reason also says the soundtrack wasn't mixed
+        // (BUG-rustic-olive-U4PY).
+        if kind == RunKind::AudioReview && failed && outputs.iter().all(|o| !o.exists || o.bytes <= 44) {
+            if let Some(m) = message.as_mut().filter(|m| !m.contains(collect::AUDIO_REVIEW_WAV)) {
+                m.push_str(&format!(" No soundtrack was mixed ({}).", collect::AUDIO_REVIEW_WAV));
+            }
+        }
+        // The last stage succeeds only if the run did: a summary written before a failure isn't a
+        // finished wrap-up (BUG-rustic-olive-U4PY).
+        if failed || cancelled {
+            if let Some(stage) = self.stage.as_mut() {
+                stage.3 = false;
+            }
+        }
+        self.finish_stage();
         let status = if cancelled {
             RunStatus::Cancelled
         } else if failed {
@@ -904,16 +965,22 @@ impl Driver {
         }
         summary.push_str(&format!("## Run status (written by {})\n\n", crate::APP_NAME));
         summary.push_str(&format!(
-            "- Status: **{}**\n- Kind: {}\n- Run config: {}\n- Model: {}\n- Duration: {}\n",
+            "- Status: **{}**\n- Kind: {}\n- Assistant: {}\n- Run config: {}\n- Model: {}\n- Duration: {}\n",
             status.label(),
-            if kind == RunKind::DryRun { "dry run" } else { "production" },
+            match kind {
+                RunKind::DryRun => "dry run",
+                RunKind::Production => "production",
+                RunKind::AudioReview => "Audio Review",
+            },
+            self.agent_name(),
             self.p.run_config.name,
             self.model_used.clone().or(self.p.record.model.clone()).unwrap_or_default(),
             crate::media::format_duration(seconds)
         ));
         if let Some(c) = cost {
             summary.push_str(&format!(
-                "- Claude cost: ${c:.2}{}\n",
+                "- {} cost: ${c:.2}{}\n",
+                self.agent_short(),
                 if self.final_usage.as_ref().and_then(|u| u.cost_usd).is_some() {
                     ""
                 } else {
@@ -930,8 +997,9 @@ impl Driver {
         }
         if self.denials > 0 {
             summary.push_str(&format!(
-                "- Blocked tool calls: {} (see logs/permissions.ndjson and logs/claude.jsonl)\n",
-                self.denials
+                "- Blocked tool calls: {} (see logs/permissions.ndjson and logs/{})\n",
+                self.denials,
+                if self.p.codex.is_some() { "codex.jsonl" } else { "claude.jsonl" }
             ));
         }
         if !outputs.is_empty() {

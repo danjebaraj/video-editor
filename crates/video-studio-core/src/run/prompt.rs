@@ -31,6 +31,9 @@ pub struct PromptInput<'a> {
     pub platforms: &'a Platforms,
     /// How the video is finished: the project's own choices or the ones in Settings.
     pub finish: &'a crate::finish::Finish,
+    /// Codex runs the turn (BUG-rustic-olive-U4PY): it has no Read, Glob or Grep tool, so the
+    /// prepared inputs come in its first message and other files are read with plain commands.
+    pub codex: bool,
 }
 
 /// One line per media item: ID, kind, role, duration, size, status, notes.
@@ -537,28 +540,82 @@ pub fn system_prompt(input: &PromptInput) -> String {
     s.push_str("## Recording apps\n");
     s.push_str(&capture_section(input));
     s.push('\n');
-    s.push_str(
+    let shell = if input.codex { CODEX_SHELL_RULE } else { CLAUDE_SHELL_RULE };
+    s.push_str(&format!(
         "## Rules of this environment\n\
-         - Shell: only `cutline …`, `video-studio eleven …`, `video-studio capture …` and, in a dry run, `video-studio standin …` run. One plain command per call: no pipes, redirections, `cd`, variables or other programs (`ls`, `cat`, `ffmpeg`, `python`, `open`, `osascript`, `screencapture` are refused). Use the Read, Glob and Grep tools to look at files; they also show images, so open the review pack's PNGs with Read.\n\
+         {shell}\
          - Files: you may write only inside the run folder, and may read the run folder, the media listed in the manifest, the brand assets and cutline's own folder. Reference media in project.json5 by the absolute paths in media-manifest.json; never copy media.\n\
          - Run every command from the run folder and give paths relative to it (`--out work/review`, not a path that starts inside work/), so files land where you expect.\n\
          - Keep scratch files under work/. Screenshots and recordings you make go to captures/. logs/ belongs to the app.\n",
-    );
+    ));
     s.push_str(if rc.web_access {
         "- Web search and fetch are available for this run.\n"
     } else {
         "- There is no web access in this run.\n"
     });
-    s.push_str(
-        "- Questions: when something only the user can decide would change the video, and guessing wrong would waste the run, ask with the AskUserQuestion tool. Give two to four concrete options and put the one you recommend first. The user may be away: if the answer says to proceed on your assumption, take your first option and record the question and the assumption in summary.md. Do not ask about things the spec, the brand or common sense already settle.\n\
+    let ask_tool = if input.codex { "request_user_input" } else { "AskUserQuestion" };
+    s.push_str(&format!(
+        "- Questions: when something only the user can decide would change the video, and guessing wrong would waste the run, ask with the {ask_tool} tool. Give two to four concrete options and put the one you recommend first. The user may be away: if the answer says to proceed on your assumption, take your first option and record the question and the assumption in summary.md. Do not ask about things the spec, the brand or common sense already settle.\n\
          - Don't stop early. Finish every output, or explain in summary.md exactly what blocked it.\n\n",
-    );
+    ));
     if !input.cutline_guide.trim().is_empty() {
         s.push_str("## cutline workflow guide (from `cutline guide`)\n\n");
         s.push_str(input.cutline_guide.trim());
         s.push('\n');
     }
     s
+}
+
+/// How Claude Code looks at files in a run: its own read tools.
+pub const CLAUDE_SHELL_RULE: &str = "- Shell: only `cutline …`, `video-studio eleven …`, `video-studio capture …` and, in a dry run, `video-studio standin …` run. One plain command per call: no pipes, redirections, `cd`, variables or other programs (`ls`, `cat`, `ffmpeg`, `python`, `open`, `osascript`, `screencapture` are refused). Use the Read, Glob and Grep tools to look at files; they also show images, so open the review pack's PNGs with Read.\n";
+
+/// How Codex looks at files in a run (BUG-rustic-olive-U4PY). Codex has no Read, Glob or Grep
+/// tool; the prepared inputs are in its first message, and Codex runs plain read-only commands
+/// inside its sandbox without asking.
+pub const CODEX_SHELL_RULE: &str = "- Shell: the work is done with `cutline …`, `video-studio eleven …`, `video-studio capture …` and, in a dry run, `video-studio standin …`. One plain command per call: no pipes, redirections, `cd` or variables; other programs that change things (`ffmpeg`, `python`, `open`, `osascript`, `screencapture`, `rm`) are refused.\n\
+         - Reading files: there is no Read, Glob or Grep tool here, and no Node REPL or MCP tool. The prepared inputs (spec.md, media-manifest.json, outputs.json, run.json and, when there is a brand, brand-preset.json) are given in full in your first message: work from that copy. To look at any other text file you may read, use one plain read-only command such as `cat work/notes.txt`, `sed -n '1,80p' project.json5` or `ls work`. Look at the review pack through cutline's own JSON and text reports; describe a picture you can't see as unchecked in your report rather than guessing.\n";
+
+/// The most of one prepared input copied into Codex's first message.
+pub const CODEX_INPUT_LIMIT: usize = 200_000;
+
+/// The prepared inputs, in full, for Codex's first message (BUG-rustic-olive-U4PY): Codex has
+/// no Read tool, so the run doesn't depend on how it might open them. A required input that
+/// can't be read stops the run here, before anything is spent, with the file and the reason.
+pub fn codex_inputs(folder: &Utf8Path, has_brand: bool) -> crate::Result<String> {
+    let mut names = vec!["spec.md", "media-manifest.json", "outputs.json", "run.json"];
+    if has_brand {
+        names.push("brand-preset.json");
+    }
+    let mut s = String::from(
+        "\n\n## Prepared inputs\n\nThese are the run folder's prepared files, copied here in full so you don't need to open them. They are the same files that are on disk.\n",
+    );
+    for name in names {
+        let path = folder.join(name);
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            crate::Error::Environment(format!("The run couldn't read its prepared input {name} ({path}): {e}"))
+        })?;
+        let lang = if name.ends_with(".json") { "json" } else { "markdown" };
+        let (body, cut) = if text.len() > CODEX_INPUT_LIMIT {
+            let mut end = CODEX_INPUT_LIMIT;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            (&text[..end], true)
+        } else {
+            (text.as_str(), false)
+        };
+        // a fence longer than any backtick run in the file, so the file can't close it
+        let longest = body.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+        let fence = "`".repeat(longest.max(2) + 1);
+        s.push_str(&format!("\n### {name}\n\n{fence}{lang}\n{}\n{fence}\n", body.trim_end()));
+        if cut {
+            s.push_str(&format!(
+                "(Only the first {} KB of {name} is shown. Read the rest with `sed -n` on the file.)\n",
+                CODEX_INPUT_LIMIT / 1000
+            ));
+        }
+    }
+    Ok(s)
 }
 
 /// Added to a revision's prompt when it runs under a different provider than the run it
@@ -768,6 +825,7 @@ mod tests {
             voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
+            codex: false,
         })
     }
 
@@ -861,6 +919,7 @@ mod tests {
                 voice_choosing: None,
                 platforms: &platforms,
                 finish: &crate::finish::Finish::default(),
+                codex: false,
             })
         };
         assert!(make(true).contains("`cutline still '<photo>' --out 'photo-copies/<name>.jpg'"));
@@ -888,6 +947,7 @@ mod tests {
             voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
+            codex: false,
         });
         assert!(
             s.contains("## Finish\n") && s.contains("snap_to_beats") && s.contains("smoothleft"),
@@ -950,6 +1010,7 @@ mod tests {
             voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
+            codex: false,
         });
         assert!(
             d.contains("cutline render project.json5 --draft")
@@ -976,6 +1037,7 @@ mod tests {
             voice_choosing: Some(&how),
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
+            codex: false,
         });
         assert!(
             v.contains("so you choose one") && v.contains("a male voice") && v.contains("most recently added"),
@@ -1003,6 +1065,7 @@ mod tests {
             voice_choosing: None,
             platforms: &platforms,
             finish: &crate::finish::Finish::default(),
+            codex: false,
         });
         assert!(
             s.contains("DRY RUN")
@@ -1047,6 +1110,7 @@ mod tests {
                     voice_choosing: None,
                     platforms: &platforms,
                     finish: &crate::finish::Finish::default(),
+                    codex: false,
                 })
             };
             let s = prompt(&off);
@@ -1133,5 +1197,29 @@ mod tests {
         assert!(!s.contains("only shell command you may run"), "{s}");
         assert!(s.contains("(/usr/local/bin/cutline) is an older build without the `still` command"), "{s}");
         assert!(s.contains("update cutline"));
+    }
+
+    /// BUG-rustic-olive-U4PY: Codex gets the prepared inputs in its first message; one it can't
+    /// get stops the run before anything starts, naming the file.
+    #[test]
+    fn codex_inputs_carry_the_files_or_name_the_missing_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = Utf8Path::from_path(dir.path()).unwrap();
+        for (name, text) in [
+            ("spec.md", "# Spec\n```vo\nHello\n```\nMARKER-1\n"),
+            ("media-manifest.json", "[]"),
+            ("outputs.json", "{\"outputs\": []}"),
+            ("run.json", "{}"),
+        ] {
+            std::fs::write(folder.join(name), text).unwrap();
+        }
+        let s = codex_inputs(folder, false).unwrap();
+        assert!(s.contains("### spec.md") && s.contains("MARKER-1") && s.contains("### run.json"));
+        assert!(s.contains("````markdown"), "the fence outlasts the spec's own code block: {s}");
+        assert!(!s.contains("brand-preset.json"));
+        let e = codex_inputs(folder, true).unwrap_err().to_string();
+        assert!(e.contains("brand-preset.json"), "{e}");
+        std::fs::remove_file(folder.join("spec.md")).unwrap();
+        assert!(codex_inputs(folder, false).unwrap_err().to_string().contains("spec.md"));
     }
 }

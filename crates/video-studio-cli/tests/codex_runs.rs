@@ -190,3 +190,137 @@ fn a_codex_run_uses_codex_models_not_claudes() {
     }
     assert_eq!(w.load_project().run_configs[0].production_model, "opus", "Claude's choice stays for Claude");
 }
+
+/// Runs an Audio Review with Codex and no Claude Code installed.
+fn run_codex_audio_review(w: &World) -> std::process::Output {
+    w.command(&["run", w.project.as_str(), "--config", "Social pack", "--audio-review", "--json", "--yes"])
+        .env("VIDEO_STUDIO_NO_CLAUDE", "1")
+        .env("FAKE_CODEX_SCRIPT", w.script.as_str())
+        .env("FAKE_CODEX_LOG", w.root.join("codex.ndjson").as_str())
+        .output()
+        .unwrap()
+}
+
+const SPEC_MARKER: &str = "MARKER-rustic-olive-7Q4T";
+
+/// BUG-rustic-olive-U4PY: a Codex Audio Review works from the inputs it was given, not from
+/// files it would have to open with tools it doesn't have. The fake server has no read tool and
+/// no Node REPL: it only goes on when the spec's marker, a media path and the export slug are in
+/// its input. Then it validates, mixes the selected export and the WAV is the result. Usage that
+/// includes cached tokens, reported twice with the same totals, is counted once and the same
+/// live and final; the inspector, summary and record all name Codex and Audio Review.
+#[test]
+fn a_codex_audio_review_gets_its_inputs_and_mixes_the_soundtrack() {
+    let w = codex_world(json!([
+        {"require": SPEC_MARKER},
+        {"require": "youtube-shorts"},
+        {"require": "footage/hero.mov"},
+        {"command": "cutline schema"},
+        {"write": {"path": "project.json5", "content": PROJECT_JSON5}},
+        {"command": "cutline validate project.json5"},
+        {"command": "cutline audio project.json5 --export youtube-shorts --out outputs/audio-review.wav"},
+        {"write": {"path": "summary.md", "content": "## What you will hear\nThe tone, once.\n"}},
+        {"usage": [982031, 1503, 927104]},
+        {"usage": [982031, 1503, 927104]},
+        {"say": "The soundtrack is mixed."}
+    ]));
+    w.edit_project(|p| {
+        p.spec.push_str(&format!(
+            "\n\nUse the attached clip once at unity gain. No generated speech or music. {SPEC_MARKER}\n"
+        ));
+    });
+    let o = run_codex_audio_review(&w);
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\nstdout:\n{}\nstderr:\n{}", stdout(&o), stderr(&o)));
+    assert_eq!(fin["event"], "run_finished");
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}\n{}", stderr(&o));
+    assert_eq!(fin["eleven_credits"], 0, "no paid service");
+
+    let r = w.load_project().runs.pop().unwrap();
+    assert_eq!(r.kind, video_studio_core::project::RunKind::AudioReview);
+    assert_eq!(r.provider, Some(video_studio_core::codex::Provider::Codex));
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    assert!(folder.join("outputs/audio-review.wav").is_file());
+    let results = video_studio_core::run::collect::load_results(&folder);
+    assert!(results.outputs[0].exists && !results.outputs[0].incomplete, "{:?}", results.outputs);
+
+    // the instructions describe what Codex actually has, and the inputs are in its first message
+    let system = std::fs::read_to_string(folder.join("logs/prompt-system.md")).unwrap();
+    assert!(!system.contains("Use the Read, Glob and Grep tools"), "Claude's tools aren't Codex's");
+    assert!(system.contains("no Read, Glob or Grep tool"));
+    let prompt = std::fs::read_to_string(folder.join("logs/prompt.md")).unwrap();
+    assert!(prompt.contains("## Prepared inputs") && prompt.contains(SPEC_MARKER), "{prompt}");
+    let run_json: Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join("logs/run.json")).unwrap()).unwrap();
+    assert_eq!(run_json["codex"]["inputs"]["read_tools"], false, "{run_json}");
+
+    // a schema lookup moves nothing forward; validation and the mix are their own stages
+    let stages: Vec<&str> =
+        ev.iter().filter(|e| e["event"] == "stage_started").map(|e| e["stage"].as_str().unwrap()).collect();
+    assert!(stages.contains(&"validate") && stages.contains(&"mix"), "{stages:?}");
+    assert!(
+        !ev.iter().any(|e| e["event"] == "progress"
+            && e["fraction"] == 1.0
+            && e["detail"].as_str().unwrap_or("").contains("cutline schema")),
+        "a lookup completes nothing"
+    );
+
+    // usage: live and final agree, cached tokens counted apart, the repeat adds nothing
+    let usage = &run_json["usage"];
+    assert_eq!(
+        (usage["input_tokens"].as_u64(), usage["cache_read_tokens"].as_u64(), usage["output_tokens"].as_u64()),
+        (Some(54_927), Some(927_104), Some(1_503)),
+        "{usage}"
+    );
+    let last_cost = ev.iter().rfind(|e| e["event"] == "cost").expect("cost");
+    assert_eq!((last_cost["input_tokens"].as_u64(), last_cost["output_tokens"].as_u64()), (Some(982_031), Some(1_503)));
+
+    // the right provider and run kind everywhere
+    let summary = std::fs::read_to_string(folder.join("logs/summary.md")).unwrap();
+    assert!(summary.contains("- Kind: Audio Review") && summary.contains("- Assistant: Codex"), "{summary}");
+    assert!(!summary.contains("Claude"), "{summary}");
+}
+
+/// BUG-rustic-olive-U4PY: a tool Codex calls that the run doesn't provide (an MCP server's
+/// Node REPL) ends the run at once with that cause, instead of waiting for Codex's own timeout.
+/// The failure names Codex, the tool and the missing WAV, and the next run starts right away.
+#[test]
+fn a_codex_audio_review_that_calls_a_missing_tool_fails_at_once_with_the_cause() {
+    let w = codex_world(json!([]));
+    std::fs::write(
+        &w.script,
+        json!([
+            [{"say": "Reading the inputs."}, {"mcp": {"server": "node_repl", "tool": "js"}}],
+            [
+                {"write": {"path": "project.json5", "content": PROJECT_JSON5}},
+                {"command": "cutline validate project.json5"},
+                {"command": "cutline audio project.json5 --export youtube-shorts --out outputs/audio-review.wav"},
+                {"write": {"path": "summary.md", "content": "## What you will hear\nThe tone.\n"}}
+            ]
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    let o = run_codex_audio_review(&w);
+    assert!(started.elapsed() < std::time::Duration::from_secs(60), "no waiting on the dead tool");
+    let ev = events(&o);
+    let fin = ev.last().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert_eq!(fin["status"], "failed", "{fin}");
+    let msg = fin["message"].as_str().unwrap();
+    assert!(msg.contains("Codex") && msg.contains("node_repl/js"), "{msg}");
+    assert!(msg.contains("outputs/audio-review.wav"), "names the missing WAV too: {msg}");
+    assert!(!msg.contains("Claude"), "{msg}");
+    let r = w.load_project().runs.pop().unwrap();
+    let folder = camino::Utf8PathBuf::from(&r.folder);
+    assert!(!folder.join("outputs/audio-review.wav").exists());
+    let summary = std::fs::read_to_string(folder.join("logs/summary.md")).unwrap();
+    assert!(summary.contains("Audio Review") && summary.contains("node_repl/js"), "{summary}");
+    // the last stage is not reported as a success
+    assert!(!ev.iter().any(|e| e["event"] == "stage_finished" && e["ok"] == true && e["stage"] == "done"));
+
+    // the next run starts immediately and succeeds
+    let o = run_codex_audio_review(&w);
+    let fin = events(&o).pop().unwrap_or_else(|| panic!("no events\n{}", stderr(&o)));
+    assert!(matches!(fin["status"].as_str(), Some("succeeded" | "succeeded_with_warnings")), "{fin}");
+}
