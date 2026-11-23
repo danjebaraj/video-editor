@@ -2,8 +2,8 @@
 id: BUG-green-cricket-P6HQ
 type: bug
 title: Codex Audio Review reports narration files written before the patch completes
-status: open
-fix: none
+status: fixed
+fix: fixed
 verified: no
 approved: yes
 approved-on: 2026-11-22
@@ -40,11 +40,11 @@ At 23:05:44 local time the inspector reported four “Wrote” events. The proto
 
 ## Fix checklist
 
-- [ ] Trace the four-path request through `crates/video-studio-core/src/codex/agent.rs`, including per-path decisions, request/response correlation and terminal item handling. Record whether the server applied the patch, failed it, or stopped responding. Treat the captured acceptance as evidence of host response only.
-- [ ] Validate every destination against the run workspace before approving the batch. Send one correlated response per request. Emit pending status on start and successful writes only after confirmed success. Surface failed, declined and missing completions distinctly. Bound the pending wait with a documented deadline and clear it on completion, Stop or disconnect. Keep the existing shell allowlist.
-- [ ] In `run/events.rs`, classify `cutline audio --help` as informational. In `run/orchestrator.rs`, retain the earliest unresolved operation in the terminal message, identify affected relative paths, and link only diagnostics that were written.
-- [ ] Extend `crates/video-studio-cli/tests/codex_runs.rs` with success, withheld completion, explicit failure and mixed allowed/outside-workspace batch cases. Assert exactly one approval response, no premature write success, no out-of-workspace change, and a single terminal outcome. Exercise timeout using a short test deadline.
-- [ ] Verify the success fixture passes the four script contents to the local helper and produces a decodable `outputs/audio-review.wav` through the normal audio command. Verify the stalled fixture spends zero credits, exposes no playback, reports the pending patch and allows a subsequent run. The two shell denials and the help command must not be reported as a completed write or an attempted mix.
+- [x] Trace the four-path request through `crates/video-studio-core/src/codex/agent.rs`, including per-path decisions, request/response correlation and terminal item handling. Record whether the server applied the patch, failed it, or stopped responding. Treat the captured acceptance as evidence of host response only.
+- [x] Validate every destination against the run workspace before approving the batch. Send one correlated response per request. Emit pending status on start and successful writes only after confirmed success. Surface failed, declined and missing completions distinctly. Bound the pending wait with a documented deadline and clear it on completion, Stop or disconnect. Keep the existing shell allowlist.
+- [x] In `run/events.rs`, classify `cutline audio --help` as informational. In `run/orchestrator.rs`, retain the earliest unresolved operation in the terminal message, identify affected relative paths, and link only diagnostics that were written.
+- [x] Extend `crates/video-studio-cli/tests/codex_runs.rs` with success, withheld completion, explicit failure and mixed allowed/outside-workspace batch cases. Assert exactly one approval response, no premature write success, no out-of-workspace change, and a single terminal outcome. Exercise timeout using a short test deadline.
+- [x] Verify the success fixture passes the four script contents to the local helper and produces a decodable `outputs/audio-review.wav` through the normal audio command. Verify the stalled fixture spends zero credits, exposes no playback, reports the pending patch and allows a subsequent run. The two shell denials and the help command must not be reported as a completed write or an attempted mix.
 
 ## Implementation log
 
@@ -53,3 +53,16 @@ At 23:05:44 local time the inspector reported four “Wrote” events. The proto
 - Implemented: Documented the protocol sequence, user-visible failures and local regression fixtures.
 - Not done: Root-cause confirmation, implementation and verification await approval.
 - Files: This bug README.md.
+
+### 2026-11-22 (fix)
+
+- Implemented: every fix checklist item.
+  - Cause: `agent.rs` turned the `fileChange` item's start into Write tool calls, and the orchestrator showed "Wrote" for each one on the spot. The host's `accept` was the only evidence; nothing waited for Codex's `item/completed`. In the reported run Codex never sent it, so the patch's real outcome is unknown.
+  - `codex/agent.rs`: every path in a batch is still checked before one correlated answer goes out, and one refused path declines the whole batch. An accepted change is now tracked until Codex reports it applied. Applied, failed (`Codex couldn't apply this change (failed)`) and declined changes are reported separately. Calls the broker declined are closed quietly, because the "Blocked" note already said why. The wait has a documented 120 s limit (`PATCH_TIMEOUT`; tests shorten it with `VIDEO_STUDIO_CODEX_PATCH_TIMEOUT_MS`). When it runs out, the run stops and names the files. The wait is cleared on completion, Stop, abort or disconnect. A turn that ends with a change still unapplied fails with the same cause. The shell allowlist is unchanged.
+  - `run/orchestrator.rs`: Codex writes show "Writing `path`…" while pending and "Wrote `path`" only after confirmation. Writes that never completed are named, by relative path, in the failure message, or as a warning if the run otherwise succeeded. The summary links only log files that exist; Codex runs have no `permissions.ndjson`. `--help` calls don't count as progress.
+  - `run/events.rs`: `--help`/`-h` never starts a stage, so `cutline audio --help` doesn't start Mix.
+  - `run/prompt.rs`: Codex is told not to retry a refused read and not to read back files it has just written.
+- Tests (`crates/video-studio-cli/tests/codex_runs.rs`, new fake Codex `patch` step): a successful four-file patch whose scripts feed the speech helper and produce the WAV; a withheld completion with a 1.5 s limit (no "Wrote", no Mix, zero credits, no WAV, files named, the next run works); a failed patch; and a batch with one path outside the run folder (declined whole, one answer, nothing written). Each checks for exactly one approval answer. `cargo test --workspace` passes.
+- Not done: the fixture's run folder path has no spaces; the World test fixture puts the library in a temp folder without them. Not tried yet with the real Codex CLI, so the bug stays unverified.
+- Files: `codex/agent.rs`, `run/orchestrator.rs`, `run/events.rs`, `run/prepare.rs`, `run/prompt.rs`, `assistant.rs`, `src/bin/fake_codex.rs`, `tests/codex_runs.rs`.
+

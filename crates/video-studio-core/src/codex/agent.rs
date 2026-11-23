@@ -86,7 +86,19 @@ pub struct CodexOptions {
     pub web_access: bool,
     /// Raw protocol log (`codex.jsonl`).
     pub log: Option<Utf8PathBuf>,
+    /// How long an accepted file change may take to be reported applied; `None`:
+    /// [`PATCH_TIMEOUT`].
+    pub patch_timeout: Option<Duration>,
 }
+
+/// How long Codex has to report an accepted file change applied (`item/completed`) before the
+/// run stops with the files named (BUG-green-cricket-P6HQ). Approval is the host's answer only;
+/// a change counts as written when Codex reports it completed.
+pub const PATCH_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The result content of a tool call the host declined: the host already said why, so the run
+/// closes the call without a second message.
+pub const DECLINED_BY_HOST: &str = "Declined by Syncfusion Video Studio (already reported).";
 
 /// Effort levels Codex takes; the app's `max` is Codex's `xhigh`.
 pub fn codex_effort(effort: Option<&str>) -> Option<String> {
@@ -364,6 +376,7 @@ impl CodexProcess {
             interrupted: false,
             disconnected: false,
             aborted: None,
+            applying: HashMap::new(),
         };
         let prompt = prompt.to_string();
         let drv_shared = shared.clone();
@@ -494,6 +507,8 @@ struct Driver {
     /// Why the host stopped the turn itself (a tool the run doesn't provide), and by when the
     /// turn must have ended.
     aborted: Option<(String, Instant)>,
+    /// Accepted file changes Codex hasn't reported applied yet: item → (paths, deadline).
+    applying: HashMap<String, (Vec<String>, Instant)>,
 }
 
 /// The key a server request ID is known by on the host side.
@@ -685,6 +700,10 @@ impl Driver {
                 self.interrupted = true;
                 self.send_interrupt();
             }
+            // an accepted change Codex never reports applied stops the run, naming the files
+            if let Some(why) = self.overdue_change() {
+                self.abort(why);
+            }
             // a turn the host stopped that doesn't end in time ends here, with the cause
             if let Some((why, by)) = self.aborted.clone() {
                 if Instant::now() >= by {
@@ -716,6 +735,7 @@ impl Driver {
     fn send_interrupt(&mut self) {
         // Pending questions and approvals are released first: nothing waits on the host now.
         self.release_pending();
+        self.stop_waiting_for_changes();
         if let (Some(thread), Some(turn)) = (self.thread.clone(), self.turn.clone()) {
             self.request("turn/interrupt", json!({"threadId": thread, "turnId": turn}));
         }
@@ -725,6 +745,12 @@ impl Driver {
         let status = turn["status"].as_str().unwrap_or("completed");
         if let Some((why, _)) = self.aborted.clone() {
             return self.fail(why);
+        }
+        // a turn that ends with an accepted change still unapplied didn't finish it
+        if let Some(paths) = self.unapplied_paths() {
+            return self.fail(format!(
+                "The Codex turn ended while its change to {paths} was accepted but never reported applied, so whether those files are on disk is unknown. Run the Audio Review or production run again."
+            ));
         }
         let error = turn["error"]["message"].as_str().map(str::to_string).or(self.last_error.clone());
         let (is_error, subtype) = match status {
@@ -763,6 +789,12 @@ impl Driver {
         for key in self.pending.keys().cloned().collect::<Vec<_>>() {
             self.answer(&key, None, "The user stopped this turn.");
         }
+    }
+
+    /// Stop or an abort: nothing waits for an accepted change any more (its paths are already
+    /// in the abort's reason).
+    fn stop_waiting_for_changes(&mut self) {
+        self.applying.clear();
     }
 
     /// Answers one server request (or one path of a file change). `allow` carries the host's
@@ -847,6 +879,11 @@ impl Driver {
         let Some(Pending::Files { id, v1, denied, item, .. }) = self.pending.remove(key) else { return };
         if denied.is_some() {
             self.declined(item);
+        } else if let Some(i) = &item {
+            // accepted: written only once Codex reports it applied, within the deadline
+            let paths = self.file_items.get(i).cloned().unwrap_or_default();
+            let by = Instant::now() + self.options.patch_timeout.unwrap_or(PATCH_TIMEOUT);
+            self.applying.insert(i.clone(), (paths, by));
         }
         let decision = match (v1, &denied) {
             (false, None) => json!("accept"),
@@ -1080,10 +1117,43 @@ impl Driver {
         self.shared
             .log_line(&json!({"type": "host_abort", "ts": crate::timeutil::now_rfc3339(), "reason": why}).to_string());
         self.aborted = Some((why, Instant::now() + ABORT_GRACE));
+        self.stop_waiting_for_changes();
         if !self.interrupted {
             self.interrupted = true;
             self.send_interrupt();
         }
+    }
+
+    /// A path as the user knows it: relative to the working folder when inside it.
+    fn shown_path(&self, p: &str) -> String {
+        let path = Utf8Path::new(p);
+        path.strip_prefix(&self.options.working_dir).map(|r| r.to_string()).unwrap_or_else(|_| p.to_string())
+    }
+
+    /// The paths of accepted changes not yet reported applied, `a`, `b` and `c`; `None` when
+    /// there are none.
+    fn unapplied_paths(&self) -> Option<String> {
+        let mut paths: Vec<String> =
+            self.applying.values().flat_map(|(p, _)| p.iter().map(|p| self.shown_path(p))).collect();
+        if paths.is_empty() {
+            return None;
+        }
+        paths.sort();
+        paths.dedup();
+        let shown: Vec<String> = paths.iter().map(|p| format!("`{p}`")).collect();
+        Some(shown.join(", "))
+    }
+
+    /// The failure for an accepted change past its deadline, once.
+    fn overdue_change(&mut self) -> Option<String> {
+        if self.aborted.is_some() || !self.applying.values().any(|(_, by)| Instant::now() >= *by) {
+            return None;
+        }
+        let paths = self.unapplied_paths()?;
+        let secs = self.options.patch_timeout.unwrap_or(PATCH_TIMEOUT).as_secs_f64();
+        Some(format!(
+            "Codex's change to {paths} was accepted but Codex didn't report it applied within {secs:.0} s, so the run was stopped. Whether those files are on disk is unknown; nothing after them ran. Try the run again, and update the Codex CLI if this keeps happening."
+        ))
     }
 
     fn item_completed(&mut self, item: &Value) {
@@ -1096,6 +1166,23 @@ impl Driver {
                     self.event(StreamEvent::AssistantText(t.to_string()));
                 }
             }
+            "commandExecution" | "fileChange" if self.declined_items.contains_key(&id) => {
+                // closed without a second message: the host already said why
+                let ids: Vec<String> = if item["type"] == "fileChange" {
+                    let n = item["changes"].as_array().map(|c| c.len()).unwrap_or(0);
+                    (0..n).map(|i| format!("{id}#{i}")).collect()
+                } else {
+                    vec![id.clone()]
+                };
+                self.applying.remove(&id);
+                for t in ids {
+                    self.event(StreamEvent::ToolResult {
+                        tool_use_id: t,
+                        content: DECLINED_BY_HOST.into(),
+                        is_error: true,
+                    });
+                }
+            }
             "commandExecution" if !declined => {
                 let failed = status != "completed" || item["exitCode"].as_i64().map(|c| c != 0).unwrap_or(false);
                 let mut content = item["aggregatedOutput"].as_str().unwrap_or("").to_string();
@@ -1106,12 +1193,19 @@ impl Driver {
                 }
                 self.event(StreamEvent::ToolResult { tool_use_id: id, content, is_error: failed });
             }
-            "fileChange" if !declined => {
+            "fileChange" => {
+                // applied, failed or declined by Codex itself: each said as such
+                self.applying.remove(&id);
                 let n = item["changes"].as_array().map(|c| c.len()).unwrap_or(0);
+                let content = match status {
+                    "completed" => String::new(),
+                    "declined" => "Codex didn't apply this change (declined).".to_string(),
+                    other => format!("Codex couldn't apply this change ({other})."),
+                };
                 for i in 0..n {
                     self.event(StreamEvent::ToolResult {
                         tool_use_id: format!("{id}#{i}"),
-                        content: String::new(),
+                        content: content.clone(),
                         is_error: status != "completed",
                     });
                 }

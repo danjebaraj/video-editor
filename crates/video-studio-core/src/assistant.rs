@@ -342,6 +342,7 @@ pub fn start_codex(
         writable_roots: vec![s.dir.clone()],
         web_access: request.web_access,
         log: Some(s.dir.with_file_name(format!("{}.codex-last-run.jsonl", s.dir.file_name().unwrap_or("session")))),
+        patch_timeout: None,
     };
     if let Some(log) = &options.log {
         let _ = std::fs::remove_file(log);
@@ -418,7 +419,9 @@ fn follow(
                     }
                     StreamEvent::ToolResult { tool_use_id, content, is_error } => {
                         let (name, input) = tools.remove(&tool_use_id).unwrap_or_default();
-                        if name != "AskUserQuestion" {
+                        // a call the broker declined: the Blocked event already said so
+                        let declined = content == crate::codex::agent::DECLINED_BY_HOST;
+                        if name != "AskUserQuestion" && !declined {
                             emit(AssistantEvent::ToolResult {
                                 id: tool_use_id,
                                 is_error,

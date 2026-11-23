@@ -614,6 +614,11 @@ pub fn prepare(request: &RunRequest, env: &RunEnv) -> Result<Prepared> {
             writable_roots: vec![folder.clone()],
             web_access: rc.web_access,
             log: Some(logs.join("codex.jsonl")),
+            // tests shorten the wait for an accepted change (BUG-green-cricket-P6HQ)
+            patch_timeout: std::env::var("VIDEO_STUDIO_CODEX_PATCH_TIMEOUT_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(std::time::Duration::from_millis),
         }
     });
 

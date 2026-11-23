@@ -198,6 +198,11 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
                         break;
                     }
                 }
+                // `cutline audio --help` asks how a command works; it starts nothing
+                // (BUG-green-cricket-P6HQ)
+                if args.iter().any(|a| is_help_flag(a)) {
+                    return None;
+                }
                 match sub? {
                     "validate" | "expand" | "cues" | "beats" => s("validate", "Validate"),
                     "review" | "preview" => s("review", "Review"),
@@ -237,6 +242,11 @@ pub fn stage_for_tool(tool: &str, input: &serde_json::Value) -> Option<(String, 
 }
 
 /// A fraction from a cutline progress line: `segment 3/12`, `frame 120/900`, or `45%`.
+/// `--help`, `-h`: a request for a command's usage, not the command.
+pub fn is_help_flag(arg: &str) -> bool {
+    matches!(arg, "--help" | "-h")
+}
+
 /// cutline commands that only look things up (BUG-rustic-olive-U4PY): their success says nothing
 /// about the project, so they neither start a stage nor complete one.
 pub fn is_informational(sub: &str) -> bool {
@@ -370,6 +380,10 @@ mod tests {
         assert_eq!(bash("video-studio capture check"), None);
         assert_eq!(stage_for_tool("Write", &json!({"file_path": "/run/summary.md"})).unwrap().0, "done");
         assert_eq!(stage_for_tool("Read", &json!({"file_path": "spec.md"})), None);
+        // BUG-green-cricket-P6HQ: asking for usage starts no stage
+        assert_eq!(bash("cutline audio --help"), None);
+        assert_eq!(bash("cutline -h render project.json5"), None);
+        assert_eq!(bash("cutline audio project.json5 --export x --out outputs/a.wav").unwrap().0, "mix");
     }
 
     #[test]

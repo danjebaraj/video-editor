@@ -20,6 +20,11 @@
 //!   `bash -lc '…'`); accepted commands really run (`sh -c` in the thread's folder).
 //! - `{"write": {"path": "p", "content": "c"}}`, `{"edit": {"path": "p", "edits": [["old",
 //!   "new"], …]}}`: a file change that asks for approval and is applied when accepted.
+//! - `{"patch": {"id": 2, "files": [{"path": "p", "content": "c"}, …], "complete": "ok"}}`: one
+//!   file change adding several files, approved once (with that request ID, `null` grantRoot and
+//!   reason). When accepted, `complete` decides what follows: `ok` writes the files and reports
+//!   the item completed, `fail` writes nothing and reports it failed, `withhold` writes nothing
+//!   and never reports it.
 //! - `{"ask": {"id": "q-1", "questions": [{"id", "header", "question", "options"}]}}`:
 //!   `item/tool/requestUserInput` with that request ID; the answer is echoed as a message.
 //! - `{"request": {"id": "x", "method": "…", "params": {…}}}`: any server request.
@@ -228,6 +233,53 @@ impl Fake {
                 }
                 t
             })?;
+        } else if let Some(p) = s.get("patch") {
+            let files: Vec<(PathBuf, String)> = p["files"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|f| {
+                            (
+                                self.resolve(f["path"].as_str().unwrap_or("")),
+                                f["content"].as_str().unwrap_or("").to_string(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let item_id = self.next_id("item");
+            let changes: Vec<Value> =
+                files.iter().map(|(path, _)| json!({"path": path, "kind": {"type": "add"}, "diff": ""})).collect();
+            self.item(
+                "item/started",
+                json!({"type": "fileChange", "id": item_id, "changes": changes, "status": "inProgress"}),
+            );
+            let rid = if p["id"].is_null() { json!(self.next_id("patch")) } else { p["id"].clone() };
+            send(
+                json!({"id": rid, "method": "item/fileChange/requestApproval", "params": {"threadId": self.thread, "turnId": self.turn, "itemId": item_id, "startedAtMs": 0, "grantRoot": null, "reason": null}}),
+            );
+            let answer = self.wait(&rid)?;
+            let status = if answer["result"]["decision"] != "accept" {
+                "declined"
+            } else {
+                match p["complete"].as_str().unwrap_or("ok") {
+                    "withhold" => return Some(()),
+                    "fail" => "failed",
+                    _ => {
+                        for (path, content) in &files {
+                            if let Some(d) = path.parent() {
+                                let _ = std::fs::create_dir_all(d);
+                            }
+                            let _ = std::fs::write(path, content);
+                        }
+                        "completed"
+                    }
+                }
+            };
+            self.item(
+                "item/completed",
+                json!({"type": "fileChange", "id": item_id, "changes": changes, "status": status}),
+            );
         } else if let Some(a) = s.get("ask") {
             let rid = a["id"].clone();
             let item_id = self.next_id("item");

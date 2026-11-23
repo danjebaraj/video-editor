@@ -190,6 +190,8 @@ struct Driver {
     /// The first tool call that failed (not one the broker refused): kept for the outcome so a
     /// missing output comes with what went wrong first (BUG-rustic-olive-U4PY).
     first_failure: Option<String>,
+    /// cutline calls (by number) that only asked for `--help` (BUG-green-cricket-P6HQ).
+    help_calls: std::collections::HashSet<u64>,
     saw_result: bool,
     warnings: Vec<String>,
     denials: u32,
@@ -316,6 +318,7 @@ impl Driver {
             model_used: None,
             result_error: None,
             first_failure: None,
+            help_calls: Default::default(),
             saw_result: false,
             warnings: Vec::new(),
             denials: 0,
@@ -370,6 +373,33 @@ impl Driver {
         if let Some((stage, _, at, ok)) = self.stage.take() {
             self.emit(EventKind::StageFinished { stage, ok, seconds: at.elapsed().as_secs_f64() });
         }
+    }
+
+    /// Whether a write is reported only once it is confirmed: Codex's file changes, which are
+    /// approved first and applied after (BUG-green-cricket-P6HQ).
+    fn confirms_writes(&self, tool: &str) -> bool {
+        self.p.codex.is_some() && matches!(tool, "Write" | "Edit" | "MultiEdit")
+    }
+
+    /// A path relative to the run folder when inside it.
+    fn shown(&self, path: &str) -> String {
+        Utf8Path::new(path).strip_prefix(&self.p.folder).map(|p| p.to_string()).unwrap_or_else(|_| path.to_string())
+    }
+
+    /// The writes that started and were never reported done, `a`, `b`; `None` when there are none.
+    fn unfinished_writes(&self) -> Option<String> {
+        let mut paths: Vec<String> = self
+            .tools
+            .values()
+            .filter(|(name, ..)| matches!(name.as_str(), "Write" | "Edit" | "MultiEdit"))
+            .map(|(_, _, input)| format!("`{}`", self.shown(input["file_path"].as_str().unwrap_or("file"))))
+            .collect();
+        if paths.is_empty() {
+            return None;
+        }
+        paths.sort();
+        paths.dedup();
+        Some(paths.join(", "))
     }
 
     /// " First problem: …" for an outcome message, when a tool call failed during the run.
@@ -542,7 +572,16 @@ impl Driver {
                     self.start_stage(s, label);
                 }
                 self.tools.insert(id, (name.clone(), stage.map(|s| s.0), input.clone()));
-                if name != "AskUserQuestion" {
+                if self.confirms_writes(&name) {
+                    // Codex's change is written only once it reports it applied
+                    // (BUG-green-cricket-P6HQ): pending until then
+                    let path = input["file_path"].as_str().unwrap_or("file");
+                    self.emit(EventKind::Progress {
+                        stage: self.stage.as_ref().map(|s| s.0.clone()).unwrap_or_else(|| "authoring".into()),
+                        fraction: None,
+                        detail: Some(format!("Writing `{}`…", self.shown(path))),
+                    });
+                } else if name != "AskUserQuestion" {
                     let detail = serde_json::to_string_pretty(&input).ok().map(|d| truncate(&d, 4000));
                     self.emit(EventKind::Message {
                         role: "tool".into(),
@@ -555,6 +594,20 @@ impl Driver {
             }
             StreamEvent::ToolResult { tool_use_id, content, is_error } => {
                 let Some((name, stage, input)) = self.tools.remove(&tool_use_id) else { return };
+                if content == crate::codex::agent::DECLINED_BY_HOST {
+                    // the broker's refusal was already reported
+                    return;
+                }
+                if !is_error && self.confirms_writes(&name) {
+                    let detail = serde_json::to_string_pretty(&input).ok().map(|d| truncate(&d, 4000));
+                    self.emit(EventKind::Message {
+                        role: "tool".into(),
+                        text: tool_summary(&name, &input, &self.p.folder),
+                        tool: Some(name.clone()),
+                        detail,
+                        failed: false,
+                    });
+                }
                 if is_error && content.contains("blocked by Syncfusion Video Studio") {
                     // Refused by the pre-tool hook: an answer Claude adapts to, not a failure.
                     let reason = content
@@ -709,6 +762,12 @@ impl Driver {
             let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
             let stage = self.stage.as_ref().map(|s| s.0.clone()).unwrap_or_else(|| "authoring".into());
             match v["type"].as_str() {
+                Some("start") => {
+                    let argv = v["argv"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+                    if argv.is_some_and(|a| a.iter().any(|x| super::events::is_help_flag(x))) {
+                        self.help_calls.insert(v["n"].as_u64().unwrap_or(0));
+                    }
+                }
                 Some("line") => {
                     let text = v["text"].as_str().unwrap_or("");
                     self.emit(EventKind::Progress {
@@ -726,7 +785,7 @@ impl Driver {
                     let command = v["command"].as_str().unwrap_or("");
                     let log = self.p.logs.join(format!("cutline/{n:03}-{command}.log"));
                     // a lookup (schema, help, doctor) finishing completes nothing (BUG-rustic-olive-U4PY)
-                    let lookup = super::events::is_informational(command);
+                    let lookup = super::events::is_informational(command) || self.help_calls.contains(&n);
                     self.emit(EventKind::Progress {
                         stage,
                         fraction: (code == 0 && !lookup).then_some(1.0),
@@ -883,6 +942,16 @@ impl Driver {
                 }
             }
         }
+        // Writes that never completed are named, whatever else happened (BUG-green-cricket-P6HQ).
+        if let Some(paths) = self.unfinished_writes() {
+            if failed {
+                if let Some(m) = message.as_mut().filter(|m| !m.contains(&paths)) {
+                    m.push_str(&format!(" These changes never completed: {paths}."));
+                }
+            } else if !cancelled {
+                self.warn(format!("{} never reported these changes complete: {paths}.", self.agent_short()));
+            }
+        }
         // An Audio Review that failed for another reason also says the soundtrack wasn't mixed
         // (BUG-rustic-olive-U4PY).
         if kind == RunKind::AudioReview && failed && outputs.iter().all(|o| !o.exists || o.bytes <= 44) {
@@ -996,11 +1065,19 @@ impl Driver {
             summary.push_str(&format!("- Note: {m}\n"));
         }
         if self.denials > 0 {
-            summary.push_str(&format!(
-                "- Blocked tool calls: {} (see logs/permissions.ndjson and logs/{})\n",
-                self.denials,
-                if self.p.codex.is_some() { "codex.jsonl" } else { "claude.jsonl" }
-            ));
+            summary.push_str(&format!("- Blocked tool calls: {}{}\n", self.denials, {
+                // only logs that exist (BUG-green-cricket-P6HQ)
+                let logs: Vec<String> = ["permissions.ndjson", "codex.jsonl", "claude.jsonl"]
+                    .iter()
+                    .filter(|f| self.p.logs.join(f).is_file())
+                    .map(|f| format!("logs/{f}"))
+                    .collect();
+                if logs.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (see {})", logs.join(" and "))
+                }
+            }));
         }
         if !outputs.is_empty() {
             summary.push_str("\n| Output | File | Size | QA |\n|---|---|---|---|\n");
