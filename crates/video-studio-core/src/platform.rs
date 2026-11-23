@@ -156,6 +156,40 @@ fn the_windows_version_number_is_read_from_ver() {
     assert!(os_version().is_some_and(|v| v.starts_with("10.") && !v.contains(' ')), "{:?}", os_version());
 }
 
+/// BUG-amber-walrus-72VP: a tree started from a thread that blocks `SIGCHLD` (as Swift's
+/// cooperative pool does) starts with nothing blocked, so Codex hears its commands exit.
+#[cfg(all(test, unix))]
+#[test]
+fn a_process_tree_starts_with_no_signals_blocked() {
+    let perl = "/usr/bin/perl";
+    if !Utf8Path::new(perl).exists() {
+        eprintln!("skipped: no {perl}");
+        return;
+    }
+    let script = "use POSIX; my $s = POSIX::SigSet->new; sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $s); \
+                  print $s->ismember(SIGCHLD) ? qq(blocked) : qq(clear)";
+    let mask = |group: bool| {
+        std::thread::spawn(move || {
+            // SAFETY: changes only this test thread's own mask.
+            unsafe {
+                let mut chld: libc::sigset_t = std::mem::zeroed();
+                libc::sigemptyset(&mut chld);
+                libc::sigaddset(&mut chld, libc::SIGCHLD);
+                libc::pthread_sigmask(libc::SIG_BLOCK, &chld, std::ptr::null_mut());
+            }
+            let mut cmd = Command::new(perl);
+            cmd.args(["-e", script]).stdout(std::process::Stdio::piped());
+            let child = if group { ProcessGroup::spawn(&mut cmd) } else { cmd.spawn() }.unwrap();
+            String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+        })
+        .join()
+        .unwrap()
+    };
+    // the control shows the mask really is inherited without the reset
+    assert_eq!(mask(false), "blocked");
+    assert_eq!(mask(true), "clear");
+}
+
 /// No durable references: resolution falls back to relative path, absolute path and search roots.
 pub struct NoFileRefs;
 
@@ -232,6 +266,19 @@ impl OpenWith for SystemOpener {
     }
 }
 
+/// Clears the calling thread's signal mask and restores `SIGCHLD`'s default action, so a child
+/// doesn't inherit the blocked or ignored signals of the thread that started it.
+#[cfg(unix)]
+fn reset_signals() {
+    // SAFETY: plain libc calls on a local, initialized signal set.
+    unsafe {
+        let mut none: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut none);
+        libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+        libc::signal(libc::SIGCHLD, libc::SIG_DFL);
+    }
+}
+
 /// Spawning and killing a process tree: a process group on Unix, a Job Object on Windows.
 pub struct ProcessGroup;
 
@@ -239,11 +286,25 @@ impl ProcessGroup {
     /// Makes `cmd` the leader of a new process group so the whole tree can be signalled. On
     /// Windows the child is also created suspended: start it with [`ProcessGroup::spawn`], which
     /// puts it in its Job Object and resumes it.
+    ///
+    /// On Unix the child also starts with no signals blocked and `SIGCHLD` at its default
+    /// (BUG-amber-walrus-72VP). A signal mask and ignored signals survive `exec`, and the macOS
+    /// app calls the core from Swift's cooperative pool, whose threads block every signal. Codex
+    /// started from there inherited a blocked `SIGCHLD`, never learned that a command or patch
+    /// had exited (it waits for `SIGCHLD`), and left each one a zombie "still running".
     pub fn configure(cmd: &mut Command) {
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
+            // SAFETY: runs in the child between fork and exec, and calls only sigemptyset,
+            // sigprocmask and signal, which are async-signal-safe.
+            unsafe {
+                cmd.pre_exec(|| {
+                    reset_signals();
+                    Ok(())
+                });
+            }
         }
         #[cfg(windows)]
         windows::configure(cmd);

@@ -2,9 +2,9 @@
 id: BUG-amber-walrus-72VP
 type: bug
 title: Codex Audio Review stalls after patch approval and issue report mislabels the failure
-status: in-progress
-fix: in-progress
-verified: no
+status: verified
+fix: fixed
+verified: yes
 approved: yes
 approved-on: 2026-11-23
 priority: medium
@@ -47,8 +47,9 @@ The first patch timed out. The change to `summary.md` was abandoned nine seconds
 
 - [x] Trace one normal multi-file patch from `item/started` through `item/fileChange/requestApproval`, broker decisions, response delivery and server completion in `crates/video-studio-core/src/codex/agent.rs`. Compare with a supported local Codex app server using a disposable workspace; record the CLI version, item/request IDs, terminal notifications and observed file contents.
 - [x] Find the first divergence in the failing run's `logs/codex.jsonl`: on the MacBook Pro, Codex sent no `item/completed` for any accepted command or file change in the turn (see the log entry "The failing run's protocol log").
-- [ ] Find why Codex never reports items finished on that Mac (see "Next steps on the failing Mac" below). A fixture that deliberately omits completion tests the deadline only and cannot establish the cause.
-- [ ] Correct the cause on the app's side, if it is in how the app starts Codex (waits on the step above), and verify a real Audio Review on that Mac reaches a playable `outputs/audio-review.wav`.
+- [x] Find why Codex never reports items finished on that Mac (see "Next steps on the failing Mac" below). A fixture that deliberately omits completion tests the deadline only and cannot establish the cause.
+- [x] Correct the cause on the app's side, if it is in how the app starts Codex (waits on the step above).
+- [x] Verify a real Audio Review on that Mac reaches a playable `outputs/audio-review.wav`.
 - [x] Verify a clean run creates all four expected script contents, accepts only authorized workspace changes, and produces a decodable `outputs/audio-review.wav` using local audio. Retain separate deadlines, one response per request and unknown file state for genuinely unconfirmed writes (BUG-green-cricket-P6HQ and BUG-deft-lily-344X).
 - [x] Safeguard while the cause is unknown: an accepted change past its deadline, or still unreported when the turn ends, is checked on disk. A change whose files all match counts as written and the run goes on; otherwise the stop names each file's state instead of "unknown".
 - [x] Update report generation in `crates/video-studio-core/src/logs.rs` to use recorded provider and effective model. Use a neutral label for legacy records without reliable attribution. On failed runs identify assistant-authored summary text as a draft and give the host's terminal result precedence while retaining the draft as evidence.
@@ -140,3 +141,34 @@ For a Claude Code session on the MacBook Pro where the stall happens (every run 
   - A run folder under `~/Library/Application Support`: completed.
 - Next: Codex's session file for the thread (`~/.codex/sessions/2026/11/23/rollout-2026-11-23T11-50-45-01a20951-….jsonl` on the MacBook Pro) holds what each tool returned to the model. `~/.codex/config.toml` (features, plugins, MCP servers) holds what is set up differently there. Both are needed to name the cause.
 
+
+### 2026-11-23 — Cause found on the MacBook Pro
+
+- Setup (`daniels.macbook.pro.lan`): codex-cli 0.171.0 from Homebrew, model `gpt-6.1-sol` at effort `low`, `service_tier = "default"`, `[features] hooks = true` with one SessionStart hook (exits at once), many bundled plugins enabled (browser, chrome, computer use and others), and MCP servers `node_repl` and `computer-use` (the app turns both off). Ruled out below.
+- The failing thread's session file shows the model working through Codex's JS tool cells (`exec`, then `wait` on a cell). Every `exec_command` came back at its yield time with a `session_id` and no exit code, even `cutline init --help`, so Codex treated every process as still running. `apply_patch` wrote `audio/scene1.txt` and never returned. The run folder holds `scene1.txt` only, plus a `summary.md` written after the interrupt.
+- Every Codex run the app made on this Mac (4 before today, 2 today) shows the same thing: no spawned command or patch ever completed. Only declined commands, which never start a process, did. A Codex spec-assistant turn in the same app on 2026-11-22 did complete its file change.
+- None of these reproduce it outside the app. Each one completed every command and patch in about 0.1 s:
+  - the attached replay script
+  - the run's exact `thread/start` and `turn/start`: its 43 KB developer instructions, prompt, `.bin` PATH and run context, through the real `cutline` proxy
+  - the GUI's launchd environment and its 256 open-file limit
+  - Codex as a process-group leader
+  - an `account/read` before `thread/start`
+  - the app's own driver (`CodexProcess`), started from a shell and as a launchd job
+- Watching a live app run: the commands ran and exited within 0.1 s (the proxy logged clean exits), but each one stayed a zombie child of `codex app-server`, never reaped. A sample of the stalled server showed its tasks waiting. In 0.171.0, `codex-rs/utils/pty/src/posix_child.rs` waits for a child by looping on `waitpid(WNOHANG)` and a tokio `SIGCHLD` stream, so a `SIGCHLD` that never reaches it leaves every wait hanging.
+- Cause: the app starts runs from Swift's cooperative pool (`RunController.swift`, `Task.detached { try startRun(...) }`). Those are GCD worker threads, which block every signal. The core's threads inherit that mask. Rust's `Command` passes the signal mask on to the child (the new test's control shows it), so `codex app-server` started with `SIGCHLD` blocked in every thread. The assistant is started on the main thread (`AssistantModel.swift`, `startAssistant`), which explains why it worked.
+- Reproduced without the app: the same probe, started with `SIGCHLD` blocked, stalled exactly like the app runs (`cutline doctor` approved, never reported finished). With the fix it completed both commands and both file writes, and wrote the files.
+- Fix (`crates/video-studio-core/src/platform.rs`): `ProcessGroup::configure`, used for Codex and Claude Code, now resets the child's signal state before exec: empty signal mask, `SIGCHLD` back to its default. This covers every thread a run can start from.
+- Test: `a_process_tree_starts_with_no_signals_blocked`. From a thread that blocks `SIGCHLD`, a plain `Command` child reports it blocked (control), while a `ProcessGroup::spawn` child reports it clear.
+- Workspace tests: all pass except `cutline-render`'s `template_goldens_shorts_and_wide`, which fails the same way without this change.
+- The attached `codex-replay.py` waits with `select()` on the pipe but reads with buffered `readline()`. When Codex sends several lines at once, the rest wait in Python's buffer, so it can stall and report "completed NEVER" falsely. Read Codex's output on a thread instead. (Not edited: attachments stay as added.)
+- Still open: why the Mac mini's runs complete although they start from the same kind of thread. That doesn't affect the fix, which no longer depends on the calling thread.
+- Not done: a real Audio Review in the reinstalled app (`./install.sh`, done) reaching a playable `outputs/audio-review.wav`.
+- Files: `crates/video-studio-core/src/platform.rs`, this README.md.
+
+### 2026-11-23 — Verified on the MacBook Pro
+
+- Implemented: "Verify a real Audio Review on that Mac reaches a playable `outputs/audio-review.wav`."
+- Run `2026-11-23-1344-default`, in the app reinstalled with the fix (`./install.sh`): Codex reported all 31 commands and file changes finished. Before the fix, no run on this Mac had a single one finish. The four scene scripts and their voice files were written, and `outputs/audio-review.wav` decodes cleanly: 45.0 s, 48 kHz stereo.
+- The six items that ended `failed` were commands that exited non-zero, and Codex reported their exit codes, which is what had been broken. They were the model's own mistakes, and it recovered from each: `eleven quote tts` with `--out`, four tries of a nonexistent `eleven quote scribe` subcommand, and a `cutline validate` font error it then fixed.
+- Not done: nothing for this bug. Why the Mac mini's runs completed before the fix is still unexplained (see the previous entry).
+- Files: this README.md.
