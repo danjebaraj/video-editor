@@ -3,7 +3,7 @@ id: FEAT-spry-alpaca-5RQZ
 type: feature
 title: Add support for Codex App Server
 status: partial
-implementation: partial
+implementation: done
 approved: yes
 approved-on: 2026-11-21
 priority: medium
