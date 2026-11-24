@@ -123,8 +123,8 @@ pub fn text_background_detail(on: &RgbImage, off: &RgbImage, bbox: (u32, u32, u3
 /// nothing and prints nothing (TASK-silver-cherry-R3MZ, TASK-honest-cedar-A73E). When the fast
 /// seek gives no frame this tries an accurate seek (`-ss` after `-i`), then the last frame at or
 /// before `t`. If all fail, the error names the file, `t`, the duration, the frame count and
-/// ffmpeg's messages.
-pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
+/// ffmpeg's messages. `work` takes the last resort's frame file (see [`grab_held`]).
+pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64, work: &Path) -> Result<RgbImage> {
     let still =
         cutline_core::timeline::default_kind_from_ext(&path.to_string_lossy()) == cutline_core::model::AssetKind::Image;
     let ts = format!("{:.6}", t.max(0.0));
@@ -153,7 +153,7 @@ pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImag
     }
     // 3. the frame on screen at `t`: the last one stored at or before it
     if !still {
-        match grab_held(tc, path, t) {
+        match grab_held(tc, path, t, work) {
             Ok(img) => return Ok(img),
             Err(e) => {
                 let e = e.to_string();
@@ -178,9 +178,10 @@ pub fn grab(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImag
 
 /// The frame on screen at `t`: the last stored frame whose time is at or before `t`. Decodes from
 /// the start of the file, so use it for sparse, variable-rate recordings (or as a fallback),
-/// where the first frame after a seek can be seconds later than the one being shown.
-pub fn grab_held(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<RgbImage> {
-    let dir = tempfile::tempdir()?;
+/// where the first frame after a seek can be seconds later than the one being shown. ffmpeg
+/// writes the frame to a folder made in `work` (the project's `.cutline/tmp`), removed afterwards.
+pub fn grab_held(tc: &cutline_deps::Toolchain, path: &Path, t: f64, work: &Path) -> Result<RgbImage> {
+    let dir = scratch(work)?;
     let out = dir.path().join("held.png");
     let o = std::process::Command::new(&tc.ffmpeg)
         .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-t", &format!("{:.6}", t.max(0.0) + 0.0005)])
@@ -207,13 +208,20 @@ pub fn grab_held(tc: &cutline_deps::Toolchain, path: &Path, t: f64) -> Result<Rg
 }
 
 /// The frame shown at `t` in a source: the held frame for a sparse recording, else [`grab`].
-pub fn grab_source(tc: &cutline_deps::Toolchain, path: &Path, t: f64, sparse: bool) -> Result<RgbImage> {
+pub fn grab_source(tc: &cutline_deps::Toolchain, path: &Path, t: f64, sparse: bool, work: &Path) -> Result<RgbImage> {
     if sparse {
-        if let Ok(img) = grab_held(tc, path, t) {
+        if let Ok(img) = grab_held(tc, path, t, work) {
             return Ok(img);
         }
     }
-    grab(tc, path, t)
+    grab(tc, path, t, work)
+}
+
+/// A fresh folder inside `work` (created when missing), removed when dropped. Scratch files go
+/// in the project, not the system temp folder, which a sandboxed run (Codex) may not write.
+pub(crate) fn scratch(work: &Path) -> Result<tempfile::TempDir> {
+    std::fs::create_dir_all(work)?;
+    Ok(tempfile::Builder::new().prefix("cutline-").tempdir_in(work)?)
 }
 
 /// Duration and stored video frame count, for error messages.
@@ -490,6 +498,8 @@ pub fn review_opts(
     compare: Option<(&str, &str)>,
 ) -> Result<ReviewReport> {
     let tc = cutline_deps::toolchain()?;
+    // scratch frames: inside the project, never the system temp folder
+    let work = cutline_render::cutline_dir(&l.dir).join("tmp");
     std::fs::create_dir_all(out_dir)?;
     for sub in ["cuts", "captions", "reframe", "annotations"] {
         let d = out_dir.join(sub);
@@ -515,7 +525,7 @@ pub fn review_opts(
         let sample = |id: &str, f: i64| -> Result<(ShotSample, RgbImage)> {
             let c = tlr.clips.iter().find(|c| c.id == id).context("clip")?;
             let seg = plan.segments.iter().find(|s| s.clip_id == id).context("the clip's segment")?;
-            let img = grab(tc, &seg.mezzanine, tlr.fps.frames_to_secs(f - c.start))?;
+            let img = grab(tc, &seg.mezzanine, tlr.fps.frames_to_secs(f - c.start), &work)?;
             Ok((ShotSample { clip: id.to_string(), at: tlr.secs(f), mean_luma: mean_luma(&img) }, img))
         };
         let (ls, li) = sample(a, fa)?;
@@ -567,6 +577,7 @@ pub fn review_opts(
 
     // ---- QA
     let mut ctx = crate::deliver::qa_context(&pr.project, tl, &pr.extras);
+    ctx.work_dir = Some(work.clone());
     ctx.ocr = crate::ocr::setting(ocr, pr.project.qa.as_ref().and_then(|q| q.ocr))?;
     let mut target = tl.target.clone();
     if !use_final {
@@ -591,7 +602,7 @@ pub fn review_opts(
     let rows = (times.len() as u32).div_ceil(cols);
     let mut sheet = RgbImage::from_pixel(cols * tw, rows.max(1) * th, Rgb([16, 16, 20]));
     for (k, t) in times.iter().enumerate() {
-        let f = grab(tc, &src, *t)?;
+        let f = grab(tc, &src, *t, &work)?;
         let mut tile = image::imageops::resize(&f, tw, th, image::imageops::FilterType::Triangle);
         painter.label(&mut tile, 6, 6, 15.0, &format!("{}  {}", format_tc(*t), clip_label(tl, *t)), [255, 255, 255]);
         image::imageops::overlay(&mut sheet, &tile, ((k as u32 % cols) * tw) as i64, ((k as u32 / cols) * th) as i64);
@@ -619,8 +630,8 @@ pub fn review_opts(
     }
     let cut_pts = pick_evenly(cut_pts, 8);
     for (k, (label, a, b)) in cut_pts.iter().enumerate() {
-        let fa = grab(tc, &src, *a)?;
-        let fb = grab(tc, &src, *b)?;
+        let fa = grab(tc, &src, *a, &work)?;
+        let fb = grab(tc, &src, *b, &work)?;
         let h = if vertical { 640 } else { 400 };
         let ra = image::imageops::resize(&fa, fa.width() * h / fa.height(), h, image::imageops::FilterType::Triangle);
         let rb = image::imageops::resize(&fb, fb.width() * h / fb.height(), h, image::imageops::FilterType::Triangle);
@@ -645,7 +656,7 @@ pub fn review_opts(
     let caps = pick_evenly(caps, 4);
     for (k, b) in caps.iter().enumerate() {
         let t = (b.start + b.end) / 2.0;
-        let mut f = grab(tc, &src, t)?;
+        let mut f = grab(tc, &src, t, &work)?;
         let sc = |v: f64| (v * scale).round() as i32;
         shade_outside(&mut f, sc(sx), sc(sy), sc(sw), sc(sh));
         stroke_rect(&mut f, sc(sx), sc(sy), sc(sw), sc(sh), 2, [0, 255, 0]);
@@ -662,7 +673,7 @@ pub fn review_opts(
         // past the enter animation, before the exit
         let (s, e) = (tl.secs(a.start), tl.secs(a.end));
         let t = (s + 0.6 * (e - s)).min(e - 0.25).max(s);
-        let mut f = grab(tc, &src, t)?;
+        let mut f = grab(tc, &src, t, &work)?;
         painter.label(
             &mut f,
             8,
@@ -688,7 +699,7 @@ pub fn review_opts(
         for frac in [0.1, 0.5, 0.9] {
             let i = ((path.len() as f64 - 1.0) * frac) as usize;
             let src_t = c.src_in + (i as f64 / path.fps) * c.speed;
-            let mut f = grab_source(tc, &m.path, src_t, m.sparse())?;
+            let mut f = grab_source(tc, &m.path, src_t, m.sparse(), &work)?;
             let s = f.width() as f64 / path.src_w as f64;
             stroke_rect(
                 &mut f,
@@ -753,7 +764,7 @@ pub fn review_opts(
                 image::imageops::resize(&img, 960, h, image::imageops::FilterType::Triangle)
             }
         };
-        let (on, off) = (norm(grab(tc, &src, t_on)?), norm(grab(tc, &src, t_off)?));
+        let (on, off) = (norm(grab(tc, &src, t_on, &work)?), norm(grab(tc, &src, t_off, &work)?));
         let k = 960.0 / tl.target.width as f64;
         let sc = |v: f64| (v * k).round().max(0.0) as u32;
         if let Some(detail) = text_background_detail(&on, &off, (sc(b.x), sc(b.y), sc(b.w), sc(b.h))) {

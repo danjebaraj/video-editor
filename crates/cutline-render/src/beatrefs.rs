@@ -92,7 +92,7 @@ pub fn grid(v: &Value, dir: &Path) -> Result<BeatGrid, String> {
         .ok_or_else(|| format!("unknown asset `{asset}`"))?;
     let path = dir.join(path);
     let fp = cutline_media::fingerprint_any(&path).map_err(|e| format!("{e:#}"))?;
-    let b = crate::auto::beats_of(&path, &fp)
+    let b = crate::auto::beats_of(dir, &path, &fp)
         .map_err(|e| format!("{e:#}"))?
         .ok_or_else(|| format!("no steady beat found in `{asset}`"))?;
     let on_tl = |ts: &[f64]| -> Vec<f64> {

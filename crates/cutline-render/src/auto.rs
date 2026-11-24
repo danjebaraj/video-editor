@@ -12,9 +12,9 @@ use cutline_transcribe::{mapping, Transcript, Word};
 use std::collections::BTreeMap;
 
 /// Transcripts are cached globally (by asset fingerprint + model) so `cutline transcribe` and
-/// renders share them.
-pub fn transcript_cache(_l: &Loaded) -> Cache {
-    Cache::global("transcripts")
+/// renders share them; in the project's `.cutline/cache` when the global cache can't be written.
+pub fn transcript_cache(l: &Loaded) -> Cache {
+    Cache::shared("transcripts", &l.dir)
 }
 
 pub fn whisper_model() -> String {
@@ -47,6 +47,7 @@ pub fn transcript_for(
         &whisper_model(),
         lang.as_deref(),
         &transcript_cache(l),
+        &crate::cutline_dir(&l.dir).join("tmp"),
         allow_whisper,
     )?;
     let Some((t, _src)) = got else { return Ok(None) };
@@ -86,7 +87,8 @@ pub fn load_transcript(
         tfile.as_deref(),
         &whisper_model(),
         lang,
-        &Cache::global("transcripts"),
+        &Cache::shared("transcripts", dir),
+        &crate::cutline_dir(dir).join("tmp"),
         allow_whisper,
     )?;
     match got {
@@ -683,12 +685,17 @@ pub fn beats_for(l: &Loaded, asset: &str) -> Result<Option<cutline_audio::beats:
     if !m.facts.has_audio {
         return Ok(None);
     }
-    beats_of(&m.path, &m.fingerprint)
+    beats_of(&l.dir, &m.path, &m.fingerprint)
 }
 
-/// Tempo and beats of an audio file (source seconds), cached by content fingerprint.
-pub fn beats_of(path: &std::path::Path, fingerprint: &str) -> Result<Option<cutline_audio::beats::Beats>> {
-    let cache = Cache::global("beats");
+/// Tempo and beats of an audio file (source seconds), cached by content fingerprint: globally,
+/// or in the project (`project_dir`) when the global cache can't be written.
+pub fn beats_of(
+    project_dir: &std::path::Path,
+    path: &std::path::Path,
+    fingerprint: &str,
+) -> Result<Option<cutline_audio::beats::Beats>> {
+    let cache = Cache::shared("beats", project_dir);
     let key = cutline_media::hash_key(&[fingerprint.as_bytes(), b"beats-v4"]);
     if let Some(b) = cache.get_json::<Option<cutline_audio::beats::Beats>>(&key) {
         return Ok(b);

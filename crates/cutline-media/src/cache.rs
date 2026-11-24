@@ -8,11 +8,14 @@ use std::time::{Duration, SystemTime};
 #[derive(Debug, Clone)]
 pub struct Cache {
     pub root: PathBuf,
+    /// Read after `root`, and written when `root` can't be: the project's own copy of a shared
+    /// cache (see [`Cache::shared`]).
+    pub fallback: Option<PathBuf>,
 }
 
 impl Cache {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self { root: root.into(), fallback: None }
     }
 
     /// Global cache (`<cache_dir>/<ns>`).
@@ -20,33 +23,61 @@ impl Cache {
         Self::new(cutline_deps::paths::cache_dir().join(ns))
     }
 
+    /// The global cache `<cache_dir>/<ns>`, backed by the project's `<project>/.cutline/cache/<ns>`.
+    /// Entries are shared between projects where the global cache can be written; where it
+    /// can't (Codex's sandbox lets a run write only its own folder), they are kept in the
+    /// project instead of being lost on every run.
+    pub fn shared(ns: &str, project_dir: &Path) -> Self {
+        Self { fallback: Some(project_dir.join(".cutline").join("cache").join(ns)), ..Self::global(ns) }
+    }
+
     pub fn path(&self, key: &str, ext: &str) -> PathBuf {
-        self.root.join(&key[..2.min(key.len())]).join(format!("{key}.{ext}"))
+        entry(&self.root, key, ext)
     }
 
     pub fn get_json<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
-        let p = self.path(key, "json");
-        let s = std::fs::read_to_string(p).ok()?;
-        serde_json::from_str(&s).ok()
+        std::iter::once(&self.root).chain(&self.fallback).find_map(|root| {
+            let s = std::fs::read_to_string(entry(root, key, "json")).ok()?;
+            serde_json::from_str(&s).ok()
+        })
     }
 
-    /// Saves a value when it can. The cache only saves time, so a folder this process may not
-    /// write (a command run in Codex's sandbox can't write the global cache) must not fail the
-    /// work being cached: that failed `cutline beats` with "Operation not permitted".
+    /// Saves a value when it can: in `root`, else in `fallback`. The cache only saves time, so
+    /// a folder this process may not write (a command run in Codex's sandbox can't write the
+    /// global cache) must not fail the work being cached: that failed `cutline beats` with
+    /// "Operation not permitted".
     pub fn store_json<T: Serialize>(&self, key: &str, v: &T) {
-        if let Err(e) = self.put_json(key, v) {
+        let Err(e) = put_json_in(&self.root, key, v) else { return };
+        let Some(fb) = &self.fallback else {
             tracing::warn!("couldn't save to the cache in {}: {e:#}", self.root.display());
+            return;
+        };
+        match put_json_in(fb, key, v) {
+            Ok(_) => tracing::debug!("saved to the project cache {} ({}: {e:#})", fb.display(), self.root.display()),
+            Err(e2) => tracing::warn!(
+                "couldn't save to the cache in {} ({e:#}) or in {} ({e2:#})",
+                self.root.display(),
+                fb.display()
+            ),
         }
     }
 
     pub fn put_json<T: Serialize>(&self, key: &str, v: &T) -> Result<PathBuf> {
-        let p = self.path(key, "json");
-        std::fs::create_dir_all(p.parent().unwrap())?;
-        let tmp = p.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(v)?)?;
-        std::fs::rename(&tmp, &p)?;
-        Ok(p)
+        put_json_in(&self.root, key, v)
     }
+}
+
+fn entry(root: &Path, key: &str, ext: &str) -> PathBuf {
+    root.join(&key[..2.min(key.len())]).join(format!("{key}.{ext}"))
+}
+
+fn put_json_in<T: Serialize>(root: &Path, key: &str, v: &T) -> Result<PathBuf> {
+    let p = entry(root, key, "json");
+    std::fs::create_dir_all(p.parent().unwrap())?;
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(v)?)?;
+    std::fs::rename(&tmp, &p)?;
+    Ok(p)
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -130,6 +161,26 @@ mod tests {
         let ok = Cache::new(d.join("beats"));
         ok.store_json("abcd", &2);
         assert_eq!(ok.get_json::<i32>("abcd"), Some(2));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn a_shared_cache_keeps_entries_in_the_project_when_the_global_one_is_read_only() {
+        let d = std::env::temp_dir().join(format!("cutline-cache-shared-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        // a file where the global folder would be: nothing can be created under it
+        let blocked = d.join("global");
+        std::fs::write(&blocked, b"").unwrap();
+        let project = d.join("project");
+        let c = Cache { root: blocked.join("beats"), ..Cache::shared("beats", &project) };
+        assert_eq!(c.fallback.as_deref(), Some(project.join(".cutline/cache/beats").as_path()));
+        c.store_json("abcd", &3);
+        assert_eq!(c.get_json::<i32>("abcd"), Some(3));
+        assert!(project.join(".cutline/cache/beats/ab/abcd.json").is_file());
+        // a writable global cache is preferred, and read first
+        let g = Cache { root: d.join("ok").join("beats"), ..Cache::shared("beats", &project) };
+        g.store_json("abcd", &4);
+        assert_eq!(g.get_json::<i32>("abcd"), Some(4));
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test]

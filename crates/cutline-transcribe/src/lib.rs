@@ -23,7 +23,9 @@ pub enum Source {
 }
 
 /// Get the transcript for an asset: explicit file (Scribe or cutline JSON) → cache → whisper
-/// (when allowed and available). Cached by asset fingerprint + model.
+/// (when allowed and available). Cached by asset fingerprint + model. Whisper works in a folder
+/// under `work_root` (the project's `.cutline/tmp`: a sandboxed run may write nothing else),
+/// removed afterwards.
 pub fn get(
     tc: &cutline_deps::Toolchain,
     asset_id: &str,
@@ -33,6 +35,7 @@ pub fn get(
     model: &str,
     lang: Option<&str>,
     cache: &Cache,
+    work_root: &Path,
     allow_whisper: bool,
 ) -> Result<Option<(Transcript, Source)>> {
     if let Some(f) = transcript_file {
@@ -52,11 +55,12 @@ pub fn get(
     if !allow_whisper || whisper::available(model).is_err() {
         return Ok(None);
     }
-    let work = cache.root.join("work").join(&key);
-    let mut t = whisper::transcribe(tc, media, model, lang, &work)?;
+    let work = work_root.join(format!("whisper-{}-{}", std::process::id(), &key[..12.min(key.len())]));
+    let res = whisper::transcribe(tc, media, model, lang, &work);
+    let _ = std::fs::remove_dir_all(&work);
+    let mut t = res?;
     t.asset = asset_id.into();
     cache.store_json(&key, &t);
-    let _ = std::fs::remove_dir_all(&work);
     Ok(Some((t, Source::Whisper(model.into()))))
 }
 

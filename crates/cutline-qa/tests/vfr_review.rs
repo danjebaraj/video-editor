@@ -57,6 +57,7 @@ const WHITE: [u8; 3] = [255, 255, 255];
 fn grabs_on_a_sparse_capture_show_the_frame_on_screen() {
     let Some(tc) = test_toolchain() else { return };
     let d = tempfile::tempdir().unwrap();
+    let w = d.path().join("work");
     let rec = d.path().join("sparse-12s.mov");
     // 0, 0.5, 1.7, 4.0, 4.3, 8.0, 9.1, 11.9 and 11.967 s
     sparse(tc, &rec, 270, 480, 12.0, &[0, 15, 51, 120, 129, 240, 273, 357, 359]);
@@ -65,29 +66,30 @@ fn grabs_on_a_sparse_capture_show_the_frame_on_screen() {
     assert!((times[7] - 11.9).abs() < 0.01 && (times[3] - 4.0).abs() < 0.01, "{times:?}");
 
     // the frame on screen at 11.433 s is the blue one stored at 9.1 s, not the white change at 11.9
-    assert!(is_color(center(&grab_held(tc, &rec, 11.433).unwrap()), BLUE));
-    assert!(is_color(center(&grab_source(tc, &rec, 11.433, true).unwrap()), BLUE));
-    assert!(is_color(center(&grab_source(tc, &rec, 2.0, true).unwrap()), RED));
-    assert!(is_color(center(&grab_source(tc, &rec, 6.5, true).unwrap()), GREEN));
+    assert!(is_color(center(&grab_held(tc, &rec, 11.433, &w).unwrap()), BLUE));
+    assert!(is_color(center(&grab_source(tc, &rec, 11.433, true, &w).unwrap()), BLUE));
+    assert!(is_color(center(&grab_source(tc, &rec, 2.0, true, &w).unwrap()), RED));
+    assert!(is_color(center(&grab_source(tc, &rec, 6.5, true, &w).unwrap()), GREEN));
     // after the last stored frame but inside the file: used to be an empty image and an empty error
-    assert!(is_color(center(&grab(tc, &rec, 11.99).unwrap()), WHITE));
+    assert!(is_color(center(&grab(tc, &rec, 11.99, &w).unwrap()), WHITE));
 
     // control: the same picture at a constant 30 fps
     let cfr = d.path().join("cfr-12s.mov");
     let mut c = tc.ffmpeg_cmd();
     c.arg("-i").arg(&rec).args(["-vf", "fps=30", "-c:v", "libx264", "-pix_fmt", "yuv420p"]).arg(&cfr);
     gen::run(c).unwrap();
-    assert!(is_color(center(&grab(tc, &cfr, 11.433).unwrap()), BLUE));
-    assert!(is_color(center(&grab_source(tc, &cfr, 11.433, false).unwrap()), BLUE));
+    assert!(is_color(center(&grab(tc, &cfr, 11.433, &w).unwrap()), BLUE));
+    assert!(is_color(center(&grab_source(tc, &cfr, 11.433, false, &w).unwrap()), BLUE));
 }
 
 #[test]
 fn a_failed_grab_says_which_file_and_why() {
     let Some(tc) = test_toolchain() else { return };
     let d = tempfile::tempdir().unwrap();
+    let w = d.path().join("work");
     let bad = d.path().join("broken.mov");
     std::fs::write(&bad, b"not a video").unwrap();
-    let e = grab(tc, &bad, 0.9).unwrap_err().to_string();
+    let e = grab(tc, &bad, 0.9, &w).unwrap_err().to_string();
     assert!(e.starts_with("frame grab at 0.900s failed: "), "{e}");
     assert!(e.contains("broken.mov") && e.contains("duration") && e.contains("frames"), "{e}");
     assert!(!e.trim_end().ends_with("failed:"), "the reason is never empty: {e}");
@@ -115,6 +117,7 @@ fn review_project(dir: &Path, name: &str, file: &str, reframe: &str) -> cutline_
 fn review_finishes_on_sparse_captures() {
     let Some(tc) = test_toolchain() else { return };
     let d = tempfile::tempdir().unwrap();
+    let w = d.path().join("work");
     std::fs::create_dir_all(d.path().join("tests/fixtures/vfr")).unwrap();
     let rec7 = "tests/fixtures/vfr/sparse-7s.mov";
     let keep7 =
@@ -132,17 +135,17 @@ fn review_finishes_on_sparse_captures() {
     assert!(r.images.iter().any(|p| p.ends_with("contact_sheet.jpg")));
     // the review's own picture at 0.9 s holds the frame stored at 0.6 s
     let preview = out.join("preview_540p.mp4");
-    assert!(grab(tc, &preview, 0.9).is_ok());
+    assert!(grab(tc, &preview, 0.9, &w).is_ok());
 
     sparse(tc, &d.path().join("sparse-12s.mov"), 270, 480, 12.0, &[0, 15, 51, 120, 129, 240, 273, 357, 359]);
     review_project(d.path(), "whole", "sparse-12s.mov", "");
     let whole = d.path().join("review/whole/preview_540p.mp4");
-    assert!(is_color(center(&grab(tc, &whole, 11.433).unwrap()), BLUE), "the held frame at 11.433 s");
+    assert!(is_color(center(&grab(tc, &whole, 11.433, &w).unwrap()), BLUE), "the held frame at 11.433 s");
     let mut c = tc.ffmpeg_cmd();
     c.arg("-i").arg(d.path().join("sparse-12s.mov")).args(["-vf", "fps=30", "-c:v", "libx264", "-pix_fmt", "yuv420p"]);
     c.arg(d.path().join("cfr-12s.mov"));
     gen::run(c).unwrap();
     review_project(d.path(), "control", "cfr-12s.mov", "");
     let control = d.path().join("review/control/preview_540p.mp4");
-    assert!(is_color(center(&grab(tc, &control, 11.433).unwrap()), BLUE));
+    assert!(is_color(center(&grab(tc, &control, 11.433, &w).unwrap()), BLUE));
 }
