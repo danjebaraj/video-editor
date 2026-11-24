@@ -31,6 +31,24 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum InternalCmd {
+    /// Render one browser job (an HTML graphic or a browser recording) into its cache folder: the
+    /// other half of `CUTLINE_BROWSER_DELEGATE`, for apps whose sandbox Chrome can't start in.
+    BrowserJob { file: PathBuf },
+}
+
+/// Runs a browser job handed over by a cutline that couldn't start Chrome (BUG-stellar-lily-K8CN).
+fn browser_job(file: &std::path::Path) -> Result<Output, CliError> {
+    let text = std::fs::read_to_string(file).map_err(CliError::internal)?;
+    let job: cutline_html::delegate::Job = serde_json::from_str(&text).map_err(CliError::internal)?;
+    // this process renders: it never hands the job on again
+    std::env::remove_var(cutline_html::delegate::DELEGATE_ENV);
+    let tc = cutline_deps::toolchain().map_err(CliError::internal)?;
+    let out = cutline_html::delegate::execute(tc, &job).map_err(CliError::internal)?;
+    Ok(Output::ok(json!({"output": out}), out.display().to_string()))
+}
+
+#[derive(Subcommand)]
 enum Cmd {
     /// Check tools, capabilities, fonts, models, Chrome and disk space.
     Doctor,
@@ -38,6 +56,12 @@ enum Cmd {
     /// one they were built with (the version number alone rarely changes).
     #[command(hide = true)]
     BuildInfo,
+    /// Commands apps run, not people.
+    #[command(hide = true)]
+    Internal {
+        #[command(subcommand)]
+        cmd: InternalCmd,
+    },
     /// Manage external tools (ffmpeg, models, chrome).
     Deps {
         #[command(subcommand)]
@@ -311,7 +335,21 @@ fn init_tracing(verbose: bool) {
         .try_init();
 }
 
+/// Unblocks every signal before any thread starts (BUG-stellar-lily-K8CN). A signal mask survives
+/// `exec`: started from a thread that blocks `SIGCHLD` (a macOS app's worker thread), cutline
+/// would never hear Chrome or ffmpeg exit and would wait for them forever.
+fn unblock_signals() {
+    #[cfg(unix)]
+    // SAFETY: plain libc calls on a local, initialized set; no other thread exists yet.
+    unsafe {
+        let mut none: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut none);
+        libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+    }
+}
+
 fn main() {
+    unblock_signals();
     let cli = match Cli::try_parse() {
         Ok(c) => c,
         Err(e) => {
@@ -389,9 +427,13 @@ fn dispatch(cli: Cli) -> CmdResult {
         Cmd::Still { input, out, max_side, quality } => still_cmd::run(&input, &out, max_side, quality),
         Cmd::Validate { project } => edit::validate(&project),
         Cmd::Schema => edit::schema(),
+        Cmd::Internal { cmd: InternalCmd::BrowserJob { file } } => browser_job(&file),
         Cmd::BuildInfo => {
             let (version, source) = (env!("CARGO_PKG_VERSION"), env!("CUTLINE_SOURCE"));
-            Ok(Output::ok(json!({"version": version, "source": source}), format!("cutline {version} (source {source})")))
+            Ok(Output::ok(
+                json!({"version": version, "source": source}),
+                format!("cutline {version} (source {source})"),
+            ))
         }
         Cmd::Init { dir, dir_flag, target, style, assets, name } => {
             let dir = dir_flag.unwrap_or(dir);

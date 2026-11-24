@@ -11,6 +11,7 @@ anyhow = "1.0.104"
 clap = { version = "4.5.61", features = ["derive"] }
 cutline-core = { version = "0.1.0", path = "../cutline-core" }
 cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
+cutline-html = { version = "0.1.0", path = "../cutline-html" }
 cutline-media = { version = "0.1.0", path = "../cutline-media" }
 cutline-qa = { version = "0.1.0", path = "../cutline-qa" }
 cutline-render = { version = "0.1.0", path = "../cutline-render" }
@@ -24,6 +25,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
 
 [features]
 onnx = ["cutline-render/onnx", "cutline-qa/onnx"]

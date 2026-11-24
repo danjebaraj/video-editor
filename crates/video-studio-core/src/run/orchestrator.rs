@@ -33,6 +33,24 @@ pub const STOP_GRACE: Duration = Duration::from_secs(5);
 /// The message Claude gets when nobody answers a question.
 pub const ASSUME_MESSAGE: &str = "No one is available to answer. Proceed on your stated assumption (your first, recommended option), and record this question and the assumption you made in summary.md.";
 
+/// The run result's note for capture the system's permissions blocked (BUG-stellar-lily-K8CN):
+/// what each missing permission stops.
+fn capture_blocked_note(missing: &[String]) -> String {
+    let what: Vec<String> = missing
+        .iter()
+        .map(|m| match m.as_str() {
+            crate::capture::SCREEN_RECORDING => format!("recording and screenshots need {m}"),
+            crate::capture::ACCESSIBILITY => format!("clicking, typing and menus need {m}"),
+            other => format!("capture needs {other}"),
+        })
+        .collect();
+    format!(
+        "Desktop capture was blocked: {}, which {} doesn't have (System Settings › Privacy & Security). Anything delivered was made without it.",
+        what.join("; "),
+        crate::APP_NAME
+    )
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RunOutcome {
     pub run_id: String,
@@ -121,6 +139,8 @@ pub fn start_run(request: &RunRequest, env: &RunEnv, sink: Arc<dyn EventSink>) -
     let project_path = request.project_path.clone();
     let thread_shared = shared.clone();
     let thread = std::thread::Builder::new().name("video-studio-run".into()).spawn(move || {
+        // nothing the run starts may inherit the caller's blocked signals (BUG-stellar-lily-K8CN)
+        crate::platform::unblock_signals();
         let outcome = Driver::new(prepared, sink, thread_shared.clone(), price, project_path).drive();
         thread_shared.finished.store(true, Ordering::SeqCst);
         outcome
@@ -530,14 +550,16 @@ impl Driver {
             // traced, not counted: it's true of every Codex run, so it doesn't change the outcome
             self.emit(EventKind::Warning { message: crate::codex::agent::READS_UNCHECKED_WARNING.into() });
         }
-        // Codex's sandbox can't reach the key store or the network: the host makes the
-        // ElevenLabs calls the helper hands it (BUG-deft-lily-344X)
+        // Codex's sandbox can't reach the key store or the network, and Chrome can't start in
+        // it: the host makes the ElevenLabs calls and renders the browser jobs the helper hands
+        // it (BUG-deft-lily-344X, BUG-stellar-lily-K8CN)
         let relay = match (&self.p.codex, &self.p.helper_context.relay_dir) {
             (Some(_), Some(dir)) => Some(super::relay::HostRelay::start(super::relay::HostSetup {
                 dir: dir.clone(),
                 helper: self.p.helper.clone(),
                 context_file: self.p.context_dir.join("context.json"),
                 run_folder: self.p.folder.clone(),
+                web_access: self.p.codex.as_ref().is_some_and(|c| c.web_access),
             })),
             _ => None,
         };
@@ -1044,6 +1066,20 @@ impl Driver {
                 self.warn(note);
             }
         }
+        // Capture that needed a permission the app doesn't have is said, even when the run
+        // delivered something else in its place (BUG-stellar-lily-K8CN).
+        let blocked = crate::capture::blocked_permissions(&self.p.helper_context.logs_dir);
+        if !blocked.is_empty() && !cancelled {
+            let note = capture_blocked_note(&blocked);
+            if failed {
+                if let Some(m) = message.as_mut().filter(|m| !m.contains(&note)) {
+                    m.push(' ');
+                    m.push_str(&note);
+                }
+            } else {
+                self.warn(note);
+            }
+        }
         // An Audio Review that failed for another reason also says the soundtrack wasn't mixed
         // (BUG-rustic-olive-U4PY).
         if kind == RunKind::AudioReview && failed && outputs.iter().all(|o| !o.exists || o.bytes <= 44) {
@@ -1260,11 +1296,30 @@ impl Driver {
 mod tests {
     use super::*;
 
+    /// BUG-stellar-lily-K8CN: the run result names each missing permission and what it stops.
+    #[test]
+    fn blocked_capture_is_named_in_the_run_result() {
+        let screen = capture_blocked_note(&[crate::capture::SCREEN_RECORDING.to_string()]);
+        assert!(
+            screen.starts_with(
+                "Desktop capture was blocked: recording and screenshots need Screen & System Audio Recording, which"
+            ),
+            "{screen}"
+        );
+        let both =
+            capture_blocked_note(&[crate::capture::SCREEN_RECORDING.into(), crate::capture::ACCESSIBILITY.into()]);
+        assert!(both.contains("; clicking, typing and menus need Accessibility"), "{both}");
+        assert!(both.contains("Anything delivered was made without it."), "{both}");
+    }
+
     #[test]
     fn an_operation_is_the_command_without_its_options() {
         use serde_json::json;
         let bash = |c: &str| operation("Bash", &json!({"command": c}));
-        assert_eq!(bash("bash -lc 'video-studio eleven music --prompt \"calm piano\" --length 49 --out music.mp3'"), "video-studio eleven music");
+        assert_eq!(
+            bash("bash -lc 'video-studio eleven music --prompt \"calm piano\" --length 49 --out music.mp3'"),
+            "video-studio eleven music"
+        );
         assert_eq!(bash("video-studio eleven quote music --length 49"), "video-studio eleven quote");
         assert_eq!(bash("PATH=/x /bin/cutline audio project.json5 --export youtube-shorts"), "cutline audio");
         assert_ne!(bash("video-studio eleven music --length 10"), bash("video-studio eleven quote music"));

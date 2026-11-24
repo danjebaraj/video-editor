@@ -459,6 +459,8 @@ pub struct FakeBackend {
     recording: Option<Utf8PathBuf>,
     /// ffmpeg for the rewrite of a real recording (`CUTLINE_FFMPEG`).
     ffmpeg: Option<Utf8PathBuf>,
+    /// The permissions it reports, normally both granted.
+    granted: Permissions,
 }
 
 /// Names a video the fake backend hands back as its recording; set only by tests.
@@ -467,7 +469,17 @@ pub const FAKE_RECORDING_ENV: &str = "VIDEO_STUDIO_CAPTURE_FAKE_RECORDING";
 impl FakeBackend {
     pub fn new(log: impl Into<Utf8PathBuf>) -> Self {
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).map(Utf8PathBuf::from);
-        FakeBackend { log: log.into(), recording: env(FAKE_RECORDING_ENV), ffmpeg: env("CUTLINE_FFMPEG") }
+        FakeBackend {
+            log: log.into(),
+            recording: env(FAKE_RECORDING_ENV),
+            ffmpeg: env("CUTLINE_FFMPEG"),
+            granted: Permissions { screen_recording: true, accessibility: true, supported: true },
+        }
+    }
+    /// Reports these permissions instead.
+    pub fn with_permissions(mut self, screen_recording: bool, accessibility: bool) -> Self {
+        self.granted = Permissions { screen_recording, accessibility, supported: true };
+        self
     }
     /// The fake recorder copies `video` instead of writing placeholder bytes, and `record wait`
     /// rewrites it with `ffmpeg`.
@@ -486,7 +498,7 @@ impl FakeBackend {
 
 impl Backend for FakeBackend {
     fn permissions(&self) -> Permissions {
-        Permissions { screen_recording: true, accessibility: true, supported: true }
+        self.granted
     }
     fn frontmost(&self) -> Result<String> {
         Ok(std::fs::read_to_string(self.front_file()).unwrap_or_else(|_| "Finder".into()))
@@ -648,6 +660,27 @@ pub enum Frame {
     Screen,
 }
 
+/// The run log of permissions capture needed and didn't have (`logs/capture-blocked.ndjson`).
+pub const BLOCKED_LOG: &str = "capture-blocked.ndjson";
+/// System Settings › Privacy & Security names, as the blocked log records them.
+pub const SCREEN_RECORDING: &str = "Screen & System Audio Recording";
+pub const ACCESSIBILITY: &str = "Accessibility";
+
+/// The permissions capture found missing during a run, each once, in the order first met.
+pub fn blocked_permissions(logs_dir: &Utf8Path) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    let text = std::fs::read_to_string(logs_dir.join(BLOCKED_LOG)).unwrap_or_default();
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        for m in v["missing"].as_array().into_iter().flatten().filter_map(|m| m.as_str()) {
+            if !out.iter().any(|o| o == m) {
+                out.push(m.to_string());
+            }
+        }
+    }
+    out
+}
+
 const ACCESSIBILITY_HELP: &str = "Clicking, typing and menus need the Accessibility permission. Tell the user: open System Settings › Privacy & Security › Accessibility and turn on Syncfusion Video Studio (or the terminal, when running the CLI), then run again.";
 const SCREEN_HELP: &str = "Screenshots and recordings need the Screen & System Audio Recording permission. Tell the user: open System Settings › Privacy & Security › Screen & System Audio Recording and turn on Syncfusion Video Studio (or the terminal, when running the CLI), then run again.";
 
@@ -700,7 +733,19 @@ impl Session {
         if self.backend.permissions().accessibility {
             Ok(())
         } else {
+            self.note_blocked(&[ACCESSIBILITY]);
             Err(Error::Environment(ACCESSIBILITY_HELP.into()))
+        }
+    }
+
+    /// Notes in the run's logs that capture needed a permission the app doesn't have, so the run's
+    /// result says so even when it delivers something else (BUG-stellar-lily-K8CN).
+    fn note_blocked(&self, missing: &[&str]) {
+        let line = serde_json::json!({"ts": crate::timeutil::now_rfc3339(), "missing": missing}).to_string();
+        let path = self.run_folder.join("logs").join(BLOCKED_LOG);
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            use std::io::Write;
+            let _ = writeln!(f, "{line}");
         }
     }
 
@@ -752,6 +797,14 @@ impl Session {
         }
         if !p.accessibility {
             lines.push(ACCESSIBILITY_HELP.into());
+        }
+        let missing: Vec<&str> =
+            [(!p.screen_recording).then_some(SCREEN_RECORDING), (!p.accessibility).then_some(ACCESSIBILITY)]
+                .into_iter()
+                .flatten()
+                .collect();
+        if !missing.is_empty() {
+            self.note_blocked(&missing);
         }
         lines.push(if self.settings.apps.is_empty() {
             "Apps: any app except terminals, system settings, password managers and Finder.".to_string()
@@ -846,6 +899,7 @@ impl Session {
         if self.backend.permissions().screen_recording {
             e
         } else {
+            self.note_blocked(&[SCREEN_RECORDING]);
             Error::Environment(format!("{e} {SCREEN_HELP}"))
         }
     }
@@ -1099,6 +1153,23 @@ mod tests {
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect()
+    }
+
+    /// BUG-stellar-lily-K8CN: a missing permission is logged for the run's result, once each.
+    #[test]
+    fn missing_permissions_are_logged_for_the_run() {
+        let (_t, dir) = tmp();
+        let mut s = session(&dir, &[]);
+        std::fs::create_dir_all(dir.join("run/logs")).unwrap();
+        let logs = dir.join("run/logs");
+        assert!(s.check(false).unwrap().contains("Screen recording: allowed"));
+        assert!(blocked_permissions(&logs).is_empty(), "nothing is missing yet");
+
+        s.backend = Box::new(FakeBackend::new(dir.join("fake.ndjson")).with_permissions(false, true));
+        assert!(s.check(false).unwrap().contains("Screen recording: NOT allowed"));
+        s.backend = Box::new(FakeBackend::new(dir.join("fake.ndjson")).with_permissions(false, false));
+        let _ = s.check(false);
+        assert_eq!(blocked_permissions(&logs), vec![SCREEN_RECORDING.to_string(), ACCESSIBILITY.to_string()]);
     }
 
     #[test]

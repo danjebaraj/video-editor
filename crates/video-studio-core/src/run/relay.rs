@@ -1,4 +1,4 @@
-//! The ElevenLabs relay for Codex runs (BUG-deft-lily-344X).
+//! The host relay for Codex runs (BUG-deft-lily-344X, BUG-stellar-lily-K8CN).
 //!
 //! Codex runs every command in its sandbox, approved or not. On macOS that sandbox denies the
 //! Keychain (`mach-lookup com.apple.SecurityServer`), which the `keyring` crate reports as "no
@@ -13,6 +13,12 @@
 //! the host picks it up, then `<id>.response.json` (exit code, stdout, stderr). `closed` marks a
 //! host that stopped serving. The host only runs `eleven` subcommands, in the run folder or a
 //! folder inside it; the credit cap is still enforced by the helper it runs.
+//!
+//! The same sandbox stops Chrome at launch (it may not register its Mach services) and hides the
+//! screen-recording and accessibility permissions the user gave the app. So the host also runs
+//! `capture` subcommands, and the browser jobs cutline hands over (`browser-job`: an HTML graphic
+//! or a browser recording, written only into the run folder; offline when the run has no web
+//! access).
 
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -117,6 +123,8 @@ pub struct HostSetup {
     /// The run context file (`VIDEO_STUDIO_RUN_CONTEXT`).
     pub context_file: Utf8PathBuf,
     pub run_folder: Utf8PathBuf,
+    /// The run's web access: without it a relayed browser recording may load local pages only.
+    pub web_access: bool,
 }
 
 impl HostRelay {
@@ -174,10 +182,24 @@ fn refuse(message: String) -> RelayResponse {
     RelayResponse { code: 2, stdout: String::new(), stderr: format!("error: {message}\n") }
 }
 
-/// Runs one relayed call: only `video-studio eleven …`, in the run folder or a folder inside it.
+/// Runs one relayed call, in the run folder or a folder inside it: `video-studio eleven …`,
+/// `video-studio capture …` (the sandbox can't see the app's screen-recording and accessibility
+/// permissions), or
+/// `video-studio browser-job <file>` for a browser job cutline couldn't run in the sandbox
+/// (BUG-stellar-lily-K8CN), whose file and cache folder must be inside the run folder.
 pub fn run(setup: &HostSetup, req: &RelayRequest) -> RelayResponse {
-    if req.args.first().map(String::as_str) != Some("eleven") {
-        return refuse("Only `video-studio eleven` calls are relayed.".into());
+    match req.args.first().map(String::as_str) {
+        Some("eleven" | "capture") => {}
+        Some(BROWSER_JOB) => {
+            if let Err(e) = check_browser_job(&setup.run_folder, &req.args) {
+                return refuse(e);
+            }
+        }
+        _ => {
+            return refuse(
+                "Only `video-studio eleven`, `video-studio capture` and browser-job calls are relayed.".into(),
+            )
+        }
     }
     let cwd = paths::normalize(Utf8Path::new(&req.cwd));
     let cwd = if !req.cwd.is_empty() && cwd.is_absolute() && paths::is_inside(&cwd, &setup.run_folder) && cwd.is_dir() {
@@ -185,22 +207,55 @@ pub fn run(setup: &HostSetup, req: &RelayRequest) -> RelayResponse {
     } else {
         setup.run_folder.clone()
     };
-    let out = Command::new(&setup.helper)
-        .args(&req.args)
+    let mut cmd = Command::new(&setup.helper);
+    cmd.args(&req.args)
         .current_dir(&cwd)
         .env(crate::eleven::CONTEXT_ENV, &setup.context_file)
         .env(RELAYED_ENV, "1")
         .env_remove("CODEX_SANDBOX")
         .env_remove("CODEX_SANDBOX_NETWORK_DISABLED")
-        .stdin(Stdio::null())
-        .output();
-    match out {
+        .env_remove(BROWSER_DELEGATE_ENV)
+        .stdin(Stdio::null());
+    // a browser job waits for Chrome to exit by SIGCHLD: it must not inherit a blocked one
+    crate::platform::reset_child_signals(&mut cmd);
+    if !setup.web_access {
+        cmd.env(BROWSER_OFFLINE_ENV, "1");
+    }
+    match cmd.output() {
         Ok(o) => RelayResponse {
             code: o.status.code().unwrap_or(1),
             stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
         },
-        Err(e) => refuse(format!("Syncfusion Video Studio couldn't run the ElevenLabs helper ({e}).")),
+        Err(e) => refuse(format!("Syncfusion Video Studio couldn't run its helper ({e}).")),
+    }
+}
+
+/// The helper subcommand that renders a browser job outside the sandbox.
+pub const BROWSER_JOB: &str = "browser-job";
+/// cutline's variable naming the program that renders its browser jobs (`cutline_html::delegate`).
+pub const BROWSER_DELEGATE_ENV: &str = "CUTLINE_BROWSER_DELEGATE";
+/// cutline's variable that keeps a browser recording to local pages.
+pub const BROWSER_OFFLINE_ENV: &str = "CUTLINE_BROWSER_OFFLINE";
+
+/// A browser job may only be read from, and only write, the run folder: `args` is
+/// `["browser-job", <job file>]`, and the job's `cache_dir` is where it writes.
+pub fn check_browser_job(run_folder: &Utf8Path, args: &[String]) -> Result<(), String> {
+    let [_, file] = args else { return Err("A browser job takes one job file.".into()) };
+    let inside = |p: &str| {
+        let p = paths::normalize(Utf8Path::new(p));
+        p.is_absolute() && paths::is_inside(&p, run_folder)
+    };
+    if !inside(file) || !Utf8Path::new(file).is_file() {
+        return Err("The browser job isn't a file inside the run folder.".into());
+    }
+    let job: serde_json::Value = std::fs::read(file)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or_else(|| "The browser job couldn't be read.".to_string())?;
+    match job["cache_dir"].as_str() {
+        Some(dir) if inside(dir) => Ok(()),
+        _ => Err("A browser job may only write inside the run folder.".into()),
     }
 }
 
@@ -221,9 +276,45 @@ mod tests {
             helper: Utf8PathBuf::from("/nonexistent/video-studio"),
             context_file: dir.join("context.json"),
             run_folder: dir.clone(),
+            web_access: false,
         };
         let r = run(&setup, &RelayRequest { args: vec!["secret".into(), "status".into()], cwd: dir.to_string() });
         assert_eq!(r.code, 2);
         assert!(r.stderr.contains("Only `video-studio eleven`"), "{}", r.stderr);
+    }
+
+    /// BUG-stellar-lily-K8CN: the host renders a browser job only when it writes inside the run.
+    #[test]
+    fn a_browser_job_must_stay_inside_the_run_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let run = Utf8Path::from_path(d.path()).unwrap().join("run");
+        std::fs::create_dir_all(run.join(".cutline/cache/html")).unwrap();
+        let job = |name: &str, cache: &Utf8Path| {
+            let f = run.join(format!(".cutline/cache/html/{name}.json"));
+            std::fs::write(&f, serde_json::json!({"job": "html", "cache_dir": cache}).to_string()).unwrap();
+            vec![BROWSER_JOB.to_string(), f.to_string()]
+        };
+        assert_eq!(check_browser_job(&run, &job("ok", &run.join(".cutline/cache/html"))), Ok(()));
+        let out = Utf8Path::from_path(d.path()).unwrap().join("elsewhere");
+        assert!(check_browser_job(&run, &job("out", &out)).unwrap_err().contains("only write inside"));
+        assert!(check_browser_job(&run, &job("up", &run.join("../elsewhere")))
+            .unwrap_err()
+            .contains("only write inside"));
+        let stray = Utf8Path::from_path(d.path()).unwrap().join("stray.json");
+        std::fs::write(&stray, "{}").unwrap();
+        let err = check_browser_job(&run, &[BROWSER_JOB.into(), stray.to_string()]).unwrap_err();
+        assert!(err.contains("isn't a file inside the run folder"), "{err}");
+
+        // the host refuses it before running anything
+        let setup = HostSetup {
+            dir: run.join("logs/relay"),
+            helper: Utf8PathBuf::from("/nonexistent/video-studio"),
+            context_file: run.join("context.json"),
+            run_folder: run.clone(),
+            web_access: false,
+        };
+        let r = super::run(&setup, &RelayRequest { args: job("bad", &out), cwd: run.to_string() });
+        assert_eq!(r.code, 2);
+        assert!(r.stderr.contains("only write inside"), "{}", r.stderr);
     }
 }

@@ -176,7 +176,9 @@ pub fn thumbnail(l: &Loaded, pr: &Prepared, t: f64, text: Option<&str>, template
         let (cw, ch, x, y) = p.rect_px(i);
         format!("crop={cw}:{ch}:{x}:{y},")
     });
-    let work = std::env::temp_dir().join(format!("cutline-thumb-{}", std::process::id()));
+    // in the project's own folder: a sandboxed run (Codex) may not write the system temp folder
+    // (BUG-stellar-lily-K8CN)
+    let work = cutline_render::cutline_dir(&l.dir).join("tmp").join(format!("thumb-{}", std::process::id()));
     std::fs::create_dir_all(&work)?;
     let mut vf = format!(
         "{}scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos:{},crop={w}:{h},eq=saturation=1.15:contrast=1.06",

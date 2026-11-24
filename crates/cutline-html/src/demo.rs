@@ -706,8 +706,11 @@ async fn record_with(exe: &Path, script: &DemoScript, script_dir: &Path, work: &
         cfg = cfg.no_sandbox();
     }
     let cfg = cfg.build().map_err(|e| anyhow!("chrome config: {e}"))?;
-    let (mut browser, mut handler) =
-        Browser::launch(cfg).await.with_context(|| format!("launching {} failed", exe.display()))?;
+    let started = std::time::Instant::now();
+    let (mut browser, mut handler) = match Browser::launch(cfg).await {
+        Ok(b) => b,
+        Err(e) => bail!(crate::launch_failure(exe, started.elapsed(), &e)),
+    };
     let hj = tokio::spawn(async move { while let Some(_ev) = handler.next().await {} });
     let res = drive(&browser, script, script_dir, work).await;
     let _ = browser.close().await;
@@ -730,7 +733,14 @@ async fn drive(browser: &Browser, script: &DemoScript, script_dir: &Path, work: 
     // the base address: a web origin, or a local page next to the script
     let http = script.url.as_ref().filter(|u| u.contains("://") && !u.starts_with("file://")).cloned();
     let base = Base { http: http.clone(), dir: script_dir.to_path_buf() };
-    let mut origins: Vec<String> = script.allow.clone();
+    // a run without web access records local pages only (BUG-stellar-lily-K8CN)
+    if crate::delegate::offline() && http.is_some() {
+        bail!(
+            "step 0: this run has no web access, so a recording can only open a local page: `{}` is a web address",
+            http.as_deref().unwrap_or_default()
+        );
+    }
+    let mut origins: Vec<String> = if crate::delegate::offline() { vec![] } else { script.allow.clone() };
     if let Some(o) = http.as_deref().and_then(origin) {
         origins.push(o);
     }
@@ -1019,6 +1029,19 @@ pub fn record_cached(
             return Ok(r);
         }
     }
+    // where Chrome can't start (Codex's sandbox), another process records into this cache
+    if let Some(program) = crate::delegate::delegate() {
+        let job = crate::delegate::Job::Demo {
+            script: script_path.to_path_buf(),
+            cache_dir: cache_dir.to_path_buf(),
+            force,
+            locale: locale.map(str::to_string),
+        };
+        crate::delegate::run(&program, &job)?;
+        return cached(script_path, cache_dir, locale)?.with_context(|| {
+            format!("the browser renderer {} finished without recording {}", program.display(), script_path.display())
+        });
+    }
     let (text, script) = read_script(script_path, locale)?;
     let key = cache_key(script_path, &text, &script);
     let dir = script_path.parent().unwrap_or(Path::new("."));
@@ -1031,9 +1054,12 @@ pub fn record_cached(
     }
     tracing::info!("recording browser demo {}", script_path.display());
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
-    let mut last = None;
+    let mut failures: Vec<String> = vec![];
     let mut cap = None;
     for exe in &cands {
+        // each browser records into an empty folder: nothing of a failed attempt is kept
+        let _ = std::fs::remove_dir_all(&work);
+        std::fs::create_dir_all(&work)?;
         match rt.block_on(record_with(exe, &script, dir, &work)) {
             Ok(c) => {
                 cap = Some(c);
@@ -1046,13 +1072,19 @@ pub fn record_cached(
             }
             Err(e) => {
                 tracing::warn!("{}: {e:#}", exe.display());
-                last = Some(e);
+                failures.push(format!("{e:#}"));
             }
         }
     }
     let Some(cap) = cap else {
         let _ = std::fs::remove_dir_all(&work);
-        return Err(last.unwrap_or_else(|| anyhow!("recording failed")));
+        bail!(
+            "no browser recorded {} ({} tried):\n  - {}\n{}",
+            script_path.display(),
+            failures.len(),
+            failures.join("\n  - "),
+            crate::exhausted_hint()
+        );
     };
     let fps = script.fps.unwrap_or(30.0).clamp(1.0, 60.0);
     let (video, events_path) = (cache_dir.join(format!("{key}.mp4")), cache_dir.join(format!("{key}.events.json")));

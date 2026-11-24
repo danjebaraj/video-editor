@@ -177,6 +177,10 @@ enum Command {
         json: bool,
     },
     /// Pre-tool permission hook for Claude Code (reads the tool call on stdin)
+    /// A browser job cutline hands over because Chrome can't start in Codex's sandbox
+    /// (`CUTLINE_BROWSER_DELEGATE`): relayed to the run's host, which renders it
+    #[command(name = "browser-job", hide = true)]
+    BrowserJob { file: Utf8PathBuf },
     #[command(hide = true)]
     Hook {
         #[arg(long)]
@@ -337,6 +341,7 @@ fn main() {
         Command::Eleven { command } => logged_helper(|| eleven_cmd::run(command, secrets().as_ref())),
         Command::Capture { target, command } => logged_helper(|| capture_cmd::run(command, &target)),
         Command::Standin { command } => logged_helper(|| cmd_standin(command)),
+        Command::BrowserJob { file } => cmd_browser_job(&file),
         Command::Secret { action, provider, json } => cmd_secret(&action, &provider, json),
         Command::Schema => {
             println!("{}", serde_json::to_string_pretty(&project::json_schema()).unwrap_or_default());
@@ -391,6 +396,48 @@ fn logged_helper(run: impl FnOnce() -> i32) -> i32 {
         ctx.log_helper(&argv, code, started.elapsed().as_secs_f64());
     }
     code
+}
+
+/// A browser job from cutline (BUG-stellar-lily-K8CN). Inside Codex's sandbox it goes to the
+/// run's host; on the host (or outside a sandbox) the real cutline renders it, after checking
+/// that the job only writes inside the run folder.
+fn cmd_browser_job(file: &Utf8Path) -> i32 {
+    use video_studio_core::run::relay;
+    let ctx = match HelperContext::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return 126;
+        }
+    };
+    let file = match std::env::current_dir() {
+        Ok(cwd) if file.is_relative() => Utf8PathBuf::from(cwd.join(file).to_string_lossy().into_owned()),
+        _ => file.to_owned(),
+    };
+    let args = vec![relay::BROWSER_JOB.to_string(), file.to_string()];
+    if let Some(dir) = ctx.relay_dir.as_ref().filter(|_| relay::sandboxed()) {
+        return relay::forward(dir, &args);
+    }
+    if let Err(e) = relay::check_browser_job(&ctx.run_folder, &args) {
+        eprintln!("error: {e}");
+        return 2;
+    }
+    let Some(cutline) = ctx.cutline.clone() else {
+        eprintln!("cutline isn't configured for this run");
+        return 127;
+    };
+    match std::process::Command::new(cutline.as_str())
+        .args(["internal", "browser-job", file.as_str()])
+        .env_remove(relay::BROWSER_DELEGATE_ENV)
+        .stdin(std::process::Stdio::null())
+        .status()
+    {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("couldn't start cutline ({cutline}): {e}");
+            127
+        }
+    }
 }
 
 fn cmd_standin(command: StandinCommand) -> i32 {

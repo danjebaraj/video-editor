@@ -184,6 +184,14 @@ fn execute(command: CaptureCommand, target: &Target) -> Result<String, Error> {
 }
 
 pub fn run(command: CaptureCommand, target: &Target) -> i32 {
+    // Codex's sandbox can't see the permissions the user gave the app, or record the screen:
+    // the run's host drives and records instead (BUG-stellar-lily-K8CN)
+    if let Ok(ctx) = HelperContext::from_env() {
+        if let Some(dir) = ctx.relay_dir.as_ref().filter(|_| video_studio_core::run::relay::sandboxed()) {
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            return video_studio_core::run::relay::forward(dir, &args);
+        }
+    }
     match execute(command, target) {
         Ok(text) => {
             println!("{text}");

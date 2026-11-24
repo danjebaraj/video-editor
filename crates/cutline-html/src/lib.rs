@@ -6,6 +6,7 @@
 //! Network is sandboxed: only `file://` URLs under the allowed directories load; everything
 //! else fails with `BlockedByClient` (recorded for tests).
 
+pub mod delegate;
 pub mod demo;
 
 use anyhow::{bail, Context, Result};
@@ -33,7 +34,7 @@ pub enum Kind {
     Lottie,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderSpec {
     pub kind: Kind,
     pub source: PathBuf,
@@ -188,27 +189,97 @@ pub fn render_frames(spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
 const STALL: &str = "Chrome produced no frames";
 
 async fn render_async(spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
-    let cands = cutline_deps::paths::chrome_candidates();
+    render_candidates(&cutline_deps::paths::chrome_candidates(), spec, work).await
+}
+
+/// Tries each browser in turn. Every attempt starts from a work folder with no frames, and a
+/// failed one leaves none behind, so frames can only come from the attempt that succeeded.
+pub(crate) async fn render_candidates(cands: &[PathBuf], spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
     if cands.is_empty() {
         bail!("no Chrome/Chromium/Edge found (run `cutline deps install chrome` or set CUTLINE_CHROME)");
     }
-    let mut last = None;
+    let mut failures: Vec<String> = vec![];
     for (i, exe) in cands.iter().enumerate() {
+        clear_frames(work);
         match render_with(exe, spec, work).await {
             Ok(r) => return Ok(r),
             Err(e) if format!("{e:#}").contains(STALL) => {
+                clear_frames(work);
                 if let Some(next) = cands.get(i + 1) {
-                    tracing::warn!("{}: {e:#}; retrying with {}", exe.display(), next.display());
+                    tracing::warn!("{e:#}; retrying with {}", next.display());
                 }
-                last = Some(e);
+                failures.push(format!("{e:#}"));
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                clear_frames(work);
+                return Err(e);
+            }
         }
     }
-    Err(last.unwrap()).context(
-        "no Chrome rendered frames. On macOS a freshly downloaded Chrome can stall for a few minutes while the \
-         system checks it on first launch: retry shortly, or set CUTLINE_CHROME to an installed Chrome",
+    bail!(
+        "no Chrome rendered frames ({} tried):\n  - {}\n{}",
+        failures.len(),
+        failures.join("\n  - "),
+        exhausted_hint()
     )
+}
+
+/// What to do when no browser started.
+pub(crate) fn exhausted_hint() -> &'static str {
+    if std::env::var_os("CODEX_SANDBOX").is_some() {
+        "Chrome can't start inside Codex's sandbox (on macOS it may not register its Mach services): \
+         render where Chrome can start, or set CUTLINE_BROWSER_DELEGATE to a program that does"
+    } else {
+        "On macOS a freshly downloaded Chrome can stall for a few minutes while the system checks it on \
+         first launch: retry shortly, or set CUTLINE_CHROME to an installed Chrome"
+    }
+}
+
+/// Removes the frames an attempt wrote.
+fn clear_frames(work: &Path) {
+    let Ok(rd) = std::fs::read_dir(work) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("frame_") && name.ends_with(".png") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// Why a browser gave no DevTools address (BUG-stellar-lily-K8CN): the executable, whether it
+/// exited during startup or timed out, after how long, its exit status when known, and its
+/// stderr (or that it was empty).
+pub(crate) fn launch_failure(exe: &Path, elapsed: Duration, e: &chromiumoxide::error::CdpError) -> String {
+    use chromiumoxide::error::CdpError;
+    let stderr_of = |b: &[u8]| {
+        let text = String::from_utf8_lossy(b);
+        let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        if lines.is_empty() {
+            "stderr empty".to_string()
+        } else {
+            format!("stderr: {}", lines[lines.len().saturating_sub(4)..].join(" | "))
+        }
+    };
+    let secs = elapsed.as_secs_f64();
+    let what = match e {
+        CdpError::LaunchExit(status, err) => {
+            format!("exited during startup after {secs:.2} s ({status}); {}", stderr_of(err.as_slice()))
+        }
+        CdpError::LaunchIo(io, err)
+            if io.kind() == std::io::ErrorKind::UnexpectedEof || io.to_string().contains("end of stream") =>
+        {
+            format!("exited during startup after {secs:.2} s (exit status unknown); {}", stderr_of(err.as_slice()))
+        }
+        CdpError::LaunchIo(io, err) => {
+            format!("failed during startup after {secs:.2} s ({io}); {}", stderr_of(err.as_slice()))
+        }
+        CdpError::LaunchTimeout(err) => {
+            format!("gave no DevTools address within {secs:.0} s (startup timeout); {}", stderr_of(err.as_slice()))
+        }
+        other => format!("failed to launch after {secs:.2} s: {other}"),
+    };
+    format!("{STALL}: {}: {what}", exe.display())
 }
 
 async fn render_with(exe: &Path, spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
@@ -239,8 +310,11 @@ async fn render_with(exe: &Path, spec: &RenderSpec, work: &Path) -> Result<Rende
         cfg = cfg.no_sandbox();
     }
     let cfg = cfg.build().map_err(|e| anyhow::anyhow!("chrome config: {e}"))?;
-    let (mut browser, mut handler) =
-        Browser::launch(cfg).await.with_context(|| format!("{STALL}: launching {} failed", exe.display()))?;
+    let started = std::time::Instant::now();
+    let (mut browser, mut handler) = match Browser::launch(cfg).await {
+        Ok(b) => b,
+        Err(e) => bail!(launch_failure(exe, started.elapsed(), &e)),
+    };
     let h = tokio::spawn(async move { while let Some(_ev) = handler.next().await {} });
     let res = drive(&browser, spec, work).await;
     let _ = browser.close().await;
@@ -426,6 +500,14 @@ pub fn render_cached(tc: &cutline_deps::Toolchain, spec: &RenderSpec, cache_dir:
     if out.exists() {
         return Ok(out);
     }
+    // where Chrome can't start (Codex's sandbox), another process renders into this cache
+    if let Some(program) = delegate::delegate() {
+        delegate::run(&program, &delegate::Job::Html { spec: spec.clone(), cache_dir: cache_dir.to_path_buf() })?;
+        if out.exists() {
+            return Ok(out);
+        }
+        bail!("the browser renderer {} finished without writing {}", program.display(), out.display());
+    }
     let work = cache_dir.join(format!("{key}.work"));
     let _ = std::fs::remove_dir_all(&work);
     render_frames(spec, &work)?;
@@ -440,6 +522,134 @@ pub fn render_cached(tc: &cutline_deps::Toolchain, spec: &RenderSpec, cache_dir:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BUG-stellar-lily-K8CN: a browser that dies at launch, one that complains and dies, and
+    /// (when one is installed) a real one to fall back to.
+    #[cfg(unix)]
+    mod launch {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn fake(dir: &Path, name: &str, body: &str) -> PathBuf {
+            let p = dir.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        }
+
+        fn card(dir: &Path) -> RenderSpec {
+            let page = dir.join("card.html");
+            std::fs::write(&page, "<html><body style='margin:0;background:#ffb000'></body></html>").unwrap();
+            RenderSpec {
+                kind: Kind::Html,
+                source: page,
+                width: 64,
+                height: 64,
+                fps: 5.0,
+                duration: 0.4,
+                alpha: false,
+                params: serde_json::Value::Null,
+                allow_dirs: vec![],
+                device_scale: 1.0,
+            }
+        }
+
+        fn frames_in(work: &Path) -> usize {
+            std::fs::read_dir(work)
+                .map(|rd| rd.flatten().filter(|e| e.file_name().to_string_lossy().starts_with("frame_")).count())
+                .unwrap_or(0)
+        }
+
+        fn render(cands: &[PathBuf], spec: &RenderSpec, work: &Path) -> Result<RenderResult> {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(render_candidates(cands, spec, work))
+        }
+
+        #[test]
+        fn every_browser_exiting_at_launch_is_reported_and_leaves_no_frames() {
+            let d = tempfile::tempdir().unwrap();
+            let silent = fake(d.path(), "silent-chrome", "exit 3");
+            let loud = fake(d.path(), "loud-chrome", "echo 'FATAL: bootstrap_check_in denied' >&2; exit 5");
+            let work = d.path().join("work");
+            std::fs::create_dir_all(&work).unwrap();
+            // frames from an earlier attempt must not survive as this render's output
+            std::fs::write(work.join("frame_00000.png"), b"stale").unwrap();
+            let err = format!("{:#}", render(&[silent.clone(), loud.clone()], &card(d.path()), &work).unwrap_err());
+            assert!(err.contains("2 tried"), "{err}");
+            for exe in [&silent, &loud] {
+                assert!(err.contains(&exe.display().to_string()), "{err}");
+            }
+            assert!(err.contains("exited during startup after"), "{err}");
+            assert!(err.contains("stderr empty"), "{err}");
+            assert!(err.contains("FATAL: bootstrap_check_in denied"), "{err}");
+            assert_eq!(frames_in(&work), 0, "a failed render left frames behind");
+        }
+
+        #[test]
+        fn a_browser_that_exits_at_launch_falls_back_to_the_next() {
+            let Some(chrome) = chrome() else {
+                eprintln!("skipped: no Chrome");
+                return;
+            };
+            let d = tempfile::tempdir().unwrap();
+            let silent = fake(d.path(), "silent-chrome", "exit 3");
+            let work = d.path().join("work");
+            let spec = card(d.path());
+            let r = render(&[silent, chrome], &spec, &work).unwrap();
+            assert_eq!(r.frames.len(), 2);
+            assert_eq!(frames_in(&work), 2);
+        }
+
+        #[test]
+        fn a_startup_timeout_reads_differently_from_an_exit() {
+            use chromiumoxide::error::{BrowserStderr, CdpError};
+            let exe = Path::new("/x/chrome");
+            let t = launch_failure(exe, Duration::from_secs(20), &CdpError::LaunchTimeout(BrowserStderr::new(vec![])));
+            assert!(
+                t.contains("no DevTools address within 20 s (startup timeout)") && t.contains("stderr empty"),
+                "{t}"
+            );
+            let eof = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected end of stream");
+            let x = launch_failure(
+                exe,
+                Duration::from_millis(40),
+                &CdpError::LaunchIo(eof, BrowserStderr::new(b"boom\n".to_vec())),
+            );
+            assert!(
+                x.contains("exited during startup after 0.04 s (exit status unknown)") && x.contains("stderr: boom"),
+                "{x}"
+            );
+        }
+
+        /// The hand-over: the job names the page and the cache, and a renderer that writes
+        /// nothing is an error, not a silent success.
+        #[test]
+        fn a_delegated_render_hands_over_the_job() {
+            let d = tempfile::tempdir().unwrap();
+            let seen = d.path().join("seen.json");
+            let program =
+                fake(d.path(), "renderer", &format!("[ \"$1\" = browser-job ] && cp \"$2\" '{}'", seen.display()));
+            let spec = card(d.path());
+            let cache = d.path().join("cache");
+            let job = delegate::Job::Html { spec: spec.clone(), cache_dir: cache.clone() };
+            delegate::run(&program, &job).unwrap();
+            let seen: delegate::Job = serde_json::from_slice(&std::fs::read(&seen).unwrap()).unwrap();
+            match seen {
+                delegate::Job::Html { spec: s, cache_dir } => {
+                    assert_eq!((s.source, cache_dir), (spec.source, cache.clone()))
+                }
+                other => panic!("{other:?}"),
+            }
+            // the job file is gone afterwards
+            assert!(std::fs::read_dir(&cache).unwrap().next().is_none());
+            let failing = fake(d.path(), "broken", "echo 'no host' >&2; exit 2");
+            let err = format!("{:#}", delegate::run(&failing, &job).unwrap_err());
+            assert!(err.contains("no host"), "{err}");
+        }
+    }
     #[test]
     fn urls_roundtrip() {
         #[cfg(not(windows))]

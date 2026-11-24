@@ -97,7 +97,17 @@ pub fn run(ctx: &HelperContext, args: &[String]) -> i32 {
         &json!({"ts": timeutil::now_rfc3339(), "type": "start", "n": n, "command": command, "argv": args}).to_string(),
     );
 
-    let mut child = match Command::new(real.as_str())
+    let mut real_cmd = Command::new(real.as_str());
+    // Chrome can't start in Codex's sandbox: cutline hands its browser jobs to this helper,
+    // which relays them to the run's host (BUG-stellar-lily-K8CN)
+    if ctx.relay_dir.is_some() && crate::run::relay::sandboxed() {
+        // the helper by its own name: called as `cutline` it would be this proxy again
+        let exe = if cfg!(windows) { "video-studio.exe" } else { "video-studio" };
+        if let Some(helper) = std::env::current_exe().ok().and_then(|me| Some(me.parent()?.join(exe))) {
+            real_cmd.env(crate::run::relay::BROWSER_DELEGATE_ENV, helper);
+        }
+    }
+    let mut child = match real_cmd
         .args(args)
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())

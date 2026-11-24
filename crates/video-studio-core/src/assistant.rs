@@ -380,6 +380,8 @@ fn follow(
     let original = request.spec.clone();
     let Session { dir, spec_path, policy, policy_file, .. } = s;
     let thread = std::thread::Builder::new().name("video-studio-assistant".into()).spawn(move || {
+        // nothing the turn starts may inherit the caller's blocked signals (BUG-stellar-lily-K8CN)
+        crate::platform::unblock_signals();
         let emit = |e: AssistantEvent| sink.emit(&e);
         let mut last_spec = original;
         let mut session: Option<String> = None;

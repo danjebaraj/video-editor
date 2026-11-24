@@ -168,7 +168,14 @@ fn a_process_tree_starts_with_no_signals_blocked() {
     }
     let script = "use POSIX; my $s = POSIX::SigSet->new; sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $s); \
                   print $s->ismember(SIGCHLD) ? qq(blocked) : qq(clear)";
-    let mask = |group: bool| {
+    #[derive(Clone, Copy)]
+    enum How {
+        Plain,
+        Group,
+        Reset,
+        UnblockedThread,
+    }
+    let mask = |how: How| {
         std::thread::spawn(move || {
             // SAFETY: changes only this test thread's own mask.
             unsafe {
@@ -177,17 +184,26 @@ fn a_process_tree_starts_with_no_signals_blocked() {
                 libc::sigaddset(&mut chld, libc::SIGCHLD);
                 libc::pthread_sigmask(libc::SIG_BLOCK, &chld, std::ptr::null_mut());
             }
+            if matches!(how, How::UnblockedThread) {
+                unblock_signals();
+            }
             let mut cmd = Command::new(perl);
             cmd.args(["-e", script]).stdout(std::process::Stdio::piped());
-            let child = if group { ProcessGroup::spawn(&mut cmd) } else { cmd.spawn() }.unwrap();
+            if matches!(how, How::Reset) {
+                reset_child_signals(&mut cmd);
+            }
+            let child = if matches!(how, How::Group) { ProcessGroup::spawn(&mut cmd) } else { cmd.spawn() }.unwrap();
             String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
         })
         .join()
         .unwrap()
     };
     // the control shows the mask really is inherited without the reset
-    assert_eq!(mask(false), "blocked");
-    assert_eq!(mask(true), "clear");
+    assert_eq!(mask(How::Plain), "blocked");
+    assert_eq!(mask(How::Group), "clear");
+    // the host relay's helper (a plain command) and a run thread that unblocks first
+    assert_eq!(mask(How::Reset), "clear");
+    assert_eq!(mask(How::UnblockedThread), "clear");
 }
 
 /// No durable references: resolution falls back to relative path, absolute path and search roots.
@@ -279,6 +295,41 @@ fn reset_signals() {
     }
 }
 
+/// Starts `cmd`'s process with no signals blocked and `SIGCHLD` at its default
+/// (BUG-amber-walrus-72VP, BUG-stellar-lily-K8CN): a signal mask and ignored signals survive
+/// `exec`, and a program that waits for its own children by `SIGCHLD` (Codex, cutline closing
+/// Chrome) never hears them exit when it inherits a blocked one.
+pub fn reset_child_signals(cmd: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: runs in the child between fork and exec, and calls only sigemptyset,
+        // sigprocmask and signal, which are async-signal-safe.
+        unsafe {
+            cmd.pre_exec(|| {
+                reset_signals();
+                Ok(())
+            });
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = cmd;
+}
+
+/// Unblocks every signal in the calling thread, which threads and processes it starts inherit.
+/// The macOS app calls the core from Swift's cooperative pool, whose threads block every signal:
+/// a thread the core starts for a run calls this first, so nothing the run starts inherits that
+/// mask (BUG-stellar-lily-K8CN). Doesn't change which signals the process ignores.
+pub fn unblock_signals() {
+    #[cfg(unix)]
+    // SAFETY: changes only this thread's mask.
+    unsafe {
+        let mut none: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut none);
+        libc::pthread_sigmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+    }
+}
+
 /// Spawning and killing a process tree: a process group on Unix, a Job Object on Windows.
 pub struct ProcessGroup;
 
@@ -297,14 +348,7 @@ impl ProcessGroup {
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
-            // SAFETY: runs in the child between fork and exec, and calls only sigemptyset,
-            // sigprocmask and signal, which are async-signal-safe.
-            unsafe {
-                cmd.pre_exec(|| {
-                    reset_signals();
-                    Ok(())
-                });
-            }
+            reset_child_signals(cmd);
         }
         #[cfg(windows)]
         windows::configure(cmd);
