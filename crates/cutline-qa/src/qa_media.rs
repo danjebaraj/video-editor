@@ -170,6 +170,7 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
     // `first_frame` limit) and shows no recognised word (TASK-silver-cherry-R3MZ,
     // TASK-honest-cedar-A73E).
     let mut reader = TextReader::new(ctx.ocr);
+    let work = ctx.work_dir_for(file);
     let mut black: Vec<(f64, f64)> = vec![];
     let mut dark_content: Vec<serde_json::Value> = vec![];
     for s in black_spans(&log).into_iter().filter(|s| !overlaps(*s, &ctx.intended_black)) {
@@ -183,7 +184,7 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
                 evidence.push(format!("luma variance {var:.4} at {t:.2}s (> {FLAT_VARIANCE})"));
                 continue;
             }
-            match reader.words_at(tc, file, t) {
+            match reader.words_at(tc, file, t, &work) {
                 Ok(words) if !words.is_empty() => {
                     evidence.push(format!("text recognised at {t:.2}s: {}", words.join(" ")))
                 }
@@ -257,7 +258,7 @@ pub fn media_checks(tc: &Toolchain, file: &Path, t: &TargetSpec, ctx: &QaContext
         let (ok, message, measured) = if let Some(t) = from_layers {
             (true, format!("first caption/text at {t:.2}s"), json!(t))
         } else if ctx.html_opening {
-            match reader.words_at(tc, file, 0.5) {
+            match reader.words_at(tc, file, 0.5, &work) {
                 Ok(words) if !words.is_empty() => (
                     true,
                     "text on screen at 0.50s (recognised)".to_string(),
@@ -418,11 +419,17 @@ impl TextReader {
     }
 
     /// Words (two or more letters or digits) recognised in the frame at `t`; `Err` says why
-    /// recognition didn't run.
-    fn words_at(&mut self, tc: &Toolchain, file: &Path, t: f64) -> std::result::Result<Vec<String>, String> {
+    /// recognition didn't run. Frames are written to a folder in `work`, removed afterwards.
+    fn words_at(
+        &mut self,
+        tc: &Toolchain,
+        file: &Path,
+        t: f64,
+        work: &Path,
+    ) -> std::result::Result<Vec<String>, String> {
         let engine = self.engine.get_or_insert_with(|| crate::ocr::resolve(self.setting)).clone()?;
-        let img = crate::review::grab(tc, file, t).map_err(|e| e.to_string())?;
-        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let img = crate::review::grab(tc, file, t, work).map_err(|e| e.to_string())?;
+        let dir = crate::review::scratch(work).map_err(|e| format!("{e:#}"))?;
         let png = dir.path().join("frame.png");
         img.save(&png).map_err(|e| e.to_string())?;
         let lines = crate::ocr::recognize(engine, &png).map_err(|e| format!("{e:#}"))?;

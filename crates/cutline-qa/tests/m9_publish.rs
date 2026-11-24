@@ -137,8 +137,9 @@ fn multi_export_chapters_thumbnail() {
 fn grab_from_still_image_at_any_time() {
     let Some(tc) = cutline_testkit::test_toolchain() else { return };
     let face = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/face_armstrong.jpg");
+    let w = tempfile::tempdir().unwrap();
     for t in [0.0, 0.5, 2.7] {
-        let f = cutline_qa::review::grab(tc, &face, t).unwrap();
+        let f = cutline_qa::review::grab(tc, &face, t, w.path()).unwrap();
         assert_eq!((f.width(), f.height()), (480, 600));
     }
 }

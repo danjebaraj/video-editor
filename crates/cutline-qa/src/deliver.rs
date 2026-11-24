@@ -202,6 +202,7 @@ fn finish(
 ) -> Result<ExportResult> {
     let t = std::time::Instant::now();
     let mut ctx = qa_context_for(pr, &plan.delivery);
+    ctx.work_dir = Some(cutline_render::cutline_dir(&l.dir).join("tmp"));
     scale_boxes(&mut ctx, plan.geometry.width as f64 / pr.timeline.target.width as f64);
     let target = if plan.draft {
         let mut t = pr.timeline.target.clone();

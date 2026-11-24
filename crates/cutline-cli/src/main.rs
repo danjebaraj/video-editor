@@ -551,7 +551,10 @@ fn transcribe(
     use cutline_transcribe::whisper;
     let tc = cutline_deps::toolchain().tool_err()?;
     let fp = cutline_media::fingerprint(file).map_err(CliError::usage)?;
-    let cache = cutline_media::cache::Cache::global("transcripts");
+    // a bare file has no project: the working directory stands in for it (a Codex run's own
+    // folder, the only one its sandbox lets it write)
+    let here = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cache = cutline_media::cache::Cache::shared("transcripts", &here);
     let model =
         model.unwrap_or_else(|| if fast { whisper::FAST_MODEL.into() } else { cutline_render::auto::whisper_model() });
     let asset = file.file_stem().and_then(|s| s.to_str()).unwrap_or("asset").to_string();
@@ -564,12 +567,11 @@ fn transcribe(
             (t, "scribe".to_string())
         }
         None => {
-            let work = std::env::temp_dir().join(format!("cutline-whisper-{}", std::process::id()));
-            match cutline_transcribe::get(tc, &asset, file, &fp, None, &model, lang.as_deref(), &cache, true).map_err(CliError::tool)? {
-                Some((t, s)) => {
-                    let _ = std::fs::remove_dir_all(work);
-                    (t, format!("{s:?}"))
-                }
+            let work = cutline_render::cutline_dir(&here).join("tmp");
+            match cutline_transcribe::get(tc, &asset, file, &fp, None, &model, lang.as_deref(), &cache, &work, true)
+                .map_err(CliError::tool)?
+            {
+                Some((t, s)) => (t, format!("{s:?}")),
                 None => {
                     return Err(CliError::tool(anyhow::anyhow!(
                         "no transcriber available: {}. Import a Scribe JSON with --import-scribe, or install whisper.cpp (whisper-cli) and `cutline deps install whisper-model {model}`",

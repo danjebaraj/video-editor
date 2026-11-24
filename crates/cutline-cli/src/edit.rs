@@ -600,7 +600,9 @@ pub fn qa(video: &Path, target: &str, project: Option<&Path>) -> CmdResult {
                 .find(|(_, e)| e.target.unwrap_or(l.project.target) == tn)
                 .unwrap_or((None, cutline_core::model::Export { target: Some(tn), ..Default::default() }));
             let pr = pipeline::prepare(&l, name, &e, false).map_err(CliError::validation)?;
-            (pr.timeline.target.clone(), cutline_qa::deliver::qa_context(&pr.project, &pr.timeline, &pr.extras))
+            let mut ctx = cutline_qa::deliver::qa_context(&pr.project, &pr.timeline, &pr.extras);
+            ctx.work_dir = Some(cutline_render::cutline_dir(&l.dir).join("tmp"));
+            (pr.timeline.target.clone(), ctx)
         }
         None => {
             let probe = cutline_media::probe(tc, video, None).map_err(CliError::usage)?;

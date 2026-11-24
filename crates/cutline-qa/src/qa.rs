@@ -70,6 +70,20 @@ pub struct QaContext {
     /// Text recognition for the content checks (`hook` with an HTML opening, `black_frames` on
     /// dark cards): `qa.ocr`, `CUTLINE_OCR` or `--ocr`. `Off` skips it.
     pub ocr: cutline_core::model::OcrEngine,
+    /// Folder for frames written while checking (the project's `.cutline/tmp`); `None` uses
+    /// `.cutline/tmp` beside the checked file. Never the system temp folder: a sandboxed run
+    /// (Codex) may write only its own folder.
+    pub work_dir: Option<PathBuf>,
+}
+
+impl QaContext {
+    /// Where to write frames while checking `file` (see `work_dir`).
+    pub fn work_dir_for(&self, file: &Path) -> PathBuf {
+        self.work_dir.clone().unwrap_or_else(|| {
+            cutline_render::cutline_dir(file.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new(".")))
+                .join("tmp")
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
