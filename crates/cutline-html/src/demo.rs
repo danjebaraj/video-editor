@@ -1045,8 +1045,7 @@ pub fn record_cached(
     let (text, script) = read_script(script_path, locale)?;
     let key = cache_key(script_path, &text, &script);
     let dir = script_path.parent().unwrap_or(Path::new("."));
-    let work = cache_dir.join(format!("{key}.work"));
-    let _ = std::fs::remove_dir_all(&work);
+    let work = crate::scratch(cache_dir, &key, "work");
     std::fs::create_dir_all(&work)?;
     let cands = cutline_deps::paths::chrome_candidates();
     if cands.is_empty() {
@@ -1088,8 +1087,12 @@ pub fn record_cached(
     };
     let fps = script.fps.unwrap_or(30.0).clamp(1.0, 60.0);
     let (video, events_path) = (cache_dir.join(format!("{key}.mp4")), cache_dir.join(format!("{key}.events.json")));
-    let tmp = cache_dir.join(format!("{key}.tmp.mp4"));
-    encode(tc, &cap, fps, &work, &tmp)?;
+    let tmp = crate::scratch(cache_dir, &key, "tmp.mp4");
+    if let Err(e) = encode(tc, &cap, fps, &work, &tmp) {
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     std::fs::write(&events_path, serde_json::to_vec_pretty(&cap.events)?)?;
     std::fs::rename(&tmp, &video)?;
     let _ = std::fs::remove_dir_all(&work);

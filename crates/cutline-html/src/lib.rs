@@ -460,7 +460,9 @@ fn is_page(p: &Path) -> bool {
 
 /// Render to a cached mezzanine. Key: source content (+ sibling files for HTML), params, size,
 /// fps, duration, alpha, Chrome path.
-pub fn render_cached(tc: &cutline_deps::Toolchain, spec: &RenderSpec, cache_dir: &Path) -> Result<PathBuf> {
+/// The cache key of a render: the page and what sits beside it, the settings and the browser.
+/// A delegated job's spec is read back in another process, which must reach the same key.
+pub fn html_key(spec: &RenderSpec) -> Result<String> {
     let mut parts: Vec<Vec<u8>> = vec![std::fs::read(&spec.source)?];
     if spec.kind == Kind::Html {
         if let Some(dir) = spec.source.parent() {
@@ -495,7 +497,21 @@ pub fn render_cached(tc: &cutline_deps::Toolchain, spec: &RenderSpec, cache_dir:
     parts.push(chrome().map(|p| p.to_string_lossy().to_string()).unwrap_or_default().into_bytes());
     parts.push(b"html-v1".to_vec());
     let refs: Vec<&[u8]> = parts.iter().map(|v| v.as_slice()).collect();
-    let key = cutline_media::hash_key(&refs);
+    Ok(cutline_media::hash_key(&refs))
+}
+
+/// A scratch path in `dir` for `key` that no other render uses, so two renders of the same
+/// graphic (two processes, or a job still running for a command that was stopped) can't clear
+/// each other's frames.
+pub(crate) fn scratch(dir: &Path, key: &str, suffix: &str) -> PathBuf {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    dir.join(format!("{key}.{}-{t}-{n}.{suffix}", std::process::id()))
+}
+
+pub fn render_cached(tc: &cutline_deps::Toolchain, spec: &RenderSpec, cache_dir: &Path) -> Result<PathBuf> {
+    let key = html_key(spec)?;
     let out = cache_dir.join(format!("{key}.mov"));
     if out.exists() {
         return Ok(out);
@@ -508,14 +524,16 @@ pub fn render_cached(tc: &cutline_deps::Toolchain, spec: &RenderSpec, cache_dir:
         }
         bail!("the browser renderer {} finished without writing {}", program.display(), out.display());
     }
-    let work = cache_dir.join(format!("{key}.work"));
-    let _ = std::fs::remove_dir_all(&work);
-    render_frames(spec, &work)?;
     std::fs::create_dir_all(cache_dir)?;
-    let tmp = cache_dir.join(format!("{key}.tmp.mov"));
-    encode(tc, spec, &work, &tmp)?;
-    std::fs::rename(&tmp, &out)?;
+    let work = scratch(cache_dir, &key, "work");
+    let tmp = scratch(cache_dir, &key, "tmp.mov");
+    let done = render_frames(spec, &work).and_then(|_| encode(tc, spec, &work, &tmp));
     let _ = std::fs::remove_dir_all(&work);
+    if let Err(e) = done {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    std::fs::rename(&tmp, &out)?;
     Ok(out)
 }
 
@@ -648,6 +666,36 @@ mod tests {
             let failing = fake(d.path(), "broken", "echo 'no host' >&2; exit 2");
             let err = format!("{:#}", delegate::run(&failing, &job).unwrap_err());
             assert!(err.contains("no host"), "{err}");
+        }
+
+        // BUG-stellar-lily-K8CN: the host computed another key for scene 4 (duration 299/30 s read
+        // back as …669), rendered to that name, and cutline found nothing at its own
+        #[test]
+        fn a_job_read_back_elsewhere_hashes_the_same() {
+            let d = tempfile::tempdir().unwrap();
+            let mut spec = card(d.path());
+            spec.params = serde_json::json!({"scene": 4});
+            for frames in [299u32, 7, 1001, 2999] {
+                spec.duration = frames as f64 / 30.0;
+                spec.fps = 30000.0 / 1001.0;
+                let job = delegate::Job::Html { spec: spec.clone(), cache_dir: d.path().join("cache") };
+                let back: delegate::Job = serde_json::from_slice(&serde_json::to_vec_pretty(&job).unwrap()).unwrap();
+                let delegate::Job::Html { spec: back, .. } = back else { panic!() };
+                assert_eq!(back.duration.to_bits(), spec.duration.to_bits(), "{}", spec.duration);
+                assert_eq!(html_key(&back).unwrap(), html_key(&spec).unwrap(), "{}", spec.duration);
+            }
+        }
+
+        // a job still running for a stopped command, and a second command asking for the same
+        // graphic, rendered into one `<key>.work`: one cleared the other's frames
+        #[test]
+        fn two_renders_of_one_graphic_never_share_scratch_space() {
+            let d = tempfile::tempdir().unwrap();
+            let key = html_key(&card(d.path())).unwrap();
+            let paths: std::collections::HashSet<PathBuf> = (0..50).map(|_| scratch(d.path(), &key, "work")).collect();
+            assert_eq!(paths.len(), 50);
+            assert!(paths.iter().all(|p| p.file_name().unwrap().to_string_lossy().starts_with(&key)));
+            assert_ne!(scratch(d.path(), &key, "work"), d.path().join(format!("{key}.work")));
         }
     }
     #[test]

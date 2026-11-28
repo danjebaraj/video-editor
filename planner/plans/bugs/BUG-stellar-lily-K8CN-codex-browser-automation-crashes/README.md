@@ -141,3 +141,55 @@ The only capture-helper invocation was `video-studio capture check` (exit 0). Th
 - Still writing outside the run folder in a Codex run, and so failing or warning there: transcription's work folder (`cutline-cli/src/main.rs`, `cutline-whisper-*` in the temp folder), `cutline-qa/src/review.rs` and `src/qa_media.rs` temp folders, and the beats cache in cutline's home ("couldn't save to the cache …/.cutline-home/cache/beats"). Not part of this bug.
 - Not done: the boxes that name the fixture in the app (a Review and a Revise, and the production entry point), an explicit desktop-recording request, and the offline project that prohibits recording.
 - Files: `crates/cutline-qa/src/publish.rs`, this README.md.
+
+### 2026-11-23 — Third app run: delegated renders missing from the cache
+
+- Run `Kept by giving article/2026-11-23-2335-default` failed with no video.
+  - `review`, `chapters` and the per-export renders all stopped with "the browser renderer …/.bin/video-studio finished without writing …/.cutline/cache/html/<key>.mov".
+  - One full render stopped with "failed (exit status: 4): error: No such file or directory (os error 2)".
+  - The app had rendered 17 graphics into `.cutline/cache/html/`, none under a name cutline asked for.
+- Cause 1: the two sides computed different cache keys.
+  - The key hashes the spec's duration, and the job carries the spec as JSON.
+  - `serde_json` without `float_roundtrip` doesn't read every `f64` back exactly. Scene 4's 299/30 s (`9.966666666666667`) came back one bit off (`…669`).
+  - The app rendered to its own key, and cutline waited for the other one. A second request found the app's file already there and returned in 0.2 s, with nothing at cutline's name.
+  - The earlier runs had durations that read back exactly.
+- Cause 2: two renders of one graphic shared a scratch folder.
+  - Codex stopped `render --dry-run` (call 14), but the scene-4 job it had handed over kept running in the app. Its job file and unread answer are still in the run folder.
+  - The next `render` asked for the same graphic. Both renders used `<key>.work`, and the second one's cleanup deleted the first one's frames: the "No such file or directory".
+- Fix:
+  - `cutline-html` enables `serde_json`'s `float_roundtrip`, and the key is computed in one place (`html_key`).
+  - Each render and each recording uses its own scratch folder and temporary file (`scratch`: key, pid, time, counter), and removes them when it fails. The finished file is still renamed into place under the shared key.
+- Tests:
+  - `a_job_read_back_elsewhere_hashes_the_same` reads a job back and compares bits and key for 299/30 s and three other durations. Without `float_roundtrip` it fails on 9.966666666666667, as in the run.
+  - `two_renders_of_one_graphic_never_share_scratch_space`.
+  - Workspace: the same three unrelated failures, and clippy is clean.
+- Checked on a copy of this run's project, with the release build:
+  - The left-over scene-4 job, run twice at once with `cutline internal browser-job`, finished both times. It wrote `cfb37f510b84f440251946bdb8cdeabe.mov`, the name `cutline chapters` had waited for, and left no scratch behind.
+  - `cutline review project.json5` with `CUTLINE_BROWSER_DELEGATE` set to a shim that runs `cutline internal browser-job` delegated all five scenes and exited 0 in 64 s.
+  - Not yet checked in the app.
+- Seen in that run, not part of this bug:
+  - `cutline still work/line-test.svg` failed with `E_IMAGE_DECODE: Error opening output files: Invalid argument`.
+  - Local Whisper failed to start, and Codex used cached Scribe transcripts.
+- Earlier work: commit 1a55e94, merged with the cleanup branch (`claude/zen-tereshkova-147d1d`) on main.
+- Not done: the same four boxes as before.
+- Files: `crates/cutline-html/Cargo.toml`, `src/lib.rs`, `src/demo.rs`; this README.md.
+
+### 2026-11-24 — Fourth app run: the same project delivered
+
+- Run `Kept by giving article/2026-11-24-0016-default`, the same project in the app reinstalled with the cache-key and scratch fixes.
+  - Its status is `succeeded_with_warnings`. The warnings are QA notes only: frozen spans, the light first frame, and the hook detector.
+  - Every browser-backed command exited 0: `review` (twice, 66 s and 73 s), `chapters` (88 s), `render --dry-run` (391 s) and `render` (336 s).
+  - No "finished without writing" or "os error" lines appear in any cutline log. `.cutline/cache/html/` holds only finished `.mov` files: no left-over jobs or scratch folders. `logs/relay/` holds only `closed`.
+  - No capture was blocked (`logs/capture-blocked.ndjson` absent).
+- Outputs, probed:
+  - `youtube-1080p.mp4`: 1920×1080.
+  - `linkedin.mp4`: 1080×1350.
+  - `youtube-shorts.mp4`: 1080×1920.
+  - All three are 45.0 s with audio.
+- Frames sampled from the Shorts file at 2, 12, 22, 31 and 41 s show the five HTML scenes: the hand and coin, the tree, the door and Zacchaeus, the heart, and the open book, each with its title.
+- Seen in that run, not part of this bug:
+  - The burned-in captions sit across the scenes' titles in the Shorts file.
+  - `cutline thumbnail` can't use an HTML-only project (ffmpeg is handed the `.html`).
+  - Local Whisper still fails to start (`transcribe` exit 3).
+- Not done: the same four boxes, which name the amber-to-white fixture and the recording cases.
+- Files: this README.md.

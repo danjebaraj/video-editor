@@ -15,7 +15,8 @@ cutline-deps = { version = "0.1.0", path = "../cutline-deps" }
 cutline-media = { version = "0.1.0", path = "../cutline-media" }
 futures = "0.3.34"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+# float_roundtrip: a browser job's spec is read back in another process and must hash the same
+serde_json = { version = "1.0.154", features = ["float_roundtrip"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time", "fs"] }
 tracing = "0.1.44"
 
